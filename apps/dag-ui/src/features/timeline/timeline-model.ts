@@ -30,16 +30,6 @@ import { MarkerReading } from "./item-reading";
  */
 
 /**
- * The longest loop a repeat is looked for in, in rows.
- *
- * A bound on the search rather than on what a run may do: the loops a run makes
- * — a hold toggling, a check polled, a heartbeat — are a handful of rows long, and
- * looking for longer ones would cost every list the square of its length to find
- * a repeat nothing makes.
- */
-export const MAX_CYCLE_ROWS = 32;
-
-/**
  * One onejudge dispatch: the agent session and the judge and lint sessions that
  * supervised it, which the operator reads as a single labelled unit.
  */
@@ -810,11 +800,12 @@ function surfaceRow(row: Extract<TimelineRow, { rowKind: "event" }>) {
  * Collapse every back-to-back repeat of one or more sibling rows into one block,
  * longest saving first, in every list of siblings however deeply it is nested.
  *
- * Two rows are the same when they are the same sort of row, of the same kind,
- * drawn with the same label, in the same dispatch — what a reader would call the
- * same thing happening again. At each place the list is read from, the loop that
- * saves the most rows wins, so `queued → held → unheld` forty times is one block
- * of three rows rather than three blocks of one.
+ * Two rows are the same when they are of the same kind and drawn with the same
+ * label — what a reader would call the same thing happening again — whatever
+ * dispatch each belongs to, and however long the loop they make. At each place
+ * the list is read from, the loop that saves the most rows wins, so `queued →
+ * held → unheld` forty times is one block of three rows rather than three
+ * blocks of one.
  */
 export function collapseCycles(rows: readonly TimelineRow[]): TimelineRow[] {
   const siblings = rows.map((row) =>
@@ -822,11 +813,12 @@ export function collapseCycles(rows: readonly TimelineRow[]): TimelineRow[] {
       ? row
       : { ...row, children: collapseCycles(row.children) },
   );
-  const keys = siblings.map(sameness);
+  const keys = sameKeys(siblings);
+  const recurs = nextOccurrences(keys);
   const collapsed: TimelineRow[] = [];
   let at = 0;
   while (at < siblings.length) {
-    const best = longestSaving(keys, at);
+    const best = longestSaving(keys, recurs, at);
     if (best === undefined) {
       const row = siblings[at];
       if (row !== undefined) collapsed.push(row);
@@ -840,51 +832,107 @@ export function collapseCycles(rows: readonly TimelineRow[]): TimelineRow[] {
   return collapsed;
 }
 
-/** The repeat starting at `at` that saves the most rows, if any repeats there. */
+/**
+ * The repeat starting at `at` that saves the most rows, if any repeats there.
+ *
+ * Loops shorter than {@link LOOP_WINDOW} rows are tried directly. A longer loop
+ * starts again only where its first {@link LOOP_WINDOW} rows recur, so only
+ * those offsets are tried, nearest first. Two bounds keep a long list cheap without limiting how long a loop may
+ * be: no loop saves more rows than lie beyond its first pass, so the search ends
+ * once the best found saves that many; and a loop whose pass is a multiple of a
+ * period already found, and which starts within that period's repeating stretch,
+ * repeats no further than that stretch does and so saves fewer rows than the
+ * period itself.
+ */
 function longestSaving(
-  keys: readonly string[],
+  keys: readonly number[],
+  recurs: readonly number[],
   at: number,
 ): { readonly length: number; readonly count: number } | undefined {
   let best: { length: number; count: number } | undefined;
-  const room = Math.min(MAX_CYCLE_ROWS, Math.floor((keys.length - at) / 2));
-  for (let length = 1; length <= room; length += 1) {
-    // A loop starts again where its first row comes round again; anywhere else is
-    // no loop of this length, and is passed over without comparing the rest.
-    if (keys[at + length] !== keys[at]) continue;
-    let count = 1;
-    while (repeats(keys, at, length, count)) count += 1;
+  let saved = 0;
+  const periods: { readonly length: number; readonly reach: number }[] = [];
+  const room = Math.floor((keys.length - at) / 2);
+  const tryLength = (length: number) => {
     if (
-      count >= 2 &&
-      (best === undefined ||
-        (count - 1) * length > (best.count - 1) * best.length)
+      periods.some(
+        (period) => length % period.length === 0 && length <= period.reach,
+      )
     )
+      return;
+    const matched = commonRun(keys, at, at + length);
+    const count = Math.floor(matched / length) + 1;
+    if (count < 2) return;
+    periods.push({ length, reach: length + matched });
+    if ((count - 1) * length > saved) {
       best = { length, count };
+      saved = (count - 1) * length;
+    }
+  };
+  for (let length = 1; length < LOOP_WINDOW && length <= room; length += 1)
+    if (keys[at + length] === keys[at]) tryLength(length);
+  for (
+    let next = recurs[at] ?? -1;
+    next !== -1 && next - at <= room;
+    next = recurs[next] ?? -1
+  ) {
+    if (saved >= keys.length - next) break;
+    if (next - at >= LOOP_WINDOW) tryLength(next - at);
   }
   return best;
 }
 
-/** Whether pass `count` of the loop of `length` starting at `at` repeats its first. */
-function repeats(
-  keys: readonly string[],
-  at: number,
-  length: number,
-  count: number,
-): boolean {
-  const start = at + count * length;
-  if (start + length > keys.length) return false;
-  for (let offset = 0; offset < length; offset += 1)
-    if (keys[start + offset] !== keys[at + offset]) return false;
-  return true;
+/** How many rows from `at` and from `other` on read the same, pairwise. */
+function commonRun(keys: readonly number[], at: number, other: number): number {
+  let matched = 0;
+  while (
+    other + matched < keys.length &&
+    keys[at + matched] === keys[other + matched]
+  )
+    matched += 1;
+  return matched;
+}
+
+/** Each sibling's sameness as a small number: equal rows share one. */
+function sameKeys(rows: readonly TimelineRow[]): number[] {
+  const ids = new Map<string, number>();
+  return rows.map((row) => {
+    const key = sameness(row);
+    const known = ids.get(key);
+    if (known !== undefined) return known;
+    ids.set(key, ids.size);
+    return ids.size - 1;
+  });
+}
+
+/**
+ * How many leading rows a loop's offset is looked up by. Wide enough that rows
+ * of a handful of kinds which never loop rarely look as if they might, which is
+ * what keeps a long list of them from being compared against itself.
+ */
+const LOOP_WINDOW = 16;
+
+/**
+ * Where the {@link LOOP_WINDOW} rows starting at each row next recur, as far as a
+ * hash of them can tell, or `-1` where they never do. A shared hash is only a
+ * place worth comparing: every offset tried is compared row by row.
+ */
+function nextOccurrences(keys: readonly number[]): number[] {
+  const next = keys.map(() => -1);
+  const seen = new Map<number, number>();
+  for (let index = keys.length - LOOP_WINDOW; index >= 0; index -= 1) {
+    let hash = 0;
+    for (let offset = 0; offset < LOOP_WINDOW; offset += 1)
+      hash = (Math.imul(hash, 0x01000193) ^ (keys[index + offset] ?? 0)) | 0;
+    next[index] = seen.get(hash) ?? -1;
+    seen.set(hash, index);
+  }
+  return next;
 }
 
 /** What makes two sibling rows the same thing happening again. */
 function sameness(row: TimelineRow): string {
-  return JSON.stringify([
-    row.rowKind,
-    row.kind,
-    row.displayLabel,
-    row.dispatch?.id ?? null,
-  ]);
+  return JSON.stringify([row.rowKind, row.kind, row.displayLabel]);
 }
 
 /** The block standing for `members`, a loop of `length` rows gone round `count` times. */
@@ -900,7 +948,12 @@ function cycleRow(
     const end = row.endedAt ?? row.startedAt;
     return Date.parse(end) > Date.parse(latest) ? end : latest;
   }, first.startedAt);
-  const dispatch = first.dispatch;
+  // A block standing for rows of several dispatches belongs to none of them.
+  const dispatch = members.every(
+    (row) => row.dispatch?.id === first.dispatch?.id,
+  )
+    ? first.dispatch
+    : undefined;
   return {
     rowKind: "group",
     count,

@@ -332,6 +332,47 @@ describe("one node's slice of the run timeline", () => {
     expect(four[0]?.rowKind === "group" && four[0].pass).toHaveLength(1);
   });
 
+  test("a loop of thirty-three rows gone round twice is one block, however long its pass", () => {
+    const pass = Array.from({ length: 33 }, (_, index) => ({
+      kind: `step-${String(index).padStart(2, "0")}`,
+    }));
+    const rows = nodeWith([...pass, ...pass]);
+    const listed = eventList(rows);
+    expect(listed).toHaveLength(1);
+    const [block] = listed;
+    if (block?.rowKind !== "group")
+      throw new Error("the loop did not collapse");
+    expect(block.count).toBe(2);
+    expect(block.pass.map(({ kind }) => kind)).toEqual(
+      pass.map(({ kind }) => kind),
+    );
+    expect(cycleLabel(block)).toBe("33 events repeated 2 times");
+    expect(
+      readingRows(transcriptEntries(listed, new Set([block.id]))).map(
+        ({ id }) => id,
+      ),
+    ).toEqual(rows.map(({ id }) => id));
+  });
+
+  test("rows of one kind and label repeat whatever dispatch each belongs to", () => {
+    const rows = nodeWith(
+      Array.from({ length: 3 }, () => ({ kind: "criterion-checked" })),
+    ).map(
+      (row, index): TimelineRow => ({
+        ...row,
+        dispatch: { id: `dispatch-${index}`, label: `Dispatch ${index + 1}` },
+      }),
+    );
+    const collapsed = collapseCycles(rows);
+    expect(collapsed).toHaveLength(1);
+    const [block] = collapsed;
+    if (block?.rowKind !== "group")
+      throw new Error("the rows did not collapse");
+    expect(block.count).toBe(3);
+    // A block standing for rows of several dispatches belongs to none of them.
+    expect(block.dispatch).toBeUndefined();
+  });
+
   test("a sequence that never repeats back to back is not collapsed", () => {
     const rows = nodeWith([
       { kind: "gate-run" },
