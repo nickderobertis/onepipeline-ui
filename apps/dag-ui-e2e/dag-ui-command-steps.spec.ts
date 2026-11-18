@@ -86,6 +86,7 @@ test("draws each command step with its kind and outcome, and shows the edits the
   const nodes = Object.keys(status);
   expect(nodes.sort()).toEqual([
     "build",
+    "changelog",
     "docs",
     "integration",
     "lint",
@@ -162,6 +163,36 @@ test("opens a command step to what it ran, how it ended and the end of its log",
   await page.goto(`${origin}/?run=${facts.run}&node=package`);
   await expect(command).toContainText("cargo package");
   await expect(command).toContainText("The command has not started.");
+
+  expect(thrown).toEqual([]);
+  expect(unanswered).toEqual([]);
+});
+
+test("shows a step its guard found not needed as done, with outcome not-needed", async ({
+  page,
+}) => {
+  const { origin, facts, status } = await served(page);
+  const { thrown, unanswered } = watchFailures(page);
+  expect(status.changelog).toBe("done");
+
+  await page.goto(`${origin}/?run=${facts.run}&view=graph`);
+  await expect(
+    page.getByRole("article", { name: "changelog: done", exact: true }),
+  ).toBeVisible();
+  await expect(graphNodes(page, "unknown")).toHaveCount(0);
+
+  // The guard answered before the command ran: the node is settled with the
+  // guard's outcome and detail, and its command never started.
+  await page.goto(`${origin}/?run=${facts.run}&node=changelog`);
+  const command = page.getByRole("region", { name: "Command", exact: true });
+  await expect(command).toContainText("Outcomenot-needed");
+  await expect(command).toContainText("The command has not started.");
+  await page.getByRole("tab", { name: "Task", exact: true }).click();
+  const task = page.getByRole("tabpanel", { name: "Task", exact: true });
+  await expect(task).toContainText("Settled asnot-needed");
+  await expect(task).toContainText(
+    "Outcomeno commits since v0.4.0 touch a released file",
+  );
 
   expect(thrown).toEqual([]);
   expect(unanswered).toEqual([]);

@@ -137,6 +137,7 @@ export type HumanItemMetadata = {
   readonly priority: "urgent" | "high" | "medium" | "low";
   readonly title: string;
   readonly body: string;
+  readonly choices?: readonly HumanItemChoice[];
 };
 export type HumanItemEventPayload = {
   readonly schema_version: number;

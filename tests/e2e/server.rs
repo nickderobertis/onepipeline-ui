@@ -14776,6 +14776,10 @@ fn harness_report(
                 cost_usd: None,
             },
             usage_source: Some("json".into()),
+            calls: None,
+            diagnostics: Vec::new(),
+            overlay_env: std::collections::BTreeMap::new(),
+            overlay_timings: None,
             session_id: Some("double-session".into()),
             events,
             events_source: Some("json".into()),
@@ -22855,8 +22859,8 @@ fn check_visibility_records_reach_every_event_reading_and_the_node_checks() {
     assert_eq!(refused.status, 422, "{}", refused.body);
 }
 
-/// The command-steps corpus, served: five `kind: command` nodes and two refused
-/// live edits, one of them the run's plan-edit hook's.
+/// The command-steps corpus, served: six `kind: command` nodes, one of them
+/// guarded, and two refused live edits, one of them the run's plan-edit hook's.
 fn command_steps() -> (Serving, String) {
     let corpus = fixture_run::command_steps();
     let run = corpus["run_id"]
@@ -22911,7 +22915,7 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         .iter()
         .map(|task| (task["id"].as_str().expect("an id").to_owned(), task.clone()))
         .collect();
-    assert_eq!(tasks.len(), 5, "{tasks:?}");
+    assert_eq!(tasks.len(), 6, "{tasks:?}");
     for task in tasks.values() {
         assert_eq!(task["kind"], json!("command"), "{task}");
     }
@@ -23081,6 +23085,61 @@ fn command_steps_and_a_refused_edit_are_served_as_the_engine_journalled_them() {
         "?filter=%7B%22exclude%22%3A%5B%7B%22kind%22%3A%22edit-rejected%22%7D%2C%7B%22kind%22%3A%22command-*%22%7D%5D%7D",
     );
     assert_eq!(narrowed["graph"]["rejected_edits"], graph["rejected_edits"]);
+    assert_eq!(narrowed["graph"]["node_results"], graph["node_results"]);
+}
+
+/// A node whose guard answered *not needed* is served as the engine settled it:
+/// `done`, with outcome `not-needed` and the guard's detail, its command never
+/// run — no log and no command records. The guard's own records are on the
+/// node's timeline, and a filter that hides them changes nothing about how the
+/// node stands. A plan's `guard` and `guard_timeout_seconds` are read without
+/// error but not served: the wire's plan-task shape names neither.
+#[test]
+fn a_node_its_guard_found_not_needed_is_served_done_with_that_outcome() {
+    let corpus = fixture_run::command_steps();
+    let (serving, run) = command_steps();
+    let detail = command_steps_detail(&serving, &run, "");
+    let graph = &detail["graph"];
+    let node = "changelog";
+
+    let settled = corpus["records"]
+        .as_array()
+        .expect("the corpus's records")
+        .iter()
+        .find(|record| record["kind"] == "node-settled" && record["node"] == node)
+        .expect("the corpus settles the guarded node");
+    assert_eq!(graph["node_status"][node], json!("done"));
+    let result = &graph["node_results"][node];
+    assert_eq!(result["status"], json!("done"), "{result}");
+    assert_eq!(result["outcome"], json!("not-needed"), "{result}");
+    assert_eq!(result["detail"], settled["payload"]["detail"], "{result}");
+    assert!(result.get("log").is_none(), "{result}");
+    assert!(node_record_fields(&serving, &run, node, "command-started").is_empty());
+    assert!(node_record_fields(&serving, &run, node, "command-exited").is_empty());
+
+    assert_eq!(
+        node_record_fields(&serving, &run, node, "guard-started").len(),
+        1
+    );
+    assert_eq!(
+        node_record_fields(&serving, &run, node, "guard-evaluated").len(),
+        1
+    );
+    let settlement = node_record_fields(&serving, &run, node, "node-settled");
+    assert_eq!(settlement.len(), 1, "{settlement:?}");
+    assert_eq!(settlement[0]["Status"], json!("done"), "{settlement:?}");
+    assert_eq!(
+        settlement[0]["Outcome"],
+        json!("not-needed"),
+        "{settlement:?}"
+    );
+
+    let narrowed = command_steps_detail(
+        &serving,
+        &run,
+        "?filter=%7B%22exclude%22%3A%5B%7B%22kind%22%3A%22guard-*%22%7D%5D%7D",
+    );
+    assert_eq!(narrowed["graph"]["node_status"], graph["node_status"]);
     assert_eq!(narrowed["graph"]["node_results"], graph["node_results"]);
 }
 
