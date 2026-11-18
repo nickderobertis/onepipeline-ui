@@ -67,13 +67,17 @@ function thrownBy(page: Page): string[] {
  * and the rows the node's read carried.
  */
 async function openWhole(page: Page, node: string) {
-  const streamed = page.waitForResponse((response) =>
-    new URL(response.url()).pathname.endsWith("/timeline/node-stream"),
-  );
   await page.goto(`${server.origin}/?run=${facts.run}&view=graph&node=${node}`);
   const transcript = page.getByRole("region", { name: "Node transcript" });
   await expect(transcript).toHaveAttribute("aria-busy", "false");
-  const read = (await (await streamed).text())
+  // What the node's read carries, asked of the same route: a browser keeps no body
+  // of a response it read as a stream.
+  const body = await (
+    await page.request.get(
+      `${server.origin}/api/v2/runs/${facts.run}/timeline/node-stream?scope=node&node=${node}`,
+    )
+  ).text();
+  const read = body
     .split("\n")
     .filter((line) => line !== "")
     .flatMap((text) => streamLineSchema.parse(JSON.parse(text)).rows ?? [])

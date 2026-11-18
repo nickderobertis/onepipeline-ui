@@ -3614,8 +3614,30 @@ export function recordActivity(root, name, detail) {
       persona: "worker",
       session: WORKER_SESSION,
     },
-    { kind: "tool_use", name, detail, truncated: false },
+    {
+      kind: "tool_use",
+      name,
+      detail,
+      truncated: false,
+      index: workerActivityCount(join(root, LIVE_RUN)),
+    },
   );
+}
+
+/**
+ * How many `turn-activity` records the dashboard's worker session has published:
+ * the `index` the next one carries, as `oneagentgraph` numbers a session's activity.
+ */
+function workerActivityCount(dir) {
+  return readFileSync(join(dir, "events.jsonl"), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter(
+      (event) =>
+        event.kind === "turn-activity" &&
+        event.labels.session === WORKER_SESSION,
+    ).length;
 }
 
 /** The two kinds `oneharness` streams an agent's own words under. */
@@ -3639,15 +3661,7 @@ export function recordWords(root, kind, text) {
     throw new Error("an agent's words are at least one character");
   }
   const dir = join(root, LIVE_RUN);
-  const index = readFileSync(join(dir, "events.jsonl"), "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .filter(
-      (event) =>
-        event.kind === "turn-activity" &&
-        event.labels.session === WORKER_SESSION,
-    ).length;
+  const index = workerActivityCount(dir);
   appendEvent(
     dir,
     "agentgraph",

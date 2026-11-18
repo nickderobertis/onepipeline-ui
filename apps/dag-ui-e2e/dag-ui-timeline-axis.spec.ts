@@ -7,9 +7,9 @@ import { DESKTOP, PHONE } from "./viewports";
 
 /**
  * A node's chart keeps its clock readable at a phone's width and a desktop's: on the
- * large-run views corpus's history node, whose records span long enough to put many
- * ticks on the axis, no tick's label touches another's and every one is drawn inside
- * the axis that holds it.
+ * large fixture node (`serve-fixture.mjs --node-timeline-corpus`, the 3,200-record
+ * node `dag-ui-node-timeline-load.spec.ts` loads), loaded whole, no tick's label
+ * touches another's and every one is drawn inside the axis that holds it.
  *
  * The corpus is its own, served by a server this file starts, for the reason
  * `dag-ui-large-run-views.spec.ts` gives: a run added to the shared one is counted by
@@ -18,7 +18,7 @@ import { DESKTOP, PHONE } from "./viewports";
 
 const factsSchema = z.object({
   run: z.string().min(1),
-  history: z.string().min(1),
+  node: z.string().min(1),
 });
 
 let server: FixtureServer;
@@ -26,7 +26,7 @@ let facts: z.infer<typeof factsSchema>;
 
 test.beforeAll(async () => {
   server = await startFixtureServer("timeline-axis", [
-    "--large-run-views-corpus",
+    "--node-timeline-corpus",
   ]);
   facts = factsSchema.parse(server.facts);
 });
@@ -41,10 +41,12 @@ for (const width of [PHONE.width, 1440]) {
   }) => {
     await page.setViewportSize({ width, height: DESKTOP.height });
     await page.goto(
-      `${server.origin}/?run=${facts.run}&view=graph&node=${facts.history}`,
+      `${server.origin}/?run=${facts.run}&view=graph&node=${facts.node}`,
     );
     const timeline = page.getByRole("region", { name: "Node timeline" });
     await expect(appPlot(timeline)).toBeVisible();
+    // The whole node, so the axis spans every record it holds.
+    await expect(timeline).toHaveAttribute("aria-busy", "false");
     const axis = timeline.getByRole("list", { name: "Timeline axis" });
     const bounds = await axis.boundingBox();
     if (bounds === null) throw new Error("an axis drawn nowhere");
