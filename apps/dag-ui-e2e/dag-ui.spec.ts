@@ -4022,24 +4022,41 @@ test("shows what a worker said and reasoned as its words, never as tool calls", 
     .filter({ hasText: said });
   await expect(turn).toHaveCount(1);
 
+  // The thought, the call and the remark — the last three things the turn did —
+  // in the order they happened, each in its place among the turn's activity.
+  const activity = turn.getByRole("region", { name: "Agent activity" });
+  await expect
+    .poll(async () =>
+      (
+        await activity.evaluate((section) =>
+          [
+            ...section.querySelectorAll('[aria-label="Agent message"], button'),
+          ].map((element) =>
+            element.getAttribute("aria-label") === "Agent message"
+              ? "message"
+              : (element.getAttribute("aria-label") ??
+                element.textContent?.trim()),
+          ),
+        )
+      ).slice(-3),
+    )
+    .toEqual(["Reasoning", "Bash tool details", "message"]);
+
   // The reasoning is the turn's own, behind the disclosure a reader opens.
-  await turn.getByRole("button", { name: "Reasoning" }).click();
-  await expect(turn.getByText(reasoned)).toBeVisible();
+  await activity.getByRole("button", { name: "Reasoning" }).click();
+  await expect(activity.getByText(reasoned)).toBeVisible();
+  await expect(
+    activity.getByRole("group", { name: "Agent message" }),
+  ).toContainText(said);
 
   // The call is shown as it always was, and the words are none of the calls.
-  const calls = turn.getByRole("region", { name: "Tool calls" });
-  await expect(
-    calls
-      .getByRole("button", { name: "Bash tool details" })
-      .filter({ hasText: "just gate --dashboard" }),
-  ).toHaveCount(1);
-  await expect(
-    calls
-      .getByRole("button", { name: /tool details$/ })
-      .filter({ hasNotText: "Bash" }),
-  ).toHaveCount(0);
-  await expect(calls).not.toContainText(said);
-  await expect(calls).not.toContainText(reasoned);
+  const calls = activity.getByRole("button", { name: /tool details$/ });
+  await expect(calls.filter({ hasText: "just gate --dashboard" })).toHaveCount(
+    1,
+  );
+  await expect(calls.filter({ hasNotText: "Bash" })).toHaveCount(0);
+  await expect(calls.filter({ hasText: said })).toHaveCount(0);
+  await expect(calls.filter({ hasText: reasoned })).toHaveCount(0);
 });
 
 /**
