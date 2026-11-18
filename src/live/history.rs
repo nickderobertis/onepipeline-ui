@@ -225,11 +225,7 @@ fn from_kept(
                 run.agents.as_ref(),
                 ItemsWindow::All,
             );
-            run.history.push((
-                scope,
-                key,
-                Held { payload: built },
-            ));
+            run.history.push((scope, key, Held { payload: built }));
             run.history.len() - 1
         }
     };

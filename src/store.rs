@@ -56,7 +56,8 @@ use crate::cli::{RunsRoot, SessionId};
 use crate::contract::{
     ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, NodeId,
     ProjectId, Release, RunId, RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest,
-    SseEvent, StopRequest, TimelineQuery, TimelineScope, TranscriptQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
+    SseEvent, StopRequest, TimelineQuery, TimelineScope, TranscriptQuery, API_VERSION,
+    TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
