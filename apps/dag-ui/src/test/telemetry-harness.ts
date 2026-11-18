@@ -10,7 +10,6 @@ import { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { vi } from "vitest";
 import { z } from "zod";
 import {
-  channelQueue,
   HISTORY_RUN,
   harnessTranscript,
   LIVE_RUN,
@@ -19,7 +18,6 @@ import {
   nodeAgents,
   projectAgents,
   projectList,
-  receipt,
   runAgents,
   runDetail,
   runList,
@@ -27,6 +25,7 @@ import {
   runStatus,
   runTimeline,
   unwatched,
+  verbBody,
 } from "./fixtures";
 
 /**
@@ -166,7 +165,7 @@ export const projectOf = (url: URL): string | undefined =>
     ? decodeURIComponent(url.pathname.slice(API_V2_PATHS.projects.length + 1))
     : undefined;
 
-/** The verb a `/api/v2/runs/<id>/<verb>` path names — `status`, `channel/next` — or `undefined`. */
+/** The verb a `/api/v2/runs/<id>/<verb>` path names — `status`, `nodes/<id>/agents` — or `undefined`. */
 export const verbOf = (url: URL): string | undefined => {
   const parts = url.pathname.split("/");
   return parts[3] === "runs" && parts.length > 5
@@ -176,8 +175,8 @@ export const verbOf = (url: URL): string | undefined => {
 
 /**
  * The wrapped verbs, answered the way the server answers them over the two
- * recorded runs: the projects, the status and channel of a run, the acting
- * session's unwatched runs, and a receipt for anything written.
+ * recorded runs: the projects, the status of a run and the acting session's
+ * unwatched runs.
  */
 function verbResponder(url: URL): Response | undefined {
   if (isProjectList(url)) return Response.json(projectList);
@@ -216,49 +215,21 @@ function verbResponder(url: URL): Response | undefined {
       return Response.json(runAgents(runId));
     case "status":
       return Response.json(runStatus(runId));
-    case "channel":
-      return Response.json(channelQueue(runId));
-    case "channel/reply":
-    case "attest":
-      return Response.json(receipt(runId));
-    case "channel/surface":
-      return Response.json({
-        ...receipt(runId),
-        receipt: undefined,
-        advice: undefined,
-        surface: 4,
-        state: "queued",
-      });
-    case "channel/next":
-      return Response.json({
-        ...receipt(runId),
-        receipt: undefined,
-        advice: undefined,
-        status: "surface",
-        surface: channelQueue(runId).waiting[0],
-        events: [],
-      });
     case "results":
     case "goals":
       return Response.json({
-        ...receipt(runId),
-        receipt: undefined,
-        advice: undefined,
+        ...verbBody(runId),
         rendered: `${runId}  rendered ${verb}\n`,
       });
     case "transcript":
       return Response.json({
-        ...receipt(runId),
-        receipt: undefined,
-        advice: undefined,
+        ...verbBody(runId),
         node: url.searchParams.get("node"),
         rendered: `${runId}  transcript\n`,
       });
     case "telemetry":
       return Response.json({
-        ...receipt(runId),
-        receipt: undefined,
-        advice: undefined,
+        ...verbBody(runId),
         telemetry: { schema_version: 2, run_id: runId },
       });
     default:
@@ -344,7 +315,7 @@ export function sidebarRowOf(run: {
 /**
  * `POST /api/v2/subscriptions`, answered by composing what the same responder
  * serves on the read routes: the sidebar from the grouped listing, and the
- * visible view from the detail, timeline and channel reads it names — so a test
+ * visible view from the detail and timeline reads it names — so a test
  * that answers one of those differently is answered differently here too, and a
  * read it refuses refuses the subscription.
  */
@@ -389,7 +360,7 @@ async function subscriptionResponder(
   } else if (view.type !== "sidebar") {
     const detail = await read(API_V2_PATHS.run(view.run_id), {
       [API_V2_QUERY.includeConversations]: "false",
-      ...(view.type === "channel" ? {} : filter),
+      ...filter,
     });
     if (!detail.ok) return detail;
     visible = { ...view, detail: await detail.json() };
@@ -402,11 +373,6 @@ async function subscriptionResponder(
       });
       if (!timeline.ok) return timeline;
       visible.timeline = await timeline.json();
-    }
-    if (view.type === "channel") {
-      const channel = await read(API_V2_PATHS.channel(view.run_id));
-      if (!channel.ok) return channel;
-      visible.channel = await channel.json();
     }
   }
   const subscription = `${HARNESS_EPOCH.slice(0, 24)}${String(next()).padStart(12, "0")}`;

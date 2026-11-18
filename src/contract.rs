@@ -429,16 +429,6 @@ pub mod routes {
     pub const PROJECTS: &str = "/api/v2/projects";
     /// One project's group.
     pub const PROJECT: &str = "/api/v2/projects/{project}";
-    /// The run's channel as it stands: `verbs::channel`.
-    pub const RUN_CHANNEL: &str = "/api/v2/runs/{run}/channel";
-    /// Claim the next surface: `verbs::next`.
-    pub const RUN_CHANNEL_NEXT: &str = "/api/v2/runs/{run}/channel/next";
-    /// Submit an envelope, byte for byte: `verbs::reply`.
-    pub const RUN_CHANNEL_REPLY: &str = "/api/v2/runs/{run}/channel/reply";
-    /// Raise a surface to the planner: `verbs::surface`.
-    pub const RUN_CHANNEL_SURFACE: &str = "/api/v2/runs/{run}/channel/surface";
-    /// Complete a ready human action: `verbs::attest`.
-    pub const RUN_ATTEST: &str = "/api/v2/runs/{run}/attest";
     /// End the run and its dispatch tree: `verbs::stop`.
     pub const RUN_STOP: &str = "/api/v2/runs/{run}/stop";
     /// Shut down the entire host through the SDK.
@@ -492,8 +482,8 @@ pub mod routes {
 
     /// The HTTP method a route answers.
     ///
-    /// A read is a `GET`, and a verb that writes to the run — claims a surface,
-    /// submits an envelope, stops or shuts down — is a `POST`, so nothing a
+    /// A read is a `GET`, and a verb that writes to the run — stops it or
+    /// shuts the host down — is a `POST`, so nothing a
     /// browser prefetches or a proxy retries can act on a run. Creating a
     /// subscription is a `POST` too, and retiring one a `DELETE`: both change
     /// what this process reads for a tab, and neither touches a run.
@@ -550,7 +540,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 39;
+    pub const COUNT: usize = 34;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -565,11 +555,6 @@ pub mod routes {
         get(EVENTS),
         get(PROJECTS),
         get(PROJECT),
-        get(RUN_CHANNEL),
-        post(RUN_CHANNEL_NEXT),
-        post(RUN_CHANNEL_REPLY),
-        post(RUN_CHANNEL_SURFACE),
-        post(RUN_ATTEST),
         post(RUN_STOP),
         post(SHUTDOWN),
         get(UNWATCHED),
@@ -879,44 +864,11 @@ pub struct EventFrame {
     pub data: Value,
 }
 
-/// The query of `POST /api/v2/runs/{run}/channel/next`: the profile the
-/// answered events are shaped through.
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct NextQuery {
-    /// The profile or spec, resolved against the run. `None` shapes nothing,
-    /// which is every event the run holds.
-    pub filter: Option<FilterSpec>,
-}
-
 /// The query of `GET /api/v2/runs/{run}/transcript`: the one node asked for.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct TranscriptQuery {
     /// The node, or every node with a record.
     pub node: Option<NodeId>,
-}
-
-/// The body of `POST /api/v2/runs/{run}/channel/surface`.
-///
-/// The kind is the engine's own validated type, so a word its grammar refuses
-/// — `^[a-z][a-z0-9-]{0,63}$` — is refused while the body is read rather than
-/// carried to the channel.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SurfaceRequest {
-    /// What the surface is about.
-    pub kind: onepipeline::channel::SurfaceKind,
-    /// What it has to say. Blank once trimmed is the engine's refusal.
-    // llmlint: ignore[invalid_states_unrepresentable] the engine's `verbs::surface` takes the message as a `String`, trims it and refuses one with nothing in it in its own words — the refusal `docs/contract.md` promises this route serves verbatim. A type here that refused blank first would be a second statement of the engine's rule, with this crate's words in place of the engine's.
-    pub message: String,
-}
-
-/// The body of `POST /api/v2/runs/{run}/attest`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AttestRequest {
-    /// The reference of the ready human action, as the run's decision names it.
-    // llmlint: ignore[invalid_states_unrepresentable] whether a reference names a ready human action is decided against the run's own decisions by the engine's `verbs::attest`, which refuses one nothing is waiting on in its own words; the only reading of a reference is that one, and a type here could hold it to nothing the engine does not already rule on.
-    pub reference: String,
 }
 
 /// The body of `POST /api/v2/runs/{run}/stop`.
@@ -1012,40 +964,6 @@ pub struct ShutdownRequest {
     /// Skip the interrupt and wait. Omitted, false.
     #[serde(default)]
     pub force: bool,
-}
-
-/// The correlation a channel reply is answered under, as
-/// `POST /api/v2/runs/{run}/channel/reply?correlation=C` names it.
-///
-/// The bus's own token, parsed by the bus's own parser: this wraps
-/// [`onemessagebus::Correlation`] so the query crosses the same boundary the
-/// CLI's `--correlation` crosses, and never a second copy of that grammar.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Correlation(onemessagebus::Correlation);
-
-impl Correlation {
-    /// The token, as the engine is handed it.
-    #[must_use]
-    pub fn inner(&self) -> &onemessagebus::Correlation {
-        &self.0
-    }
-}
-
-impl TryFrom<&str> for Correlation {
-    type Error = ApiError;
-
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
-        value
-            .parse::<onemessagebus::Correlation>()
-            .map(Self)
-            .map_err(|refused| ApiError::InvalidCorrelation(refused.to_string()))
-    }
-}
-
-impl fmt::Display for Correlation {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
-    }
 }
 
 /// A validated qualified project id: `<source>:<native>`.
@@ -2028,9 +1946,8 @@ pub enum ViewScope {
 /// run view.
 ///
 /// The Graph view selects `detail`, Overall `timeline` at run scope, a node's
-/// timeline `timeline` at node scope, Channel `channel`, and Action items
-/// `human-items`. The Host page and a page with no run open select `sidebar`
-/// alone.
+/// timeline `timeline` at node scope, and Action items `human-items`. The
+/// Host page and a page with no run open select `sidebar` alone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubscriptionView {
     /// The sidebar alone.
@@ -2052,11 +1969,6 @@ pub enum SubscriptionView {
         scope: ViewScope,
         /// Which events both carry.
         filter: Option<FilterSpec>,
-    },
-    /// The run's channel queue, with the detail beside it.
-    Channel {
-        /// The run.
-        run_id: RunId,
     },
     // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views this enum declares; the plan names this enum as what gains the view, and its selectors and records stay the engine's and `src/human_items.rs`'s.
     /// The host's human items: no run, and every item this filter selects.
@@ -2141,10 +2053,6 @@ impl SubscriptionView {
                     filter: filter()?,
                 })
             }
-            Some("channel") => {
-                allow(&["type", "run_id"])?;
-                Ok(Self::Channel { run_id: run_id()? })
-            }
             Some("human-items") => {
                 allow(&["type", "filter", "item"])?;
                 Ok(Self::HumanItems {
@@ -2174,9 +2082,7 @@ impl SubscriptionView {
     pub fn run_id(&self) -> Option<&RunId> {
         match self {
             Self::Sidebar | Self::HumanItems { .. } => None,
-            Self::Detail { run_id, .. }
-            | Self::Timeline { run_id, .. }
-            | Self::Channel { run_id } => Some(run_id),
+            Self::Detail { run_id, .. } | Self::Timeline { run_id, .. } => Some(run_id),
         }
     }
 
@@ -2213,7 +2119,6 @@ impl SubscriptionView {
                 serde_json::json!({ "type": "timeline", "run_id": run_id, "scope": "node", "node": node }),
                 filter,
             ),
-            Self::Channel { run_id } => serde_json::json!({ "type": "channel", "run_id": run_id }),
             Self::HumanItems { filter, item } => {
                 let mut value = serde_json::json!({ "type": "human-items" });
                 if *filter != HumanItemFilter::default() {

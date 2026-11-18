@@ -347,62 +347,9 @@ export function unwatched(reported: readonly string[] = [LIVE_RUN]) {
   };
 }
 
-/** One surface on the channel, as the engine records it. */
-export function channelSurface(
-  id: number,
-  overrides: Record<string, unknown> = {},
-) {
-  return {
-    id,
-    kind: "finding",
-    message: `the gate went red ${id}`,
-    source: "sentinel",
-    blocking: false,
-    queued_at: 1_784_000_000_000,
-    ...overrides,
-  };
-}
-
-/** `GET .../channel`: one waiting surface, one held, one answered, one reply. */
-export function channelQueue(runId: string = LIVE_RUN) {
-  return {
-    ...verbEnvelope,
-    run_id: runId,
-    surfaces: [
-      channelSurface(0),
-      channelSurface(1, {
-        kind: "ask-manager",
-        blocking: true,
-        workstream: "dashboard",
-      }),
-      channelSurface(2, { kind: "check-in" }),
-    ],
-    waiting: [channelSurface(2, { kind: "check-in" })],
-    held: channelSurface(1, {
-      kind: "ask-manager",
-      blocking: true,
-      workstream: "dashboard",
-    }),
-    replies: [
-      {
-        id: 0,
-        reply: { completion: false, message: "carry on" },
-        at: 1_784_000_100_000,
-      },
-    ],
-    commands: [],
-    outcomes: [{ id: 0, applied: true }],
-  };
-}
-
-/** A receipt the engine answers a reply or an attest with. */
-export function receipt(runId: string = LIVE_RUN) {
-  return {
-    ...verbEnvelope,
-    run_id: runId,
-    receipt: { reply: 3, state: "delivered", verdict: "delivered" },
-    advice: ["nothing is driving the run; adopt it for the reply to be read"],
-  };
+/** A wrapped verb's envelope over one run, before the verb's own members. */
+export function verbBody(runId: string = LIVE_RUN) {
+  return { ...verbEnvelope, run_id: runId };
 }
 
 /** The graph overrides the live run's `queued` node declares, in order. */

@@ -47,7 +47,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use onepipeline::agents::{AgentScope, Agents};
-use onepipeline::provenance::Provenance;
 use onepipeline::verbs;
 use onepipeline::views::{Listing, RunPaths, RunSummary, RunView, Skipped};
 use serde_json::{json, Value};
@@ -55,10 +54,9 @@ use serde_json::{json, Value};
 use crate::api::RunApi;
 use crate::cli::{RunsRoot, SessionId};
 use crate::contract::{
-    ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
-    Health, HealthStatus, NextQuery, NodeId, ProjectId, Release, RunId, RunQuery, RunSelection,
-    RunsPage, RunsQuery, ShutdownRequest, SseEvent, StopRequest, SurfaceRequest, TimelineQuery,
-    TimelineScope, TranscriptQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
+    ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, HealthStatus, NodeId,
+    ProjectId, Release, RunId, RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest,
+    SseEvent, StopRequest, TimelineQuery, TimelineScope, TranscriptQuery, API_VERSION, TELEMETRY_SCHEMA_VERSION,
 };
 use crate::error::ApiError;
 use crate::filter::{EventFilter, FilterSpec, LaunchProfiles};
@@ -748,20 +746,6 @@ impl RunStore {
                 ApiError::ProjectionFailed(format!("the agents do not serialize: {error}"))
             })
     }
-
-    /// The filter one verb request asked for, as the engine's own type.
-    ///
-    /// Resolved against the run, exactly as a read route resolves one — the
-    /// built-in profiles, the run's own, or an inline spec — and then handed to
-    /// the engine in its own grammar.
-    fn engine_filter(
-        &self,
-        run: &RunId,
-        spec: Option<&FilterSpec>,
-    ) -> Result<onepipeline::filter::EventFilter, ApiError> {
-        let view = self.view(run)?;
-        Self::resolve(&view, spec)?.to_engine()
-    }
 }
 
 impl RunApi for RunStore {
@@ -861,70 +845,6 @@ impl RunApi for RunStore {
             &|summary| self.grouped_row(summary),
             &|group| self.group_agent_count(group),
         )))
-    }
-
-    fn channel(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
-        let paths = self.present(run)?;
-        let queue = verbs::channel(&paths).map_err(|error| Self::refused(run, error))?;
-        let mut payload = serde_json::to_value(&queue).map_err(|error| {
-            ApiError::ProjectionFailed(format!("the channel does not serialize: {error}"))
-        })?;
-        payload["run_id"] = json!(run);
-        Ok(Self::envelope(payload))
-    }
-
-    fn channel_next(&self, run: &RunId, query: &NextQuery) -> Result<Envelope<Value>, ApiError> {
-        let paths = self.present(run)?;
-        let filter = self.engine_filter(run, query.filter.as_ref())?;
-        let next = verbs::next(&paths, &filter).map_err(|error| Self::refused(run, error))?;
-        let mut payload = serde_json::to_value(&next).map_err(|error| {
-            ApiError::ProjectionFailed(format!("the claim does not serialize: {error}"))
-        })?;
-        payload["run_id"] = json!(run);
-        Ok(Self::envelope(payload))
-    }
-
-    fn channel_reply(
-        &self,
-        run: &RunId,
-        correlation: Option<&Correlation>,
-        envelope: &str,
-    ) -> Result<Envelope<Value>, ApiError> {
-        let paths = self.present(run)?;
-        // The body, byte for byte: the engine parses it, validates it and rules
-        // on its author, and this crate reads nothing out of it first. A reply
-        // from the browser is a person's, so the engine records it as the
-        // user's words and refuses a body that states the manager's.
-        let receipt = verbs::reply_as(
-            &paths,
-            correlation.map(Correlation::inner),
-            envelope,
-            Provenance::User,
-        )
-        .map_err(|error| Self::refused(run, error))?;
-        Ok(Self::envelope(payload::receipt(run, &receipt)))
-    }
-
-    fn channel_surface(
-        &self,
-        run: &RunId,
-        request: &SurfaceRequest,
-    ) -> Result<Envelope<Value>, ApiError> {
-        let paths = self.present(run)?;
-        let surfaced = verbs::surface(&paths, request.kind.clone(), request.message.clone())
-            .map_err(|error| Self::refused(run, error))?;
-        Ok(Self::envelope(json!({
-            "run_id": run,
-            "surface": surfaced.surface,
-            "state": "queued",
-        })))
-    }
-
-    fn attest(&self, run: &RunId, request: &AttestRequest) -> Result<Envelope<Value>, ApiError> {
-        let paths = self.present(run)?;
-        let receipt =
-            verbs::attest(&paths, &request.reference).map_err(|error| Self::refused(run, error))?;
-        Ok(Self::envelope(payload::receipt(run, &receipt)))
     }
 
     fn stop(&self, run: &RunId, request: &StopRequest) -> Result<Envelope<Value>, ApiError> {

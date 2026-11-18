@@ -221,7 +221,7 @@ test("replaces the subscription for a new view and retires it when closed", asyn
   const h = harness();
   const { live, errors } = open(h);
   await vi.waitFor(() => expect(h.sources).toHaveLength(1));
-  // Answered as the server answers the Channel view: its detail and queue.
+  // Answered as the server answers the Graph view: its detail.
   h.answer = (body) =>
     Response.json(
       {
@@ -232,21 +232,20 @@ test("replaces the subscription for a new view and retires it when closed", asyn
           snapshot: {
             ...snapshot(4),
             visible: {
-              type: "channel",
+              type: "detail",
               run_id: SERVED_RUN,
               detail: served("run.json"),
-              channel: served("run-channel.json"),
             },
           },
         },
       },
       { status: 201 },
     );
-  live.change({ type: "channel", run_id: SERVED_RUN });
+  live.change({ type: "detail", run_id: SERVED_RUN });
   expect(sourceAt(h, 0).closed).toBe(true);
   await vi.waitFor(() => expect(h.sources).toHaveLength(2));
   expect(h.bodies.at(-1)).toStrictEqual({
-    view: { type: "channel", run_id: SERVED_RUN },
+    view: { type: "detail", run_id: SERVED_RUN },
     replaces: SUBSCRIPTION,
   });
   expect(errors).toStrictEqual([]);
@@ -332,7 +331,7 @@ test("refuses an answer for another view, and a frame whose SSE event or id is n
     Response.json(
       {
         subscription: SUBSCRIPTION,
-        view: { type: "channel", run_id: "run-1" },
+        view: { type: "detail", run_id: "run-1" },
         initial: { type: "snapshot", snapshot: snapshot(1) },
       },
       { status: 201 },

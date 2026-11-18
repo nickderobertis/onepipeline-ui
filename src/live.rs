@@ -6,7 +6,7 @@
 //! the state it shows — the sidebar's trimmed rows and the visible view's payload
 //! — at one publication boundary, then reads `GET /api/v2/events?subscription=`
 //! for the changes after it: a trimmed row per run that moved, a patch of the
-//! visible detail, timeline or channel queue, and nothing for anything the tab is
+//! visible detail or timeline, and nothing for anything the tab is
 //! not showing. A reconnect resumes after the last frame it applied, replayed
 //! from the frames the subscription retained; a cursor the subscription cannot
 //! resume from is answered with one explicit reset, never a silent re-send.
@@ -269,7 +269,6 @@ enum FrameKind {
     RunRemoved,
     DetailPatch,
     TimelinePatch,
-    ChannelPatch,
     SidebarSnapshot,
     // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, and the plan names this file's `FrameKind` as the one declaration of the frame; reading and diffing the view stay in the poller the frame goes out on, and the records stay the engine's.
     HumanItemsPatch,
@@ -283,7 +282,6 @@ impl FrameKind {
             Self::RunRemoved => "run.removed",
             Self::DetailPatch => "detail.patch",
             Self::TimelinePatch => "timeline.patch",
-            Self::ChannelPatch => "channel.patch",
             Self::SidebarSnapshot => "sidebar.snapshot",
             Self::HumanItemsPatch => "human-items.patch",
             Self::Reset => "reset",
@@ -309,10 +307,6 @@ enum Change {
         scope: TimelineScope,
         ops: Vec<Op>,
     },
-    Channel {
-        run: RunId,
-        ops: Vec<Op>,
-    },
     // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, and the plan names this file's `FrameKind` as the one declaration of the frame; this is that frame's payload, closed as the frames are.
     HumanItems {
         ops: Vec<Op>,
@@ -328,7 +322,6 @@ impl Change {
             Self::Removed(_) => FrameKind::RunRemoved,
             Self::Detail { .. } => FrameKind::DetailPatch,
             Self::Timeline { .. } => FrameKind::TimelinePatch,
-            Self::Channel { .. } => FrameKind::ChannelPatch,
             Self::HumanItems { .. } => FrameKind::HumanItemsPatch,
         }
     }
@@ -340,7 +333,7 @@ impl Change {
             Self::SidebarRows(rows) => return format!("\"rows\":{rows}"),
             Self::Row(row) => return format!("\"row\":{row}"),
             Self::Removed(run) => json!({ "run_id": run }),
-            Self::Detail { run, ops } | Self::Channel { run, ops } => {
+            Self::Detail { run, ops } => {
                 json!({ "run_id": run, "ops": wire(ops) })
             }
             Self::Timeline {
@@ -400,9 +393,6 @@ enum Visible {
         scope: TimelineScope,
         filter: FilterKey,
     },
-    Channel {
-        run: RunId,
-    },
     // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, and the plan names this file's `FrameKind` as the one declaration of the frame; a subscription shows one of a closed set of views, and this is the one that frame patches.
     HumanItems(HumanItemsKey),
 }
@@ -450,9 +440,6 @@ impl Visible {
                 },
                 filter: filter(spec),
             },
-            SubscriptionView::Channel { run_id } => Self::Channel {
-                run: run_id.clone(),
-            },
             SubscriptionView::HumanItems { filter, item } => {
                 Self::HumanItems(HumanItemsKey::of(filter, item.as_ref()))
             }
@@ -466,18 +453,15 @@ impl Visible {
     fn run_id(&self) -> Option<&RunId> {
         match self {
             Self::Sidebar | Self::HumanItems(_) => None,
-            Self::Detail { run, .. } | Self::Timeline { run, .. } | Self::Channel { run } => {
-                Some(run)
-            }
+            Self::Detail { run, .. } | Self::Timeline { run, .. } => Some(run),
         }
     }
 
-    /// The filter its detail is read under: the timeline's for a timeline, and
-    /// none for the channel's header.
+    /// The filter its detail is read under: the timeline's for a timeline.
     fn detail_filter(&self) -> FilterKey {
         match self {
             Self::Detail { filter, .. } | Self::Timeline { filter, .. } => filter.clone(),
-            Self::Sidebar | Self::Channel { .. } | Self::HumanItems(_) => FilterKey::default(),
+            Self::Sidebar | Self::HumanItems(_) => FilterKey::default(),
         }
     }
 }
@@ -805,8 +789,6 @@ struct LiveRun {
     /// complete read has been published, kept current here rather than
     /// rebuilt on a request.
     history: Vec<(TimelineScope, FilterKey, Held<LiveTimeline>)>,
-    channel: Option<Held<Value>>,
-    channel_stamp: Vec<(PathBuf, u64, SystemTime)>,
     telemetry: Folded,
     /// What each node was last seen doing: one fold per opening.
     activity: ActivityFold,
@@ -899,11 +881,9 @@ fn wire_window(scope: &TimelineScope) -> ItemsWindow {
     }
 }
 
-/// A payload, and the instant it was last read at — the envelope's
-/// `observed_at`.
+/// A payload a run keeps current.
 struct Held<T> {
     payload: T,
-    observed_at: String,
 }
 
 /// The SDK's telemetry document, folded on its own clock.
@@ -1027,8 +1007,6 @@ impl LiveRun {
             details: HashMap::new(),
             timelines: Vec::new(),
             history: Vec::new(),
-            channel: None,
-            channel_stamp: channel_stamp(&paths.channel_dir()),
             agents_stamp: file_stamp(&paths.oneharness_sessions()),
             agents,
             view,
@@ -1197,11 +1175,10 @@ impl LiveRun {
     /// are not, and answer the snapshot of them.
     fn ensure(
         &mut self,
-        store: &RunStore,
         visible: &Visible,
         spec: Option<&crate::filter::FilterSpec>,
     ) -> Result<Value, ApiError> {
-        let at = self.hold(store, visible, spec)?;
+        let at = self.hold(visible, spec)?;
         Ok(self.answer(visible, at))
     }
 
@@ -1210,7 +1187,6 @@ impl LiveRun {
     /// reads them.
     fn hold(
         &mut self,
-        store: &RunStore,
         visible: &Visible,
         spec: Option<&crate::filter::FilterSpec>,
     ) -> Result<Option<usize>, ApiError> {
@@ -1321,13 +1297,6 @@ impl LiveRun {
                     };
                 Ok(Some(at))
             }
-            Visible::Channel { .. } => {
-                if self.channel.is_none() {
-                    let channel = channel_payload(store, &self.run)?;
-                    self.channel = Some(held(channel));
-                }
-                Ok(None)
-            }
         }
     }
 
@@ -1372,17 +1341,6 @@ impl LiveRun {
                 }
             }
             (Visible::Timeline { .. }, None) => Value::Null,
-            (Visible::Channel { .. }, _) => {
-                let channel = self.channel.as_ref().map_or(Value::Null, |held| {
-                    enveloped(held.payload.clone(), &held.observed_at)
-                });
-                object_of([
-                    ("type", Value::from("channel")),
-                    ("run_id", run),
-                    ("detail", detail()),
-                    ("channel", channel),
-                ])
-            }
         }
     }
 }
@@ -1395,13 +1353,6 @@ fn fold_activity(view: &RunView) -> ActivityFold {
     }
     fold.settle();
     fold
-}
-
-fn held<T>(payload: T) -> Held<T> {
-    Held {
-        payload,
-        observed_at: payload::now_rfc3339(),
-    }
 }
 
 /// A payload in the schema-version envelope every route serves it in: the
@@ -1438,41 +1389,9 @@ fn object_of<const N: usize>(members: [(&str, Value); N]) -> Value {
     )
 }
 
-/// The channel route's payload, without its envelope.
-fn channel_payload(store: &RunStore, run: &RunId) -> Result<Value, ApiError> {
-    use crate::api::RunApi;
-    store.channel(run).map(|envelope| envelope.payload)
-}
-
 fn file_stamp(path: &Path) -> Option<(u64, SystemTime)> {
     let about = std::fs::metadata(path).ok()?;
     Some((about.len(), about.modified().ok()?))
-}
-
-/// Every file under a run's channel directory, and what each looks like: the
-/// queue moves exactly when one of them does.
-fn channel_stamp(dir: &Path) -> Vec<(PathBuf, u64, SystemTime)> {
-    let mut found = Vec::new();
-    let mut pending = vec![dir.to_path_buf()];
-    while let Some(dir) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            match entry.metadata() {
-                Ok(about) if about.is_dir() => pending.push(path),
-                Ok(about) => {
-                    if let Ok(modified) = about.modified() {
-                        found.push((path, about.len(), modified));
-                    }
-                }
-                Err(_) => {}
-            }
-        }
-    }
-    found.sort();
-    found
 }
 
 /// What a stream asked for a subscription it cannot have is told: `410` with
@@ -1607,7 +1526,7 @@ impl Hub {
                     _ => None,
                 };
                 let live = self.live_run(&run, node)?;
-                lock(&live).hold(&shared.store, &visible, spec)?;
+                lock(&live).hold(&visible, spec)?;
                 Some(live)
             }
         };
@@ -1642,7 +1561,7 @@ impl Hub {
         let mut run = live.as_ref().map(|live| lock(live));
         let mut reading = human_items.as_ref().map(|_| lock(&shared.human_items));
         let visible_state = match (run.as_mut(), &human_items, reading.as_mut()) {
-            (Some(run), _, _) => run.ensure(&shared.store, &visible, spec)?,
+            (Some(run), _, _) => run.ensure(&visible, spec)?,
             (None, Some(view), Some(reading)) => self.ensure_human_items(reading, view)?,
             _ => json!({ "type": "sidebar" }),
         };
@@ -1842,7 +1761,7 @@ impl Hub {
             (Some(reason), Some(after)) => {
                 // One explicit re-send, named, and the new base from here on.
                 let visible_state = match (run.as_mut(), &human_items, reading.as_ref()) {
-                    (Some(run), _, _) => run.ensure(&shared.store, &visible, spec_of(&view)).ok(),
+                    (Some(run), _, _) => run.ensure(&visible, spec_of(&view)).ok(),
                     (None, Some(view), Some(reading)) => reading
                         .views
                         .get(&HumanItemsKey::of(&view.0, view.1.as_ref()))
@@ -2229,12 +2148,6 @@ impl Hub {
                     matches!(visible, Visible::Timeline { scope: shown, filter, .. } if shown == scope && filter == key)
                 })
         });
-        if !wanted
-            .iter()
-            .any(|visible| matches!(visible, Visible::Channel { .. }))
-        {
-            run.channel = None;
-        }
         let outcome = run.view.refresh();
         let paths = run.view.paths.clone();
         let touched = match outcome {
@@ -2327,13 +2240,7 @@ impl Hub {
             || liveness_moved
             || refold
             || overdue_moved;
-        let channel_stamp = if run.channel.is_some() {
-            channel_stamp(&paths.channel_dir())
-        } else {
-            Vec::new()
-        };
-        let channel_moved = run.channel.is_some() && channel_stamp != run.channel_stamp;
-        if !moved && !channel_moved {
+        if !moved {
             return;
         }
         let now = payload::now_rfc3339();
@@ -2493,32 +2400,6 @@ impl Hub {
                 );
             }
         }
-        if channel_moved {
-            // The stamp is taken as read only once the queue was: a read the
-            // engine refused is tried again on the next tick, not forgotten.
-            let read = channel_payload(&shared.store, &run.run);
-            if read.is_ok() {
-                run.channel_stamp = channel_stamp;
-            }
-            if let (Ok(now_channel), Some(held)) = (read, run.channel.as_mut()) {
-                let mut ops = Vec::new();
-                if let Err(refused) = crate::patch::diff(&held.payload, &now_channel, &mut ops) {
-                    eprintln!("onepipeline-api: a channel could not be patched: {refused}");
-                }
-                held.payload = now_channel;
-                if let Some(ops) = patch_ops(&mut held.observed_at, &now, ops) {
-                    changes.push((
-                        Visible::Channel {
-                            run: run.run.clone(),
-                        },
-                        Change::Channel {
-                            run: run.run.clone(),
-                            ops,
-                        },
-                    ));
-                }
-            }
-        }
         if !changes.is_empty() {
             let mut state = lock(&shared.state);
             let reach: Vec<(SubscriptionId, Visible)> = state
@@ -2551,7 +2432,6 @@ impl Hub {
                         }
                     }),
             )
-            .chain(run.channel.as_ref().map(|_| "channel".to_owned()))
             .collect();
         self.trace(&json!({
             "run": run.run,

@@ -339,8 +339,6 @@ impl Tab {
             }
             Some("timeline.patch") => patch::apply(&mut visible["timeline"], &ops(frame))
                 .expect("the timeline patch applies"),
-            Some("channel.patch") => patch::apply(&mut visible["channel"], &ops(frame))
-                .expect("the channel patch applies"),
             other => panic!("an unknown frame type {other:?}"),
         }
         self.applied = frame["id"].as_str().expect("an id").to_owned();
@@ -444,10 +442,6 @@ fn every_appended_record_patches_each_view_into_what_a_fresh_read_serves() {
             "overall, planner".into(),
             json!({ "type": "timeline", "run_id": run, "scope": "run", "filter": "planner" }),
         ),
-        (
-            "channel".into(),
-            json!({ "type": "channel", "run_id": run }),
-        ),
     ];
     for node in &nodes {
         views.push((
@@ -540,27 +534,19 @@ fn every_appended_record_patches_each_view_into_what_a_fresh_read_serves() {
                 ),
                 &format!("{name}'s detail after record {index}"),
             );
-            match view["type"].as_str() {
-                Some("timeline") => {
-                    let scope = match view["node"].as_str() {
-                        Some(node) => format!("scope=node&node={node}"),
-                        None => "scope=run".to_owned(),
-                    };
-                    same(
-                        &unstamped(tab.state["visible"]["timeline"].clone()),
-                        &fresh(
-                            address,
-                            &format!("/api/v2/runs/{run}/timeline?{scope}{filter}"),
-                        ),
-                        &format!("{name}'s timeline after record {index}"),
-                    );
-                }
-                Some("channel") => assert_eq!(
-                    unstamped(tab.state["visible"]["channel"].clone()),
-                    fresh(address, &format!("/api/v2/runs/{run}/channel")),
-                    "{name}'s channel after record {index}"
-                ),
-                _ => {}
+            if view["type"] == "timeline" {
+                let scope = match view["node"].as_str() {
+                    Some(node) => format!("scope=node&node={node}"),
+                    None => "scope=run".to_owned(),
+                };
+                same(
+                    &unstamped(tab.state["visible"]["timeline"].clone()),
+                    &fresh(
+                        address,
+                        &format!("/api/v2/runs/{run}/timeline?{scope}{filter}"),
+                    ),
+                    &format!("{name}'s timeline after record {index}"),
+                );
             }
         }
     }
@@ -1412,10 +1398,12 @@ fn a_retired_or_replaced_subscription_is_gone_and_its_stream_says_so() {
     let live = Live::start(|root| growing_run(root, run));
     let first = live.subscribe(&json!({ "view": { "type": "detail", "run_id": run } }));
     let first_id = first["subscription"].as_str().expect("an id").to_owned();
-    // Moving to the Channel view replaces the subscription: the detail view
+    // Moving to the Overall view replaces the subscription: the detail view
     // left behind is no longer subscribed or read.
-    let second = live
-        .subscribe(&json!({ "view": { "type": "channel", "run_id": run }, "replaces": first_id }));
+    let second = live.subscribe(&json!({
+        "view": { "type": "timeline", "run_id": run, "scope": "run" },
+        "replaces": first_id,
+    }));
     let second_id = second["subscription"].as_str().expect("an id").to_owned();
     for (id, status) in [(&first_id, 410), (&second_id, 200)] {
         let stream = http::stream(
@@ -1601,74 +1589,14 @@ fn a_label_change_without_growth_is_reread_and_served_as_what_changed() {
     );
 }
 
-#[test]
-fn a_surface_raised_through_the_engine_reaches_the_channel_view_as_a_patch() {
-    let run = fixture_run::RUN_ID;
-    let live = Live::start(|root| growing_run(root, run));
-    let mut tab = Tab::open(&live, &json!({ "type": "channel", "run_id": run }));
-    let mut seen = live.refreshes().len();
-    // The engine's own writer journals the surface, receipt and all. Its receipt
-    // lands just after the record, and a poll between the two is answered with a
-    // re-read; so the journey raises until one append is read as one, and every
-    // other read is that re-read rather than anything else.
-    let mut reads = Vec::new();
-    while !reads
-        .iter()
-        .any(|read: &Value| read["refresh"] == "appended")
-    {
-        assert!(
-            reads.len() < 5,
-            "the engine's own append is never read as one: {reads:#?}"
-        );
-        let raised = http::post(
-            live.address(),
-            &format!("/api/v2/runs/{run}/channel/surface"),
-            &json!({ "kind": "question", "message": "is the journey live?" }).to_string(),
-        );
-        assert_eq!(raised.status, 200, "{}", raised.body);
-        let read = live.next_refresh(run, &mut seen);
-        assert!(
-            ["appended", "reread"].contains(&read["refresh"].as_str().unwrap_or_default()),
-            "{read}"
-        );
-        reads.push(read);
-    }
-    let deadline = Instant::now() + PATIENCE;
-    let mut frames = Vec::new();
-    while !frames
-        .iter()
-        .any(|frame: &Value| frame["type"] == "channel.patch")
-        && Instant::now() < deadline
-    {
-        frames.extend(tab.drain());
-    }
-    assert!(
-        frames.iter().any(|frame| frame["type"] == "channel.patch"),
-        "{frames:#?}"
-    );
-    let channel = unstamped(tab.state["visible"]["channel"].clone());
-    assert_eq!(
-        channel,
-        fresh(live.address(), &format!("/api/v2/runs/{run}/channel"))
-    );
-    let messages: Vec<&str> = channel["surfaces"]
-        .as_array()
-        .expect("surfaces")
-        .iter()
-        .filter_map(|surface| surface["message"].as_str())
-        .collect();
-    assert!(messages.contains(&"is the journey live?"), "{messages:?}");
-}
-
 /// The UUID every served epoch and subscription id is written as in a golden.
 const PINNED_EPOCH: &str = "00000000-0000-4000-8000-0000000e9c00";
 const PINNED_SUBSCRIPTION: &str = "00000000-0000-4000-8000-00000005ab00";
 
 /// A served document with what no two runs share replaced by what the golden
 /// claims: the process's epoch, the subscription ids, the instant of each read,
-/// and any wall-clock stamp written today (the channel's own records of the
-/// surface this journey raised, as text or as epoch milliseconds). Everything
-/// else is compared byte for byte.
+/// and any wall-clock stamp written today, as text or as epoch milliseconds.
+/// Everything else is compared byte for byte.
 fn pinned(value: &Value, subscriptions: &[String], epoch: &str, today: &str) -> Value {
     match value {
         Value::String(text) => {
@@ -1701,8 +1629,7 @@ fn pinned(value: &Value, subscriptions: &[String], epoch: &str, today: &str) -> 
                 .collect(),
         ),
         Value::Number(number) => match number.as_u64() {
-            // An epoch-millisecond stamp taken today, as the channel's own
-            // records carry one.
+            // An epoch-millisecond stamp taken today.
             Some(millis) if millis.abs_diff(now_epoch_millis()) < 86_400_000 => {
                 json!(1_786_104_000_000_u64)
             }
@@ -1867,7 +1794,6 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
         &live,
         &json!({ "type": "timeline", "run_id": run, "scope": "node", "node": fixture_run::NODE_ID }),
     );
-    let mut channel = Tab::open(&live, &json!({ "type": "channel", "run_id": run }));
     let mut sidebar = Tab::open(&live, &json!({ "type": "sidebar" }));
 
     // One record of the node's own, appended the engine's way.
@@ -1881,14 +1807,6 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
     let run_patch = frame_of(&mut overall, "timeline.patch");
     let node_patch = frame_of(&mut node, "timeline.patch");
     let changed = frame_of(&mut sidebar, "run.changed");
-    // A surface raised through the engine's own verb reaches the channel view.
-    let raised = http::post(
-        live.address(),
-        &format!("/api/v2/runs/{run}/channel/surface"),
-        &json!({ "kind": "question", "message": "pinned" }).to_string(),
-    );
-    assert_eq!(raised.status, 200, "{}", raised.body);
-    let channel_patch = frame_of(&mut channel, "channel.patch");
     // A run taken out of the root is removed from every sidebar. Nothing has
     // written into it since the journey did — the sidebar has read it, and
     // read it without writing — so nothing is left to race its removal, and
@@ -1927,7 +1845,7 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
         .json();
     assert_eq!(reset["type"], "reset");
 
-    let subscriptions: Vec<String> = [&detail, &overall, &node, &channel, &sidebar]
+    let subscriptions: Vec<String> = [&detail, &overall, &node, &sidebar]
         .iter()
         .map(|tab| tab.subscription.clone())
         .chain(std::iter::once(
@@ -1949,7 +1867,6 @@ fn the_served_subscription_and_every_frame_type_are_the_goldens_the_contract_pin
             pin(&detail_patch),
             pin(&run_patch),
             pin(&node_patch),
-            pin(&channel_patch),
             pin(&reset),
         ]),
     );
@@ -1976,13 +1893,14 @@ fn the_fixture_writers_receipts_are_the_engines_field_for_field() {
         serde_json::from_slice(&fs::read(live_journal::receipt_path(&journal)).expect("a receipt"))
             .expect("a receipt parses")
     };
+    // Raised through the engine's own verb, as `onepipeline surface` raises it.
     let surface = |message: &str| {
-        let raised = http::post(
-            live.address(),
-            &format!("/api/v2/runs/{run}/channel/surface"),
-            &json!({ "kind": "question", "message": message }).to_string(),
-        );
-        assert_eq!(raised.status, 200, "{}", raised.body);
+        onepipeline::verbs::surface(
+            &onepipeline::views::RunPaths::under(&live.serving.runs_root(), run),
+            "question".parse().expect("a surface kind"),
+            message.to_owned(),
+        )
+        .expect("the engine raises the surface");
     };
     // A tab on the run, so the server holds it open and refreshes it too.
     let _tab = Tab::open(&live, &json!({ "type": "detail", "run_id": run }));
@@ -2224,60 +2142,6 @@ fn a_stale_telemetry_fold_catches_up_once_the_run_goes_quiet_without_holding_bac
             &format!("/api/v2/runs/{run}?include_conversations=false"),
         )),
         "the detail once the fold caught up",
-    );
-}
-
-/// Unix-only: the queue is made unreadable with a POSIX permission bit, and
-/// Windows denies a read through an ACL this journey cannot set.
-#[cfg(unix)]
-#[test]
-fn a_channel_that_could_not_be_read_for_a_moment_reaches_the_view_once_it_can() {
-    use std::os::unix::fs::PermissionsExt;
-    let run = fixture_run::RUN_ID;
-    let live = Live::start(|root| growing_run(root, run));
-    let raise = |message: &str| {
-        let raised = http::post(
-            live.address(),
-            &format!("/api/v2/runs/{run}/channel/surface"),
-            &json!({ "kind": "question", "message": message }).to_string(),
-        );
-        assert_eq!(raised.status, 200, "{}", raised.body);
-    };
-    // The channel exists before the view opens, so it can be made unreadable.
-    raise("before the view");
-    let mut tab = Tab::open(&live, &json!({ "type": "channel", "run_id": run }));
-    let channel = live.serving.run_dir(run).join("channel");
-    let readable = fs::metadata(&channel).expect("a channel").permissions();
-    // A surface lands, and the queue is then unreadable while the poller looks.
-    raise("while unreadable");
-    fs::set_permissions(&channel, fs::Permissions::from_mode(0o000)).expect("lock the channel");
-    std::thread::sleep(Duration::from_millis(600));
-    fs::set_permissions(&channel, readable).expect("unlock the channel");
-    // Once it can be read, the surface reaches the view, and the view is the
-    // queue a fresh read serves.
-    let deadline = Instant::now() + PATIENCE;
-    loop {
-        tab.drain();
-        let shown = tab.state["visible"]["channel"]["surfaces"]
-            .as_array()
-            .is_some_and(|surfaces| {
-                surfaces
-                    .iter()
-                    .any(|surface| surface["message"] == "while unreadable")
-            });
-        if shown {
-            break;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the surface never reached the view: {:#?}",
-            tab.frames
-        );
-    }
-    same(
-        &unstamped(tab.state["visible"]["channel"].clone()),
-        &fresh(live.address(), &format!("/api/v2/runs/{run}/channel")),
-        "the channel once it could be read",
     );
 }
 
@@ -3808,19 +3672,6 @@ fn a_complete_read_that_fails_keeps_the_screen_says_why_and_a_later_tab_retries(
     assert!(retry.state["visible"]["detail"]["progress"]
         .get("failed")
         .is_none());
-}
-
-#[test]
-fn a_channel_view_opens_on_the_first_detail_without_waiting_for_the_rest() {
-    let run = fixture_run::RUN_ID;
-    let live = Live::start_with(|root| growing_run(root, run), &[HOLD]);
-    let tab = Tab::first(&live, &json!({ "type": "channel", "run_id": run }));
-    assert_eq!(tab.state["visible"]["type"], "channel");
-    assert_eq!(
-        tab.state["visible"]["detail"]["progress"]["complete"],
-        false
-    );
-    assert!(tab.state["visible"]["channel"].is_object());
 }
 
 #[test]

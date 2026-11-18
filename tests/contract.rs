@@ -22,10 +22,10 @@ use onepipeline::views::{RunPaths, RunSummary, RunView};
 use onepipeline_ui::api::RunApi;
 use onepipeline_ui::cli::{Cli, Command, ServeArgs, SessionId, EXIT_SOFTWARE};
 use onepipeline_ui::contract::{
-    routes, ArtifactId, AttestRequest, ConversationId, DispatchId, Envelope, ErrorEnvelope,
-    EventFrame, EventsPageLimit, EventsQuery, Health, HealthStatus, NextQuery, NodeId, PageLimit,
+    routes, ArtifactId, ConversationId, DispatchId, Envelope, ErrorEnvelope,
+    EventFrame, EventsPageLimit, EventsQuery, Health, HealthStatus, NodeId, PageLimit,
     PageOwner, ProjectId, ReferenceKind, Release, RunId, RunQuery, RunsPage, RunsQuery,
-    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, SurfaceRequest, TimelineEventsQuery,
+    ShutdownRequest, ShutdownScope, SseEvent, StopRequest, TimelineEventsQuery,
     TimelineQuery, TimelineScope, TranscriptQuery, API_VERSION, RUNS_PAGE_LIMIT,
     TELEMETRY_SCHEMA_VERSION, TIMELINE_EVENTS_PAGE, TIMELINE_EVENTS_PAGE_MAX,
     TIMELINE_SCHEMA_VERSION,
@@ -51,11 +51,6 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::EVENTS, "events.json"),
     (routes::PROJECTS, "projects.json"),
     (routes::PROJECT, "project.json"),
-    (routes::RUN_CHANNEL, "run-channel.json"),
-    (routes::RUN_CHANNEL_NEXT, "run-channel-next.json"),
-    (routes::RUN_CHANNEL_REPLY, "run-channel-reply.json"),
-    (routes::RUN_CHANNEL_SURFACE, "run-channel-surface.json"),
-    (routes::RUN_ATTEST, "run-attest.json"),
     (routes::RUN_STOP, "run-stop.json"),
     (routes::SHUTDOWN, "shutdown.json"),
     (routes::UNWATCHED, "unwatched.json"),
@@ -630,8 +625,8 @@ fn pin_under(name: &str, document: Value, root: Option<&Path>) {
 /// Every one is `onepipeline::verbs` over the same directory
 /// `every_route_serves_the_payload_its_golden_pins` serves the read routes
 /// against, so what these goldens pin is the envelope this crate owns around
-/// the SDK's own result — the grouped listing in its order, the channel as it
-/// stands, and the CLI's own renderings.
+/// the SDK's own result — the grouped listing in its order and the CLI's own
+/// renderings.
 #[test]
 fn every_read_verb_serves_the_payload_its_golden_pins() {
     // `status` renders the provider-health block the engine reads through its
@@ -669,7 +664,7 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
     let node = NodeId::try_from(fixture_run::NODE_ID).expect("valid");
     let project = ProjectId::try_from(fixture_run::PLAN_PROJECT).expect("the fixture's project");
 
-    let served: [(&str, Value); 14] = [
+    let served: [(&str, Value); 13] = [
         ("projects.json", enveloped(store.projects())),
         ("project.json", enveloped(store.project(&project))),
         ("run-agents.json", enveloped(store.agents(&run))),
@@ -681,7 +676,6 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
             "project-agents.json",
             enveloped(store.project_agents(&project)),
         ),
-        ("run-channel.json", enveloped(store.channel(&run))),
         (
             "unwatched.json",
             enveloped(
@@ -718,70 +712,11 @@ fn every_read_verb_serves_the_payload_its_golden_pins() {
 /// run and pinned.
 ///
 /// Each is the engine's own verb over a run nothing is driving, which is what
-/// lets every one of them succeed without a driver: a reply is applied by the
-/// call itself, a claim finds the queue the surface was pushed onto, and an
-/// adoption retains the compiled binary and lets it settle the complete run.
-/// What the goldens pin is the receipt, the claim, the stop and the pid
-/// answer — projected from the SDK's own results — with the one value no golden
-/// can hold, the driver's pid, replaced as `observed_at` is.
+/// lets every one of them succeed without a driver. What the goldens pin is the
+/// stop and the shutdown reports, projected from the SDK's own results.
 #[test]
 fn every_write_verb_serves_the_payload_its_golden_pins() {
-    let (_workspace, root) = fixture_run::workspace();
-    fixture_run::write(&root, fixture_run::RUN_ID);
-    let store = store_over(&root);
     let run = RunId::try_from(fixture_run::RUN_ID).expect("valid");
-
-    // A surface raised, then claimed by the channel's only consumer: the claim
-    // carries the surface the raise queued.
-    let surfaced = enveloped(store.channel_surface(
-        &run,
-        &SurfaceRequest {
-            kind: onepipeline::channel::SurfaceKind::finding(),
-            message: "the gate is red".to_owned(),
-        },
-    ));
-    // Shaped through a spec that admits no event: what this golden pins is the
-    // claim — the surface the raise queued, consumed by the channel's only
-    // consumer — and the run's events are pinned by the read routes' own
-    // goldens. Unshaped, the answer carries the `planner-surfaced` the claim
-    // itself just journalled, stamped with this host and this instant.
-    let claimed = enveloped(
-        store.channel_next(
-            &run,
-            &NextQuery {
-                filter: Some(
-                    onepipeline_ui::filter::FilterSpec::parse(
-                        r#"{"include":[{"kind":"no-such-kind"}]}"#,
-                    )
-                    .expect("a spec"),
-                ),
-            },
-        ),
-    );
-    // An edit, applied by the reply itself because nothing is driving the run.
-    let replied = enveloped(store.channel_reply(
-        &run,
-        None,
-        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done"}}]}"###,
-    ));
-    pin("run-channel-surface.json", surfaced);
-    pin("run-channel-next.json", claimed);
-    pin("run-channel-reply.json", replied);
-
-    // The attestation, over the run holding a ready human action nobody has
-    // taken.
-    let (_live, live_root) = fixture_run::workspace();
-    fixture_run::write_live(&live_root, fixture_run::RUN_ID);
-    let live = store_over(&live_root);
-    pin(
-        "run-attest.json",
-        enveloped(live.attest(
-            &run,
-            &AttestRequest {
-                reference: fixture_run::SIGNOFF_NODE_ID.to_owned(),
-            },
-        )),
-    );
 
     // A stop, as the session the fixture's launch record names.
     let (_stopping, stop_root) = fixture_run::workspace();
@@ -840,13 +775,6 @@ fn enveloped(served: Result<Envelope<Value>, ApiError>) -> Value {
 /// replaced as the read's instant is, and the test that pins it holds the
 /// served one to being a pid.
 const DRIVER_PID: u64 = 4242;
-
-/// The instant a golden claims a surface was queued at.
-///
-/// The engine stamps a raised surface with the clock, so it is replaced as the
-/// read's instant is: the fact the golden pins is that the claim carries the
-/// surface the raise queued, not when.
-const QUEUED_AT: u64 = 1_786_104_000_000;
 
 /// Where a golden says the runs root was.
 ///
@@ -1032,7 +960,7 @@ fn a_scratch_path_reads_as_the_golden_whichever_separator_recorded_it() {
 const READING_HOST: &str = "a-reading-host";
 
 /// The same document with the read's own instant — and a retained driver's
-/// pid, a surface's queued instant, every scratch directory, and the
+/// pid, every scratch directory, and the
 /// workspace's `root` where one is named — replaced, wherever they appear.
 fn normalized_under(document: Value, root: Option<&Path>) -> Value {
     match document {
@@ -1055,8 +983,6 @@ fn normalized_under(document: Value, root: Option<&Path>) -> Value {
                         )
                     } else if key == "pid" {
                         (key, json!(DRIVER_PID))
-                    } else if key == "queued_at" {
-                        (key, json!(QUEUED_AT))
                     } else {
                         (key, normalized_under(value, root))
                     }
@@ -1534,104 +1460,6 @@ fn the_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines() 
     }
 }
 
-/// The golden both halves of the reply-command drift gate read.
-const REPLY_COMMANDS: &str = "reply-commands.json";
-
-/// The browser's copy of the reply envelope's commands, held to the engine's own
-/// `Command` — one half of a gate whose other half is TypeScript.
-///
-/// The composer composes, and `packages/dag-model` parses, every op the engine's
-/// `channel::Command` declares, which a Rust enum cannot be read across the
-/// language boundary to say. So this reads each op's fields off the schema that
-/// type itself derives — the declaration, never the engine's prose — and pins
-/// them to `tests/fixtures/reply-commands.json`, which
-/// `packages/dag-model/e2e/model.e2e.test.ts` holds the model's own
-/// `replyCommandSchema` to, op for op and field for field. An op or a field the
-/// engine grows fails here until the golden moves with it
-/// (`UPDATE_CONTRACT_FIXTURES=1`), and fails there until the browser follows.
-///
-/// A node's list fields ride along on the same terms: the engine's `plan::Node`
-/// denies what it does not declare, so a field that round-trips through it is
-/// one it declares, and one it omits when empty is one it defaults.
-#[test]
-fn the_browser_clients_copy_of_the_reply_commands_matches_the_engines() {
-    let schema = schemars::schema_for!(onepipeline::channel::Command).to_value();
-    let variants = schema["oneOf"]
-        .as_array()
-        .expect("the engine's Command derives one schema per op");
-    let mut commands = serde_json::Map::new();
-    for variant in variants {
-        let op = variant["properties"]["op"]["const"]
-            .as_str()
-            .expect("every op is a constant tag");
-        assert_eq!(
-            variant["additionalProperties"],
-            json!(false),
-            "the engine's `{op}` is no longer closed, so a client could not know what it refuses"
-        );
-        let required: Vec<&str> = variant["required"]
-            .as_array()
-            .expect("required fields")
-            .iter()
-            .filter_map(Value::as_str)
-            .filter(|field| *field != "op")
-            .collect();
-        let mut optional: Vec<&str> = variant["properties"]
-            .as_object()
-            .expect("the op's fields")
-            .keys()
-            .map(String::as_str)
-            .filter(|field| *field != "op" && !required.contains(field))
-            .collect();
-        optional.sort_unstable();
-        let mut required = required;
-        required.sort_unstable();
-        commands.insert(
-            op.to_owned(),
-            json!({ "required": required, "optional": optional }),
-        );
-    }
-
-    // `sets` is a list the engine declares on a node, keeps in order, and omits
-    // when empty — what the browser's `planTaskSchema` and the composer's
-    // `add`, `retry` and `requeue` carry for it.
-    let node_list_fields = ["sets"];
-    for field in node_list_fields {
-        let written = json!({ "id": "n", "task": "t", field: ["b=2", "a=1"] });
-        let node: onepipeline::plan::Node = serde_json::from_value(written.clone())
-            .unwrap_or_else(|err| panic!("the engine's node no longer declares `{field}`: {err}"));
-        assert_eq!(
-            serde_json::to_value(&node).expect("serialize"),
-            written,
-            "the engine's node does not keep `{field}` as written, in order"
-        );
-        let emptied: onepipeline::plan::Node =
-            serde_json::from_value(json!({ "id": "n", "task": "t", field: [] }))
-                .expect("an empty list");
-        assert_eq!(
-            serde_json::to_value(&emptied).expect("serialize"),
-            json!({ "id": "n", "task": "t" }),
-            "the engine's node no longer omits an empty `{field}`"
-        );
-    }
-
-    let declared = canonical(&json!({
-        "reply_envelope_version": onepipeline::channel::REPLY_ENVELOPE_VERSION,
-        "commands": commands,
-        "node_list_fields": node_list_fields,
-    }));
-    let path = fixture_dir().join(REPLY_COMMANDS);
-    if std::env::var_os(UPDATE).is_some() {
-        fs::write(&path, &declared).unwrap_or_else(|err| panic!("write {}: {err}", path.display()));
-    }
-    assert_eq!(
-        read_fixture(REPLY_COMMANDS),
-        declared,
-        "the engine's reply commands moved; re-run with {UPDATE}=1 and bring \
-         `packages/dag-model`'s `replyCommandSchema` with them"
-    );
-}
-
 #[test]
 fn the_event_frame_round_trips_and_opens_with_a_snapshot() {
     let raw = read_fixture("events.json");
@@ -1705,7 +1533,7 @@ fn the_error_envelope_round_trips_and_matches_the_error_it_renders() {
 fn every_error_maps_to_its_code_and_status() {
     let reason = "why".to_owned();
     let id = "why-1";
-    let cases: [(ApiError, &str, u16); 20] = [
+    let cases: [(ApiError, &str, u16); 19] = [
         (
             ApiError::InvalidRequest(reason.clone()),
             "invalid_request",
@@ -1714,11 +1542,6 @@ fn every_error_maps_to_its_code_and_status() {
         (
             ApiError::InvalidProjectId(reason.clone()),
             "invalid_project_id",
-            422,
-        ),
-        (
-            ApiError::InvalidCorrelation(reason.clone()),
-            "invalid_correlation",
             422,
         ),
         (ApiError::Refused(reason.clone()), "refused", 422),
@@ -2271,37 +2094,6 @@ impl RunApi for Unimplemented {
 
     fn project(&self, project: &ProjectId) -> Result<Envelope<Value>, ApiError> {
         Err(ApiError::ProjectNotFound(project.clone()))
-    }
-
-    fn channel(&self, run: &RunId) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.clone()))
-    }
-
-    fn channel_next(&self, run: &RunId, _query: &NextQuery) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.clone()))
-    }
-
-    fn channel_reply(
-        &self,
-        _run: &RunId,
-        _correlation: Option<&onepipeline_ui::contract::Correlation>,
-        envelope: &str,
-    ) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::Refused(format!(
-            "the reply is malformed: {envelope}"
-        )))
-    }
-
-    fn channel_surface(
-        &self,
-        run: &RunId,
-        _request: &SurfaceRequest,
-    ) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.clone()))
-    }
-
-    fn attest(&self, run: &RunId, _request: &AttestRequest) -> Result<Envelope<Value>, ApiError> {
-        Err(ApiError::RunNotFound(run.clone()))
     }
 
     fn stop(&self, run: &RunId, _request: &StopRequest) -> Result<Envelope<Value>, ApiError> {

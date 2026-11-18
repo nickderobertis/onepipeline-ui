@@ -259,51 +259,6 @@
     ]
   },
   {
-    "id": "00000000-0000-4000-8000-0000000e9c00:2",
-    "base": "00000000-0000-4000-8000-0000000e9c00:1",
-    "subscription": "00000000-0000-4000-8000-00000005ab00",
-    "type": "channel.patch",
-    "run_id": "run-20260807-a1b2c3",
-    "ops": [
-      {
-        "p": [
-          "surfaces"
-        ],
-        "a": [
-          {
-            "id": 0,
-            "kind": "question",
-            "message": "pinned",
-            "source": "proposal",
-            "blocking": false,
-            "queued_at": 1786104000000
-          }
-        ]
-      },
-      {
-        "p": [
-          "waiting"
-        ],
-        "a": [
-          {
-            "id": 0,
-            "kind": "question",
-            "message": "pinned",
-            "source": "proposal",
-            "blocking": false,
-            "queued_at": 1786104000000
-          }
-        ]
-      },
-      {
-        "p": [
-          "observed_at"
-        ],
-        "v": "2026-08-07T12:00:00Z"
-      }
-    ]
-  },
-  {
     "id": "00000000-0000-4000-8000-0000000e9c00:1",
     "base": "00000000-0000-4000-8000-0000000e9c00:2",
     "subscription": "00000000-0000-4000-8000-00000005ab00",
@@ -320,14 +275,14 @@
             "name": "contract"
           },
           "kind": null,
-          "state": "active",
+          "state": "parked",
           "nodes": {
             "total": 2,
             "done": 0,
             "failed": 0,
             "running": 1
           },
-          "updated_at": "2026-08-07T12:00:00Z",
+          "updated_at": "2026-08-07T12:00:10.000Z",
           "started_at": "2026-08-07T12:00:00.000Z"
         }
       ],

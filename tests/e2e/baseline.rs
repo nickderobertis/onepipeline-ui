@@ -223,7 +223,6 @@ fn asked(run: &str) -> Vec<(&'static str, String)> {
             routes::PROJECT,
             routes::PROJECT.replace("{project}", fixture_run::PLAN_PROJECT),
         ),
-        (routes::RUN_CHANNEL, for_run(routes::RUN_CHANNEL)),
         (routes::UNWATCHED, routes::UNWATCHED.to_owned()),
         (routes::HOST, routes::HOST.to_owned()),
         (routes::RUN_STATUS, for_run(routes::RUN_STATUS)),

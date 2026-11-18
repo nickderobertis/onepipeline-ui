@@ -8847,18 +8847,6 @@ pub fn shutdown(shutdown: &onepipeline::verbs::Shutdown) -> Value {
     })
 }
 
-/// A receipt `verbs::reply` or `verbs::attest` answered, with the engine's
-/// advice beside it — the sentences its binary prints on standard error, which
-/// say what a queued envelope is waiting for.
-#[must_use]
-pub fn receipt(run: &RunId, receipt: &onepipeline::verbs::Receipt) -> Value {
-    json!({
-        "run_id": run,
-        "receipt": receipt,
-        "advice": receipt.advice,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use std::cell::Cell;

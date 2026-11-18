@@ -228,10 +228,7 @@ fn from_kept(
             run.history.push((
                 scope,
                 key,
-                Held {
-                    payload: built,
-                    observed_at: String::new(),
-                },
+                Held { payload: built },
             ));
             run.history.len() - 1
         }

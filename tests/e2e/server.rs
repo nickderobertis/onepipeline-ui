@@ -56,6 +56,95 @@ fn assert_enveloped(body: &Value) {
     );
 }
 
+// A run's channel is the CLI's and no route here serves it, so a journey that
+// needs a reply, an attestation or a surface on a run this server reads
+// makes it through the engine's own verb over the same run directory, exactly
+// as `onepipeline reply`, `attest` and `surface` do, and reads what the
+// server then serves.
+
+/// The engine's paths for `run` under `root`.
+fn run_paths(root: &Path, run: &str) -> onepipeline::views::RunPaths {
+    onepipeline::views::RunPaths::under(root, run)
+}
+
+/// A receipt the engine answered a reply or an attestation with, as JSON.
+fn receipt_json(receipt: &onepipeline::verbs::Receipt) -> Value {
+    json!({ "receipt": receipt, "advice": receipt.advice })
+}
+
+/// `onepipeline reply RUN --as user`: `envelope`, byte for byte, as the user's
+/// words, under `correlation` where one is named.
+fn engine_reply(
+    root: &Path,
+    run: &str,
+    correlation: Option<&str>,
+    envelope: &str,
+) -> Result<Value, String> {
+    let correlation = correlation
+        .map(|token| {
+            token
+                .parse::<onemessagebus::Correlation>()
+                .map_err(|refused| refused.to_string())
+        })
+        .transpose()?;
+    onepipeline::verbs::reply_as(
+        &run_paths(root, run),
+        correlation.as_ref(),
+        envelope,
+        onepipeline::provenance::Provenance::User,
+    )
+    .map(|receipt| receipt_json(&receipt))
+    .map_err(|refused| refused.to_string())
+}
+
+/// `onepipeline reply RUN FILE --as user`, run as the pinned CLI in an
+/// environment changed by `environment` — for a reply that waits on a live
+/// driver under a reply timeout the journey names, which the engine reads off
+/// its own process's environment. The receipt the CLI printed, as JSON.
+fn cli_reply(
+    root: &Path,
+    run: &str,
+    envelope: &str,
+    environment: &[(&str, &str)],
+) -> Result<Value, String> {
+    let files = tempfile::tempdir().expect("the reply's envelope file");
+    let path = files.path().join("reply.json");
+    fs::write(&path, envelope).expect("the envelope");
+    let output = sibling::run_with_env(
+        root,
+        Some(fixture_run::SESSION),
+        &[
+            "reply",
+            run,
+            path.to_str().expect("a UTF-8 path"),
+            "--as",
+            "user",
+        ],
+        environment,
+    );
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+    }
+    let receipt: Value = serde_json::from_slice(&output.stdout).expect("the reply's receipt");
+    Ok(json!({ "receipt": receipt }))
+}
+
+/// `onepipeline attest RUN REF`.
+fn engine_attest(root: &Path, run: &str, reference: &str) -> Result<Value, String> {
+    onepipeline::verbs::attest(&run_paths(root, run), reference)
+        .map(|receipt| receipt_json(&receipt))
+        .map_err(|refused| refused.to_string())
+}
+
+/// `onepipeline surface RUN --kind KIND --message TEXT`.
+fn engine_surface(root: &Path, run: &str, kind: &str, message: &str) -> u64 {
+    let kind: onepipeline::channel::SurfaceKind = serde_json::from_value(json!(kind))
+        .unwrap_or_else(|refused| panic!("the engine refuses the kind {kind:?}: {refused}"));
+    onepipeline::verbs::surface(&run_paths(root, run), kind, message.to_owned())
+        .unwrap_or_else(|refused| panic!("the engine refused the surface: {refused}"))
+        .surface
+}
+
 #[test]
 fn healthz_answers_without_reading_run_storage() {
     // Deliberately over an *empty* root: liveness must answer whether or not
@@ -8203,12 +8292,12 @@ fn a_surface_of_a_kind_no_vocabulary_declares_is_served_as_the_host_raised_it() 
     let asked = Serving::start(|root| {
         fixture_run::write_launched(root, fixture_run::RUN_ID);
     });
-    let raised = http::post(
-        asked.address,
-        &format!("/api/v2/runs/{}/channel/surface", fixture_run::RUN_ID),
-        &json!({ "kind": SENTINEL_LOST, "message": "park or carry on?" }).to_string(),
+    engine_surface(
+        &asked.runs_root(),
+        fixture_run::RUN_ID,
+        SENTINEL_LOST,
+        "park or carry on?",
     );
-    assert_eq!(raised.status, 200, "{}", raised.body);
     let waiting = http::get(asked.address, "/api/v2/runs").json()["runs"][0].clone();
     assert_eq!(waiting["state"], json!("active"), "{waiting}");
     assert_eq!(waiting["unread_surfaces"], json!(1), "{waiting}");
@@ -12931,7 +13020,7 @@ fn a_run_holding_an_unanswered_question_is_waiting_and_the_row_says_how_many() {
     assert_eq!(row["liveness"], json!("PARKED"), "{row}");
     assert_eq!(row["unread_surfaces"], json!(0), "{row}");
 
-    // A blocking finding, raised through the channel's own reply — applied by
+    // A blocking finding, raised through the engine's own reply — applied by
     // the call itself, because nothing is driving the run — is a question
     // nobody has read.
     let asked = Serving::start_with_env(
@@ -12940,12 +13029,13 @@ fn a_run_holding_an_unanswered_question_is_waiting_and_the_row_says_how_many() {
         },
         quiet,
     );
-    let replied = http::post(
-        asked.address,
-        &format!("/api/v2/runs/{}/channel/reply", fixture_run::RUN_ID),
+    engine_reply(
+        &asked.runs_root(),
+        fixture_run::RUN_ID,
+        None,
         r#"{"version":3,"commands":[{"op":"finding","message":"which way?","blocking":true}]}"#,
-    );
-    assert_eq!(replied.status, 200, "{}", replied.body);
+    )
+    .expect("the engine applies the finding");
     // Quiet is counted in whole seconds past the threshold, so a run written
     // to this second is not yet quiet under a threshold of one.
     std::thread::sleep(Duration::from_millis(2_200));
@@ -12970,12 +13060,12 @@ fn a_run_holding_an_unanswered_question_is_waiting_and_the_row_says_how_many() {
         },
         quiet,
     );
-    let surfaced = http::post(
-        told.address,
-        &format!("/api/v2/runs/{}/channel/surface", fixture_run::RUN_ID),
-        r#"{"kind":"finding","message":"the gate is red"}"#,
+    engine_surface(
+        &told.runs_root(),
+        fixture_run::RUN_ID,
+        "finding",
+        "the gate is red",
     );
-    assert_eq!(surfaced.status, 200, "{}", surfaced.body);
     std::thread::sleep(Duration::from_millis(2_200));
     let row = http::get(told.address, "/api/v2/runs").json()["runs"][0].clone();
     assert_eq!(row["unread_surfaces"], json!(1), "{row}");
@@ -13077,9 +13167,8 @@ fn listing_a_run_that_predates_the_channel_makes_it_no_channel() {
 /// on through `run:<id>#<node>`, and `concurrent-acknowledged` for an override,
 /// whose holders now name the identity, run, node and covering dependency where
 /// the engine knew them. Neither is read by any typed reader here, so what this
-/// crate owes is that each reaches a reader as the engine wrote it — the new
-/// kind admitted by the filter grammar's globs, and the optional holder keys
-/// neither dropped where they are present nor invented where they are not.
+/// crate owes is that each reaches the timeline as the engine journalled it,
+/// the new kind admitted by the filter grammar's globs.
 #[test]
 fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     let serving = Serving::start(|root| {
@@ -13132,63 +13221,50 @@ fn a_launch_beside_a_live_holder_is_served_as_the_engine_journalled_it() {
     fixture_run::append(&dir, acknowledged_kind, acknowledged.clone());
     journal_schema::assert_conforms(&serving.runs_root());
 
-    let concurrent = urlencode(r#"{"include":[{"kind":"concurrent-*"}]}"#);
-    let read = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/next?filter={concurrent}"),
-        "",
-    );
-    assert_eq!(read.status, 200, "{}", read.body);
-    let read = read.json();
-    assert_enveloped(&read);
-    // A settled run with nothing raised: the read claims nothing.
-    assert_eq!(read["status"], json!("finished"), "{read}");
-    // `Value` equality is exact, so this fails on an attributed holder key the
-    // server dropped as on one it invented for the unattributed holder.
-    let served: Vec<(&str, &Value)> = read["events"]
-        .as_array()
-        .expect("the shaped events")
-        .iter()
-        .map(|event| {
-            (
-                event["kind"].as_str().unwrap_or_default(),
-                &event["payload"],
-            )
-        })
-        .collect();
+    // The run's timeline under a reader's glob lists both records, in the
+    // order the engine journalled them.
+    let kinds_under = |filter: &str| -> Vec<String> {
+        let read = http::get(
+            serving.address,
+            &format!(
+                "/api/v2/runs/{run}/timeline?scope=run&filter={}",
+                urlencode(filter)
+            ),
+        );
+        assert_eq!(read.status, 200, "{}", read.body);
+        let read = read.json();
+        assert_enveloped(&read);
+        events_on(&read)
+            .iter()
+            .filter_map(|event| event["kind"].as_str())
+            .filter(|kind| kind.starts_with("concurrent-"))
+            .map(str::to_owned)
+            .collect()
+    };
     assert_eq!(
-        served,
-        [
-            (deferred_kind, &deferred),
-            (acknowledged_kind, &acknowledged),
-        ],
-        "{read}"
+        kinds_under(r#"{"include":[{"kind":"concurrent-*"}]}"#),
+        [deferred_kind, acknowledged_kind]
     );
 
     // And the one record that went ahead on the dependency alone is still its
     // own kind to a reader excluding the override.
-    let deferred_only = urlencode(
-        &json!({
-            "include": [{ "kind": "concurrent-*" }],
-            "exclude": [{ "kind": acknowledged_kind }],
-        })
-        .to_string(),
+    assert_eq!(
+        kinds_under(
+            &json!({
+                "include": [{ "kind": "concurrent-*" }],
+                "exclude": [{ "kind": acknowledged_kind }],
+            })
+            .to_string()
+        ),
+        [deferred_kind]
     );
-    let narrowed = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/next?filter={deferred_only}"),
-        "",
-    )
-    .json();
-    assert_eq!(narrowed["events"], json!([read["events"][0]]), "{narrowed}");
 
     // A kind matcher with nothing in it names no kind, and is refused before the
     // run is read rather than read as admitting both.
     let empty = urlencode(r#"{"include":[{"kind":""}]}"#);
-    let refused = http::post(
+    let refused = http::get(
         serving.address,
-        &format!("/api/v2/runs/{run}/channel/next?filter={empty}"),
-        "",
+        &format!("/api/v2/runs/{run}/timeline?scope=run&filter={empty}"),
     );
     assert_eq!(refused.status, 422, "{}", refused.body);
     assert_eq!(refused.json()["error"]["code"], json!("invalid_request"));
@@ -13262,7 +13338,7 @@ fn a_journal_record_departing_from_its_kinds_schema_is_refused() {
 /// is new and nothing here reads the key, so what this crate owes is that a
 /// run carrying one is still read — its change noticed on the event route,
 /// the record listed on its node's timeline, its branch still the node's
-/// publication — and that the record reaches a reader with the key as written.
+/// publication.
 #[test]
 fn a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it() {
     let serving = Serving::start(|root| {
@@ -13304,7 +13380,7 @@ fn a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it(
         "vcs",
         kind,
         json!({ "run_id": run, "node": node }),
-        opened.clone(),
+        opened,
     );
 
     // The event route notices the run moved, rather than refusing the record.
@@ -13312,26 +13388,7 @@ fn a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it(
     assert_eq!(changed.event, "run.changed", "{}", changed.data);
     assert_eq!(changed.json()["run_id"], json!(run));
 
-    // The record as journalled, the conflict included, to a reader asking for it.
-    let only = urlencode(&json!({ "include": [{ "kind": kind }] }).to_string());
-    let read = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/next?filter={only}"),
-        "",
-    );
-    assert_eq!(read.status, 200, "{}", read.body);
-    let read = read.json();
-    assert_enveloped(&read);
-    let served: Vec<&Value> = read["events"]
-        .as_array()
-        .expect("the shaped events")
-        .iter()
-        .filter(|event| event["payload"]["conflict"].is_object())
-        .map(|event| &event["payload"])
-        .collect();
-    assert_eq!(served, [&opened], "{read}");
-
-    // And the timeline lists it on the node, and the run still reads.
+    // The timeline lists it on the node, and the run still reads.
     let timeline = http::get(
         serving.address,
         &format!("/api/v2/runs/{run}/timeline?scope=run"),
@@ -13348,649 +13405,36 @@ fn a_session_opened_on_a_conflicted_merge_is_served_as_the_engine_journalled_it(
     assert_eq!(detail.status, 200, "{}", detail.body);
 }
 
-#[test]
-fn the_channel_is_raised_read_and_claimed_over_http() {
-    let serving = Serving::start(|root| {
-        fixture_run::write(root, fixture_run::RUN_ID);
-        // A driver recorded on another host reads as live and quiet — `PARKED`,
-        // which is driven — so the settled run names one proved gone here.
-        fixture_run::driven_on_this_host(root, fixture_run::RUN_ID, 0x7FFF_FFF0);
-    });
-    let run = fixture_run::RUN_ID;
-
-    // Nothing raised yet: the queue is empty and a claim finds nothing — on a
-    // settled run, `finished`.
-    let empty = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
-    assert_enveloped(&empty);
-    assert_eq!(empty["run_id"], json!(run));
-    assert_eq!(empty["surfaces"], json!([]));
-    assert_eq!(empty["waiting"], json!([]));
-    assert_eq!(empty["held"], json!(null));
-    let nothing = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/next"),
-        "",
-    )
-    .json();
-    assert_eq!(nothing["status"], json!("finished"), "{nothing}");
-    assert_eq!(nothing["surface"], json!(null));
-
-    // A surface raised, in the engine's own words for it.
-    let raised = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/surface"),
-        r#"{"kind":"finding","message":"the gate is red"}"#,
-    );
-    assert_eq!(raised.status, 200, "{}", raised.body);
-    let raised = raised.json();
-    assert_enveloped(&raised);
-    assert_eq!(raised["state"], json!("queued"));
-    let id = raised["surface"].as_u64().expect("the surface's id");
-
-    // Read: it is waiting, and reading consumes nothing.
-    let queue = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
-    assert_eq!(queue["waiting"][0]["id"], json!(id), "{queue}");
-    assert_eq!(queue["waiting"][0]["kind"], json!("finding"));
-    assert_eq!(queue["waiting"][0]["message"], json!("the gate is red"));
-    assert_eq!(queue["waiting"][0]["blocking"], json!(false));
-    let again = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
-    assert_eq!(
-        again["waiting"], queue["waiting"],
-        "a read consumed a surface"
-    );
-
-    // Claimed: the channel's only consumer hands it out, shaped through the
-    // profile a reader named — the planner's, which is the decisions alone.
-    let claimed = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/next?filter=planner"),
-        "",
-    );
-    assert_eq!(claimed.status, 200, "{}", claimed.body);
-    let claimed = claimed.json();
-    assert_enveloped(&claimed);
-    assert_eq!(claimed["status"], json!("surface"));
-    assert_eq!(claimed["surface"]["id"], json!(id));
-    assert_eq!(claimed["surface"]["message"], json!("the gate is red"));
-    assert!(
-        claimed["events"]
-            .as_array()
-            .expect("the shaped events")
-            .iter()
-            .all(|event| event["source"] == json!("pipeline")),
-        "the planner profile admits the decision vocabulary alone: {claimed}"
-    );
-    // And the claim is journalled: the run's own record says it was surfaced.
-    let timeline = http::get(
-        serving.address,
-        &format!("/api/v2/runs/{run}/timeline?scope=run"),
-    )
-    .json();
-    assert!(
-        events_on(&timeline)
-            .iter()
-            .any(|event| event["kind"] == json!("planner-surfaced")
-                && event["surface"]["message"] == json!("the gate is red")),
-        "{timeline}"
-    );
-    // A finding holds nothing back, so a claim consumes it outright: raised,
-    // no longer waiting, and nothing in the pending slot.
-    let consumed = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
-    assert_eq!(consumed["surfaces"][0]["id"], json!(id), "{consumed}");
-    assert_eq!(consumed["waiting"], json!([]));
-    assert_eq!(consumed["held"], json!(null));
-
-    // A **blocking** finding — raised through the channel's own reply, which is
-    // where a surface that means to stop a subtree comes from — outlives its
-    // claim: it is held, pending, until somebody answers it.
-    let asked = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/reply"),
-        r#"{"version":3,"commands":[{"op":"finding","message":"which way?","blocking":true}]}"#,
-    );
-    assert_eq!(asked.status, 200, "{}", asked.body);
-    let waiting = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
-    assert_eq!(
-        waiting["waiting"][0]["message"],
-        json!("which way?"),
-        "{waiting}"
-    );
-    assert_eq!(waiting["waiting"][0]["blocking"], json!(true));
-    let claimed = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/next"),
-        "",
-    )
-    .json();
-    assert_eq!(claimed["status"], json!("surface"), "{claimed}");
-    assert_eq!(claimed["surface"]["message"], json!("which way?"));
-    let held = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
-    assert_eq!(held["held"]["message"], json!("which way?"), "{held}");
-    assert_eq!(held["waiting"], json!([]));
-
-    // The refusals a user can cause: a message with nothing in it, in the
-    // engine's words; a kind its grammar refuses; a body that is not the shape.
-    let blank = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/surface"),
-        r#"{"kind":"finding","message":"   "}"#,
-    );
-    assert_eq!(blank.status, 422, "{}", blank.body);
-    let blank = blank.json();
-    assert_eq!(blank["error"]["code"], json!("refused"));
-    assert!(
-        blank["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("carried nothing")),
-        "{blank}"
-    );
-    let unkind = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/surface"),
-        r#"{"kind":"Not A Kind","message":"hello"}"#,
-    );
-    assert_eq!(unkind.status, 422, "{}", unkind.body);
-    assert_eq!(unkind.json()["error"]["code"], json!("invalid_request"));
-    let shapeless = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/surface"),
-        "not json",
-    );
-    assert_eq!(shapeless.status, 422, "{}", shapeless.body);
-    assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
-    // A profile the run does not have, on the claim, is the same refusal the
-    // read routes make of it — before anything is claimed.
-    let unknown = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/next?filter=nobody"),
-        "",
-    );
-    assert_eq!(unknown.status, 404, "{}", unknown.body);
-    assert_eq!(
-        unknown.json()["error"]["code"],
-        json!("unknown_filter_profile")
-    );
-    // And a run that is not there, on every verb.
-    for (method, path) in [
-        (
-            "GET",
-            "/api/v2/runs/run-that-is-not-there/channel".to_owned(),
-        ),
-        (
-            "POST",
-            "/api/v2/runs/run-that-is-not-there/channel/next".to_owned(),
-        ),
-        (
-            "POST",
-            "/api/v2/runs/run-that-is-not-there/channel/surface".to_owned(),
-        ),
-    ] {
-        let absent = if method == "GET" {
-            http::get(serving.address, &path)
-        } else {
-            http::post(
-                serving.address,
-                &path,
-                r#"{"kind":"finding","message":"x"}"#,
-            )
-        };
-        assert_eq!(absent.status, 404, "{path}: {}", absent.body);
-        assert_eq!(
-            absent.json()["error"]["code"],
-            json!("run_not_found"),
-            "{path}"
-        );
-    }
-}
-
-#[test]
-fn a_reply_reaches_the_engine_byte_for_byte_and_is_answered_in_its_words() {
-    let serving = Serving::start(|root| {
-        fixture_run::write(root, fixture_run::RUN_ID);
-    });
-    let run = fixture_run::RUN_ID;
-    let reply = format!("/api/v2/runs/{run}/channel/reply");
-
-    // Malformed: the engine's own refusal text, not this server's reading of
-    // the body — which it never makes.
-    let malformed = http::post(serving.address, &reply, r#"{"nope":"#);
-    assert_eq!(malformed.status, 422, "{}", malformed.body);
-    let malformed = malformed.json();
-    assert_eq!(malformed["error"]["code"], json!("refused"));
-    assert!(
-        malformed["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("the reply is malformed")),
-        "{malformed}"
-    );
-
-    // An author the run's launch never declared, issuing an op: judged by the
-    // launch configuration inside the engine, and refused naming the author —
-    // which is the proof the author reached it unrewritten.
-    let ungranted = http::post(
-        serving.address,
-        &reply,
-        r###"{"version": 2, "author": "sentinel", "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done"}}]}"###,
-    );
-    assert_eq!(ungranted.status, 422, "{}", ungranted.body);
-    let ungranted = ungranted.json();
-    assert_eq!(ungranted["error"]["code"], json!("refused"));
-    assert!(
-        ungranted["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("sentinel")),
-        "the refusal names the author the body named: {ungranted}"
-    );
-
-    // A correlation that is not one, refused at the boundary — through the
-    // bus's own parser, whose words say what a correlation is.
-    let uncorrelated = http::post(
-        serving.address,
-        &format!("{reply}?correlation=not%20a%20token"),
-        r#"{"version": 2, "commands": []}"#,
-    );
-    assert_eq!(uncorrelated.status, 422, "{}", uncorrelated.body);
-    let uncorrelated = uncorrelated.json();
-    assert_eq!(uncorrelated["error"]["code"], json!("invalid_correlation"));
-    assert!(
-        uncorrelated["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("is not a correlation")),
-        "{uncorrelated}"
-    );
-
-    // A correlation the bus's parser accepts reaches the engine beside the
-    // bytes, and the engine rules on the pair: a correlation names the question
-    // a verdict answers, so an envelope carrying no verdict under one is the
-    // engine's refusal — in its words, naming the token it was handed, which is
-    // the proof the token reached it unchanged.
-    let correlated = http::post(
-        serving.address,
-        &format!("{reply}?correlation=c-0123456789abcdef0123456789abcdef"),
-        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done"}}]}"###,
-    );
-    assert_eq!(correlated.status, 422, "{}", correlated.body);
-    let correlated = correlated.json();
-    assert_eq!(correlated["error"]["code"], json!("refused"));
-    assert!(
-        correlated["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("c-0123456789abcdef0123456789abcdef")
-                && said.contains("carries no verdict")),
-        "{correlated}"
-    );
-
-    // An edit, applied by the reply itself because nothing is driving the run,
-    // answered with the receipt — and the omitted author is the planner, by the
-    // engine's own contract, as the record the edit left says.
-    let applied = http::post(
-        serving.address,
-        &reply,
-        r###"{"version": 2, "commands": [{"op": "add", "node": {"id": "extra", "persona": "engineer", "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done"}}]}"###,
-    );
-    assert_eq!(applied.status, 200, "{}", applied.body);
-    let applied = applied.json();
-    assert_enveloped(&applied);
-    assert_eq!(applied["run_id"], json!(run));
-    assert_eq!(applied["receipt"]["state"], json!("applied"), "{applied}");
-    assert_eq!(applied["receipt"]["commands"], json!("applied"));
-    assert_eq!(applied["receipt"]["reply"], json!(0));
-    assert_eq!(applied["advice"], json!([]));
-    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
-    assert!(
-        detail["graph"]["plan"]["tasks"]
-            .as_array()
-            .expect("the plan's tasks")
-            .iter()
-            .any(|task| task["id"] == json!("extra")),
-        "the edit reached the graph: {detail}"
-    );
-    let timeline = http::get(
-        serving.address,
-        &format!("/api/v2/runs/{run}/timeline?scope=run"),
-    )
-    .json();
-    let committed: Vec<Value> = events_on(&timeline)
-        .into_iter()
-        .filter(|event| event["kind"] == json!("edit-committed"))
-        .collect();
-    assert_eq!(committed.len(), 1, "{timeline}");
-    assert_eq!(
-        committed[0]["redirection"]["author"]
-            .as_str()
-            .or(committed[0]["author"].as_str()),
-        Some("planner"),
-        "an omitted author is the planner: {}",
-        committed[0]
-    );
-}
-
-/// **A reply from the browser is the user's words.** The route submits it
-/// through `verbs::reply_as(.., Provenance::User)`, so the linked engine
-/// journals its edit with provenance `user` whatever version the envelope is —
-/// and an envelope claiming the manager's words is refused `422` naming the
-/// field, with nothing queued and nothing applied: a person at the browser is
-/// the user.
-#[test]
-fn a_reply_through_the_route_is_journaled_as_the_users_and_a_body_claiming_the_managers_is_refused()
-{
-    let mut run_dir = std::path::PathBuf::new();
-    let serving = Serving::start(|root| {
-        run_dir = fixture_run::write(root, fixture_run::RUN_ID);
-    });
-    let run = fixture_run::RUN_ID;
-    let reply = format!("/api/v2/runs/{run}/channel/reply");
-    let journal_path = run_dir.join("events.jsonl");
-    let journal = || fs::read_to_string(&journal_path).expect("the run's journal");
-    let committed = || -> Vec<Value> {
-        journal()
-            .lines()
-            .map(|line| serde_json::from_str::<Value>(line).expect("a journal line"))
-            .filter(|event| event["kind"] == json!("edit-committed"))
-            .collect()
-    };
-    let add = |id: &str| {
-        json!({
-            "op": "add",
-            "node": {
-                "id": id,
-                "persona": "engineer",
-                "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done",
-            },
-        })
-    };
-
-    // Claiming the manager's words, on the envelope that carries the field.
-    let before = journal();
-    let claimed = http::post(
-        serving.address,
-        &reply,
-        &json!({"version": 4, "provenance": "manager", "commands": [add("claimed")]}).to_string(),
-    );
-    assert_eq!(claimed.status, 422, "{}", claimed.body);
-    let claimed = claimed.json();
-    assert_eq!(claimed["error"]["code"], json!("refused"), "{claimed}");
-    let said = claimed["error"]["message"].as_str().expect("the refusal");
-    assert!(
-        said.contains("provenance") && said.contains("Nothing was queued"),
-        "the refusal names the field: {said}"
-    );
-    assert_eq!(journal(), before, "a refused reply journals nothing");
-    let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
-    assert_eq!(channel["commands"], json!([]), "{channel}");
-    assert_eq!(channel["replies"], json!([]), "{channel}");
-
-    // Every version the engine reads, saying nothing of whose words, or saying
-    // the user's, is journaled as the user's.
-    for (version, stated, id) in [
-        (2, None, "from-v2"),
-        (3, None, "from-v3"),
-        (4, None, "from-v4"),
-        (4, Some("user"), "stated-user"),
-    ] {
-        let mut envelope = json!({"version": version, "commands": [add(id)]});
-        if let Some(stated) = stated {
-            envelope["provenance"] = json!(stated);
-        }
-        let applied = http::post(serving.address, &reply, &envelope.to_string());
-        assert_eq!(applied.status, 200, "{id}: {}", applied.body);
-        assert_eq!(applied.json()["receipt"]["state"], json!("applied"));
-    }
-    let parties: Vec<Value> = committed()
-        .iter()
-        .map(|event| event["payload"]["provenance"].clone())
-        .collect();
-    assert_eq!(parties, vec![json!("user"); 4], "{:?}", committed());
-}
-
-/// **A declined ruling is served with the engine's typed record.** A manager's
-/// note, sent through the real `onepipeline reply` with no `--as`, declined
-/// through the real `onepipeline decline-ruling`, is served by the channel
-/// route as one `declined-ruling` surface whose `declined_ruling` names every
-/// fact of it as the test declined it — so a reader takes the node, the
-/// reference, the party, the kind, the reply, the text and the reason from
-/// there rather than from the message.
-#[test]
-fn a_ruling_declined_through_the_cli_is_served_by_the_channel_with_its_typed_record() {
-    const NOTE: &str = "Keep the export under fifty lines.";
-    const REASON: &str = "The fixture already exceeds fifty lines.";
-    let serving = Serving::start(|root| {
-        fixture_run::write(root, fixture_run::RUN_ID);
-    });
-    let run = fixture_run::RUN_ID;
-    let root = serving.runs_root();
-    let files = tempfile::tempdir().expect("the CLI's input files");
-    let cli = |arguments: &[&str], input: Option<(&str, &str)>| -> Value {
-        let mut arguments = arguments.to_vec();
-        let path;
-        if let Some((name, text)) = input {
-            path = files.path().join(name);
-            fs::write(&path, text).expect("the CLI's input");
-            arguments.push(path.to_str().expect("a UTF-8 path"));
-        }
-        let output = sibling::run(&root, Some(fixture_run::SESSION), &arguments);
-        assert!(
-            output.status.success(),
-            "`onepipeline {}` refused: {}",
-            arguments.join(" "),
-            String::from_utf8_lossy(&output.stderr)
-        );
-        serde_json::from_slice(&output.stdout).unwrap_or(Value::Null)
-    };
-    let envelope = |commands: Value| json!({"version": 4, "commands": commands}).to_string();
-    cli(
-        &["reply", run],
-        Some((
-            "add.json",
-            &envelope(
-                json!([{"op": "add", "node": {"id": "export", "persona": "engineer",
-                "task": "## What\nExport it.\n\n## Acceptance criteria\n\n- it is exported"}}]),
-            ),
-        )),
-    );
-    let noted = cli(
-        &["reply", run],
-        Some((
-            "note.json",
-            &envelope(json!([{"op": "note", "id": "export", "addressee": "worker", "text": NOTE}])),
-        )),
-    );
-    let reply = noted["reply"].as_u64().expect("the note's envelope id");
-    let ruling = format!("c{reply}.0");
-    cli(
-        &["decline-ruling", run, "--ruling", &ruling],
-        Some(("reason.txt", REASON)),
-    );
-
-    let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
-    assert_eq!(channel.status, 200, "{}", channel.body);
-    let channel = channel.json();
-    let surfaces = channel["surfaces"].as_array().expect("the surfaces");
-    let declined: Vec<&Value> = surfaces
-        .iter()
-        .filter(|surface| surface["kind"] == json!("declined-ruling"))
-        .collect();
-    assert_eq!(declined.len(), 1, "{channel}");
-    let declined = declined[0];
-    assert_eq!(declined["blocking"], json!(false), "{declined}");
-    assert_eq!(declined["workstream"], json!("export"), "{declined}");
-    assert_eq!(
-        declined["declined_ruling"],
-        json!({
-            "node": "export",
-            "ruling": ruling,
-            "provenance": "manager",
-            "kind": "note",
-            "reply": reply,
-            "text": NOTE,
-            "reason": REASON,
-        }),
-        "{declined}"
-    );
-    // Every other surface serializes as it always did: without the record.
-    for other in surfaces
-        .iter()
-        .filter(|surface| surface["kind"] != json!("declined-ruling"))
-    {
-        assert!(other.get("declined_ruling").is_none(), "{other}");
-    }
-}
-
-/// **A ruling declined with its reason as one argument is served with it.** The
-/// linked engine's `decline-ruling` takes `--reason TEXT` — the form a caller
-/// that can pass only arguments uses, and the one the manager-ruling
-/// attribution it records now names — and the channel serves that decline's
-/// typed record with the reason as given. `--reason` beside a file is refused
-/// naming both, and records nothing the channel then serves.
-#[test]
-fn a_ruling_declined_with_its_reason_as_an_argument_is_served_with_it() {
-    const NOTE: &str = "Keep the export under fifty lines.";
-    const REASON: &str = "The fixture already exceeds fifty lines.";
-    let serving = Serving::start(|root| {
-        fixture_run::write(root, fixture_run::RUN_ID);
-    });
-    let run = fixture_run::RUN_ID;
-    let root = serving.runs_root();
-    let files = tempfile::tempdir().expect("the CLI's input files");
-    let cli = |arguments: &[&str]| sibling::run(&root, Some(fixture_run::SESSION), arguments);
-    let reply = |name: &str, commands: Value| -> Value {
-        let path = files.path().join(name);
-        fs::write(
-            &path,
-            json!({"version": 4, "commands": commands}).to_string(),
-        )
-        .expect("the envelope");
-        let output = cli(&["reply", run, path.to_str().expect("a UTF-8 path")]);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        serde_json::from_slice(&output.stdout).expect("the reply's receipt")
-    };
-    reply(
-        "add.json",
-        json!([{"op": "add", "node": {"id": "export", "persona": "engineer",
-        "task": "## What\nExport it.\n\n## Acceptance criteria\n\n- it is exported"}}]),
-    );
-    let noted = reply(
-        "note.json",
-        json!([{"op": "note", "id": "export", "addressee": "worker", "text": NOTE}]),
-    );
-    let ruling = format!(
-        "c{}.0",
-        noted["reply"].as_u64().expect("the note's envelope id")
-    );
-    let declined = || -> Vec<Value> {
-        let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
-        assert_eq!(channel.status, 200, "{}", channel.body);
-        channel.json()["surfaces"]
-            .as_array()
-            .expect("the surfaces")
-            .iter()
-            .filter(|surface| surface["kind"] == json!("declined-ruling"))
-            .cloned()
-            .collect()
-    };
-
-    let file = files.path().join("reason.txt");
-    fs::write(&file, REASON).expect("the reason file");
-    let both = cli(&[
-        "decline-ruling",
-        run,
-        "--ruling",
-        &ruling,
-        "--reason",
-        REASON,
-        file.to_str().expect("a UTF-8 path"),
-    ]);
-    assert!(
-        !both.status.success(),
-        "`--reason` beside a file was accepted"
-    );
-    let refusal = String::from_utf8_lossy(&both.stderr);
-    assert!(
-        refusal.contains("never both") && refusal.contains("reason.txt"),
-        "{refusal}"
-    );
-    assert!(declined().is_empty(), "{:?}", declined());
-
-    let output = cli(&[
-        "decline-ruling",
-        run,
-        "--ruling",
-        &ruling,
-        "--reason",
-        REASON,
-    ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let served = declined();
-    assert_eq!(served.len(), 1, "{served:?}");
-    assert_eq!(
-        served[0]["declined_ruling"]["ruling"],
-        json!(ruling),
-        "{served:?}"
-    );
-    assert_eq!(
-        served[0]["declined_ruling"]["reason"],
-        json!(REASON),
-        "{served:?}"
-    );
-    assert_eq!(
-        served[0]["declined_ruling"]["text"],
-        json!(NOTE),
-        "{served:?}"
-    );
-}
-
-/// The note op's newer fields and the op that takes a note back pass through
-/// the reply route as written, and are answered in the engine's words.
-///
 /// A note asking for the running turn to be left to end, bounded by a delivery
-/// timeout, is the linked engine's to judge: over a run nothing is driving it is
-/// carried to the node's next dispatch and recorded exactly as it was sent. A
-/// timeout no turn can meet, and a `withdraw-note` naming a note the run cannot
-/// take back, are refused by that engine naming what they said — which is the
-/// proof each field reached it unrewritten.
+/// timeout, sent through the engine's own reply over a run nothing is driving,
+/// is carried to the node's next dispatch — and the timeline serves that as the
+/// delivery it was, with no turn to speak of.
 #[test]
-fn a_turn_end_note_and_its_withdrawal_reach_the_engine_and_are_answered_in_its_words() {
+fn a_turn_end_note_carried_to_the_next_dispatch_is_served_as_the_delivery_it_was() {
     let serving = Serving::start(|root| {
         fixture_run::write(root, fixture_run::RUN_ID);
     });
     let run = fixture_run::RUN_ID;
-    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let root = serving.runs_root();
     let post = |commands: Value| {
-        http::post(
-            serving.address,
-            &reply,
+        engine_reply(
+            &root,
+            run,
+            None,
             &json!({ "version": 3, "commands": commands }).to_string(),
         )
     };
-    let refused = |commands: Value| {
-        let answered = post(commands);
-        assert_eq!(answered.status, 422, "{}", answered.body);
-        let answered = answered.json();
-        assert_eq!(answered["error"]["code"], json!("refused"), "{answered}");
-        answered["error"]["message"]
-            .as_str()
-            .expect("the engine's refusal")
-            .to_owned()
-    };
 
     // A node no dispatch has reached, for the note to be owed to.
-    let added = post(json!([{
+    post(json!([{
         "op": "add",
         "node": {
             "id": "extra",
             "persona": "engineer",
             "task": "## What\ndo more\n\n## Acceptance criteria\n\n- more is done",
         },
-    }]));
-    assert_eq!(added.status, 200, "{}", added.body);
+    }]))
+    .expect("the engine applies the add");
 
     let note = json!({
         "op": "note",
@@ -14000,10 +13444,7 @@ fn a_turn_end_note_and_its_withdrawal_reach_the_engine_and_are_answered_in_its_w
         "deliver": "turn-end",
         "delivery_timeout_seconds": 30,
     });
-    let noted = post(json!([note]));
-    assert_eq!(noted.status, 200, "{}", noted.body);
-    let noted = noted.json();
-    assert_enveloped(&noted);
+    let noted = post(json!([note])).expect("the engine applies the note");
     assert_eq!(noted["receipt"]["state"], json!("applied"), "{noted}");
     assert_eq!(noted["receipt"]["commands"], json!("applied"), "{noted}");
 
@@ -14034,70 +13475,24 @@ fn a_turn_end_note_and_its_withdrawal_reach_the_engine_and_are_answered_in_its_w
         "{}",
         carried[0]
     );
-    // And the edit the engine committed names the command exactly as posted,
-    // `deliver` and `delivery_timeout_seconds` included.
-    // A timeout no turn can meet is the engine's refusal, naming the field.
-    let zero = refused(json!([{
-        "op": "note",
-        "id": "extra",
-        "addressee": "worker",
-        "text": "x",
-        "deliver": "turn-end",
-        "delivery_timeout_seconds": 0,
-    }]));
-    assert!(zero.contains("`delivery_timeout_seconds` is 0"), "{zero}");
-
-    // Each part of a withdrawal reaches the engine as written: the envelope it
-    // names, the position, and the reason, each refused in its own words.
-    let withdraw = |envelope: &str, index: u32, reason: &str| {
-        refused(json!([{
-            "op": "withdraw-note",
-            "envelope": envelope,
-            "index": index,
-            "reason": reason,
-        }]))
-    };
-    let unnumbered = withdraw("the-last-one", 0, "superseded");
+    // A note nobody took back serves no withdrawal.
     assert!(
-        unnumbered.contains("withdraw-note: 'the-last-one' is not an envelope id"),
-        "{unnumbered}"
-    );
-    let unexplained = withdraw("0", 0, "  ");
-    assert!(
-        unexplained.contains("withdraw-note: `reason` is blank"),
-        "{unexplained}"
-    );
-    let unknown = withdraw("41", 0, "superseded");
-    assert!(
-        unknown.contains("withdraw-note: the run holds no envelope 41"),
-        "{unknown}"
-    );
-    // Nothing above was taken back: the carried note is still the run's only
-    // delivery of it, and no withdrawal was recorded.
-    let after = events_on(
-        &http::get(
-            serving.address,
-            &format!("/api/v2/runs/{run}/timeline?scope=run"),
-        )
-        .json(),
-    );
-    assert!(
-        !after
+        !events_on(&timeline)
             .iter()
             .any(|event| event["kind"] == json!("note-withdrawn")),
-        "{after:?}"
+        "{timeline}"
     );
 }
 
 /// A verdict naming a settled run's question is that question's ruling, and
 /// never the run asking to complete. A host raises its end-of-run question on
 /// the run's channel through the bus — non-blocking, because the run is not
-/// held on it — and listens for the answer under its correlation; a manager in
-/// the browser answers it with `{"completion": true, ...}` under that
-/// correlation. The engine this binary links delivers the ruling to the
-/// listener through the bus's binding and answers `delivered`, and writes no
-/// `completion-requested`: the run already closed, and a ruling on a question
-/// about it is not a request to close it again.
+/// held on it — and listens for the answer under its correlation; a manager
+/// answers it through the engine's own reply with `{"completion": true, ...}`
+/// under that correlation. The engine delivers the ruling to the listener
+/// through the bus's binding and answers `delivered`, and this server serves no
+/// `completion-requested` and the run as settled: the run already closed, and a
+/// ruling on a question about it is not a request to close it again.
 #[test]
 fn a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_completion() {
     use onemessagebus::{Answer, AskOptions, Config, Layouts, QueueName, TransportKinds};
@@ -14109,7 +13504,7 @@ fn a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_co
         fixture_run::write(root, fixture_run::RUN_ID);
     });
     let run = fixture_run::RUN_ID;
-    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let root = serving.runs_root();
     let state = || {
         http::get(serving.address, "/api/v2/runs?include_settled=true").json()["runs"][0]["state"]
             .clone()
@@ -14151,40 +13546,15 @@ fn a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_co
         .expect("the question is raised");
     let correlation = pending.correlation().to_string();
     let listener = std::thread::spawn(move || pending.wait(Duration::from_secs(60)));
-    let queue = http::get(serving.address, &format!("/api/v2/runs/{run}/channel")).json();
-    assert!(
-        queue["surfaces"]
-            .as_array()
-            .expect("the channel's surfaces")
-            .iter()
-            .any(|surface| surface["correlation"] == json!(correlation)
-                && surface["blocking"] == json!(false)),
-        "the question is not on the run's channel: {queue}"
-    );
 
-    // A correlation the run never raised is refused, with nothing delivered.
-    let unraised = http::post(
-        serving.address,
-        &format!("{reply}?correlation=c-0123456789abcdef0123456789abcdef"),
+    // The ruling, under the question's correlation, through the engine's reply.
+    let answered = engine_reply(
+        &root,
+        run,
+        Some(&correlation),
         r#"{"version":2,"completion":true,"reason":"the work is done"}"#,
-    );
-    assert_eq!(unraised.status, 422, "{}", unraised.body);
-    assert_eq!(unraised.json()["error"]["code"], json!("refused"));
-    assert!(
-        !listener.is_finished(),
-        "a refused reply reached the listener"
-    );
-
-    // The ruling, under the question's correlation.
-    let answered = http::post(
-        serving.address,
-        &format!("{reply}?correlation={correlation}"),
-        r#"{"version":2,"completion":true,"reason":"the work is done"}"#,
-    );
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let answered = answered.json();
-    assert_enveloped(&answered);
-    assert_eq!(answered["run_id"], json!(run));
+    )
+    .expect("the engine delivers the ruling");
     assert_eq!(
         answered["receipt"]["state"],
         json!("delivered"),
@@ -14222,29 +13592,15 @@ fn a_correlated_verdict_on_a_settled_run_reaches_its_listener_and_requests_no_co
     assert_eq!(state(), json!("settled"));
 }
 
+/// A ready human action the engine's own `attest` completed over a run nothing
+/// is driving is served done, with the attestation on the timeline.
 #[test]
 fn an_attestation_completes_a_ready_human_action() {
     let serving = Serving::start(|root| {
         fixture_run::write_live(root, fixture_run::RUN_ID);
     });
     let run = fixture_run::RUN_ID;
-    let attest = format!("/api/v2/runs/{run}/attest");
-
-    // A reference nothing is waiting on: the engine's refusal.
-    let unwaited = http::post(serving.address, &attest, r#"{"reference":"nobody-asked"}"#);
-    assert_eq!(unwaited.status, 422, "{}", unwaited.body);
-    let unwaited = unwaited.json();
-    assert_eq!(unwaited["error"]["code"], json!("refused"));
-    assert!(
-        unwaited["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("nobody-asked")),
-        "{unwaited}"
-    );
-    // And a body that is not the shape.
-    let shapeless = http::post(serving.address, &attest, r#"{"ref":"signoff"}"#);
-    assert_eq!(shapeless.status, 422, "{}", shapeless.body);
-    assert_eq!(shapeless.json()["error"]["code"], json!("invalid_request"));
+    let root = serving.runs_root();
 
     // The ready human action the live run holds, attested: the receipt, and
     // the decision gone from the graph.
@@ -14257,14 +13613,8 @@ fn an_attestation_completes_a_ready_human_action() {
             .any(|decision| decision["id"] == json!(fixture_run::SIGNOFF_NODE_ID)),
         "{before}"
     );
-    let attested = http::post(
-        serving.address,
-        &attest,
-        &json!({ "reference": fixture_run::SIGNOFF_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
-    let attested = attested.json();
-    assert_enveloped(&attested);
+    let attested = engine_attest(&root, run, fixture_run::SIGNOFF_NODE_ID)
+        .expect("the engine attests the ready action");
     assert_eq!(attested["receipt"]["state"], json!("applied"), "{attested}");
     // Applied by the call itself, because nothing is driving the run: the
     // engine's own fold now settles the action, and the run's record says who
@@ -14289,19 +13639,11 @@ fn an_attestation_completes_a_ready_human_action() {
             .any(|event| event["kind"] == json!("human-attested")),
         "{timeline}"
     );
-    // And attested twice is refused: nothing is waiting on it any more.
-    let again = http::post(
-        serving.address,
-        &attest,
-        &json!({ "reference": fixture_run::SIGNOFF_NODE_ID }).to_string(),
-    );
-    assert_eq!(again.status, 422, "{}", again.body);
-    assert_eq!(again.json()["error"]["code"], json!("refused"));
 }
 
 /// A human approval already waiting for its attestation can still be put
 /// behind more work. The engine this binary links takes a `reparent` of a
-/// waiting, unattested `kind: human` node through the reply route and clears
+/// waiting, unattested `kind: human` node through its own reply and clears
 /// its recorded wait, so the approval re-derives from its new prerequisites:
 /// behind a node nothing has started, the run's status no longer offers it for
 /// attestation, and an attestation of it is refused.
@@ -14311,7 +13653,7 @@ fn a_waiting_approval_reparented_onto_unfinished_work_is_no_longer_offered_for_a
         fixture_run::write_waiting_approval(root, fixture_run::RUN_ID, root);
     });
     let run = fixture_run::RUN_ID;
-    let reply = format!("/api/v2/runs/{run}/channel/reply");
+    let root = serving.runs_root();
     let status = || http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
     let signoff = fixture_run::APPROVAL_NODE_ID;
     let docs = fixture_run::UNSTARTED_NODE_ID;
@@ -14322,9 +13664,10 @@ fn a_waiting_approval_reparented_onto_unfinished_work_is_no_longer_offered_for_a
 
     // An attestation and a reparent of the same approval in one envelope is
     // refused whole, and the approval is left waiting as it was.
-    let both = http::post(
-        serving.address,
-        &reply,
+    let both = engine_reply(
+        &root,
+        run,
+        None,
         &json!({
             "version": 2,
             "commands": [
@@ -14333,32 +13676,24 @@ fn a_waiting_approval_reparented_onto_unfinished_work_is_no_longer_offered_for_a
             ],
         })
         .to_string(),
-    );
-    assert_eq!(both.status, 422, "{}", both.body);
-    let both = both.json();
-    assert_eq!(both["error"]["code"], json!("refused"));
-    assert!(
-        both["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("already started")),
-        "{both}"
-    );
+    )
+    .expect_err("the engine refuses the pair");
+    assert!(both.contains("already started"), "{both}");
     assert_eq!(status()["node_status"][signoff], json!("waiting"));
 
     // The reparent alone, onto the node nothing has started: applied by the reply
     // itself, because nothing is driving the run.
-    let reparented = http::post(
-        serving.address,
-        &reply,
+    let reparented = engine_reply(
+        &root,
+        run,
+        None,
         &json!({
             "version": 2,
             "commands": [{ "op": "reparent", "id": signoff, "deps": [docs] }],
         })
         .to_string(),
-    );
-    assert_eq!(reparented.status, 200, "{}", reparented.body);
-    let reparented = reparented.json();
-    assert_enveloped(&reparented);
+    )
+    .expect("the engine applies the reparent");
     assert_eq!(
         reparented["receipt"]["state"],
         json!("applied"),
@@ -14382,13 +13717,7 @@ fn a_waiting_approval_reparented_onto_unfinished_work_is_no_longer_offered_for_a
     assert_eq!(task["deps"], json!([docs]), "{task}");
 
     // So nothing is waiting on it to attest any more.
-    let attested = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": signoff }).to_string(),
-    );
-    assert_eq!(attested.status, 422, "{}", attested.body);
-    assert_eq!(attested.json()["error"]["code"], json!("refused"));
+    engine_attest(&root, run, signoff).expect_err("nothing waits on the approval");
     assert_eq!(status()["node_status"][signoff], json!("pending"));
 }
 
@@ -15051,7 +14380,7 @@ fn notes_awaiting_an_answer(state: &Path) -> usize {
     found
 }
 
-/// A note posted through the reply route into a run driven by the pinned CLI
+/// A note sent through the pinned CLI's `reply` into a run driven by the pinned CLI
 /// waits on the held turn it was offered to **without stopping the run**. The
 /// envelope is answered at hand-off with the note `queued`, and the engine
 /// delivers the note off the run's single writer, so while the turn has not
@@ -15141,9 +14470,10 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
 
     // A note naming a node the plan does not have is refused at once, and
     // offered to nothing.
-    let refused = http::post(
-        address,
-        &format!("/api/v2/runs/{run}/channel/reply"),
+    let refusal = engine_reply(
+        &root,
+        run,
+        None,
         &json!({
             "version": 2,
             "commands": [{
@@ -15152,16 +14482,9 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
             }],
         })
         .to_string(),
-    );
-    assert_eq!(refused.status, 422, "{}", refused.body);
-    let refusal = refused.json();
-    assert_eq!(refusal["error"]["code"], json!("refused"), "{refusal}");
-    assert!(
-        refusal["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("no node 'no-such-node'")),
-        "{refusal}"
-    );
+    )
+    .expect_err("a note to no node is refused");
+    assert!(refusal.contains("no node 'no-such-node'"), "{refusal}");
     assert_eq!(notes_awaiting_an_answer(&dir), 0);
 
     // The envelope is acknowledged with its note queued while delivery waits
@@ -15172,12 +14495,13 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "commands": [{ "op": "note", "id": node, "addressee": "worker", "deliver": "turn-end", "text": HELD_TURN_NOTE }],
     })
     .to_string();
+    let replying_root = root.clone();
     let reply = std::thread::spawn(move || {
-        http::post_within(
-            address,
-            &format!("/api/v2/runs/{run}/channel/reply"),
+        cli_reply(
+            &replying_root,
+            run,
             &envelope,
-            Duration::from_secs(150),
+            &[("ONEPIPELINE_REPLY_TIMEOUT_SECONDS", "120")],
         )
     });
     eventually("the note to wait in the conversation's spool", || {
@@ -15230,9 +14554,10 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
         "the queued note's reply to finish before the turn ends",
         || reply.is_finished(),
     );
-    let answered = reply.join().expect("the reply thread");
-    assert_eq!(answered.status, 200, "{}", answered.body);
-    let receipt = answered.json();
+    let receipt = reply
+        .join()
+        .expect("the reply thread")
+        .expect("the engine queues the note");
     assert_eq!(receipt["receipt"]["state"], json!("applied"), "{receipt}");
     assert_eq!(
         receipt["receipt"]["notes"][node],
@@ -15325,7 +14650,10 @@ fn a_note_waiting_on_an_adopted_runs_held_turn_leaves_the_run_journalling_and_li
     // And the envelope the driver claimed is answered rather than left claimed:
     // the channel holds no unclaimed command and one outcome, for that reply —
     // retaining its queued result after delivery, as #1094 requires.
-    let channel = http::get(address, &format!("/api/v2/runs/{run}/channel")).json();
+    let channel = serde_json::to_value(
+        onepipeline::verbs::channel(&run_paths(&root, run)).expect("the engine reads the queue"),
+    )
+    .expect("the queue serializes");
     assert_eq!(channel["commands"], json!([]), "{channel}");
     assert_eq!(
         channel["outcomes"],
@@ -15932,12 +15260,8 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
     drop(driver);
 
     // Attested, then adopted again: the second driver completes the graph.
-    let attested = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
+    engine_attest(&serving.runs_root(), run, fixture_run::APPROVAL_NODE_ID)
+        .expect("the engine attests the ready action");
     let second = serving.drive_fixture(run);
     let driver = RetainedDriver(second);
     eventually("the second driver completed the graph", || {
@@ -16392,12 +15716,8 @@ fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
         drop(driver);
     };
     let attest = |node: &str| {
-        let attested = http::post(
-            serving.address,
-            &format!("/api/v2/runs/{run}/attest"),
-            &json!({ "reference": node }).to_string(),
-        );
-        assert_eq!(attested.status, 200, "{}", attested.body);
+        engine_attest(&serving.runs_root(), run, node)
+            .expect("the engine attests the ready action");
     };
     let (approve, signoff) = (
         fixture_run::APPROVAL_NODE_ID,
@@ -16593,12 +15913,8 @@ fn an_adopted_run_writes_back_member_scoped_projections_and_keeps_its_landed_bas
     );
 
     // Attested, then adopted again: the second driver completes the graph.
-    let attested = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
+    engine_attest(&serving.runs_root(), run, fixture_run::APPROVAL_NODE_ID)
+        .expect("the engine attests the ready action");
     let second = serving.drive_fixture(run);
     let driver = RetainedDriver(second);
     eventually("the second driver was reaped", || !process_is_live(second));
@@ -16988,12 +16304,8 @@ fn an_adoption_of_a_run_launched_with_a_template_root_and_require_rendered_dispa
             ("XDG_STATE_HOME", &state.display().to_string()),
         ],
     );
-    let attested = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
+    engine_attest(&serving.runs_root(), &run, fixture_run::APPROVAL_NODE_ID)
+        .expect("the engine attests the ready action");
     let pid = serving.drive_fixture(run.as_str());
     let driver = RetainedDriver(pid);
 
@@ -17259,12 +16571,8 @@ fn an_adopted_run_settles_a_store_copied_plan_launched_under_the_rendered_only_c
         "{}",
         detail()["graph"]
     );
-    let attested = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
+    engine_attest(&serving.runs_root(), &run, fixture_run::APPROVAL_NODE_ID)
+        .expect("the engine attests the ready action");
     let pid = serving.drive_fixture(run.as_str());
     let driver = RetainedDriver(pid);
 
@@ -17441,18 +16749,10 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
     );
     assert_eq!(served_statuses(), waiting, "{}", detail()["graph"]);
 
-    let premature = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": SIGNOFF }).to_string(),
-    );
-    assert_eq!(premature.status, 422, "{}", premature.body);
-    let premature = premature.json();
-    assert_eq!(premature["error"]["code"], json!("refused"), "{premature}");
+    let premature = engine_attest(&serving.runs_root(), &run, SIGNOFF)
+        .expect_err("the sign-off is not ready to attest");
     assert!(
-        premature["error"]["message"]
-            .as_str()
-            .is_some_and(|said| said.contains("is not a ready, waiting human action")),
+        premature.contains("is not a ready, waiting human action"),
         "{premature}"
     );
     assert_eq!(served_statuses(), waiting);
@@ -17567,12 +16867,8 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
     fs::write(&path, &poisoned).expect("the board edit");
     let serving = Serving::start_in_as_with_env(workspace, fixture_run::SESSION, &[]);
     let detail_path = format!("/api/v2/runs/{run}");
-    let premature = http::post(
-        serving.address,
-        &format!("{detail_path}/attest"),
-        &json!({"reference": "missing-node"}).to_string(),
-    );
-    assert_eq!(premature.status, 422, "{}", premature.body);
+    engine_attest(&serving.runs_root(), &run, "missing-node")
+        .expect_err("nothing waits on a node the run does not have");
     assert_eq!(
         http::get(serving.address, &detail_path).json()["graph"]["node_status"]
             [fixture_run::APPROVAL_NODE_ID],
@@ -18300,19 +17596,6 @@ fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it
         })],
         "{events:?}"
     );
-
-    let channel = http::get(serving.address, &format!("/api/v2/runs/{run}/channel"));
-    assert_eq!(channel.status, 200, "{}", channel.body);
-    let channel = channel.json();
-    let waiting: Vec<&Value> = channel["waiting"]
-        .as_array()
-        .expect("the waiting surfaces")
-        .iter()
-        .filter(|surface| surface["kind"] == json!("provisioning-failed"))
-        .collect();
-    assert_eq!(waiting.len(), 1, "{channel}");
-    assert_eq!(waiting[0]["message"], json!(message));
-    assert_eq!(waiting[0]["blocking"], json!(false));
     drop(driver);
     serving.stop_on(Stop::Terminate);
 }
@@ -18325,8 +17608,8 @@ fn a_node_whose_worktree_provisioning_failed_is_served_as_the_engine_recorded_it
 /// The launch is the pinned engine's own `start --bus-config` over a real
 /// `local-md` store, and the hook is a real command on the channel's `replies`
 /// queue: it drops any envelope carrying [`HOOK_DROPS`] and prints every other
-/// back unchanged. The server's own linked engine runs that hook on each reply
-/// it is handed, so a dropped envelope answers the engine's own `dropped`
+/// back unchanged. The linked engine's own reply runs that hook on each
+/// envelope it is handed, so a dropped envelope answers the engine's own `dropped`
 /// receipt with nothing applied, and a kept one settles the node; the retained
 /// driver then settles the run. The plan, the node statuses and the settlement
 /// the server answers are each held to the records the engine wrote.
@@ -18449,13 +17732,8 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
     assert_eq!(launched["graph"]["node_status"][node], json!("waiting"));
 
     let reply = |envelope: Value| {
-        let answered = http::post(
-            serving.address,
-            &format!("{detail_path}/channel/reply"),
-            &envelope.to_string(),
-        );
-        assert_eq!(answered.status, 200, "{}", answered.body);
-        answered.json()
+        engine_reply(&serving.runs_root(), &run, None, &envelope.to_string())
+            .expect("the engine answers the reply")
     };
     let settle = |evidence: &str| {
         json!({"version": 2, "commands": [{
@@ -18467,7 +17745,6 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
     // one, the bus's drop log holds what the hook dropped, and nothing reached
     // the run — no command queued, no edit committed, the node still waiting.
     let dropped = reply(settle(HOOK_DROPS));
-    assert_eq!(dropped["run_id"], json!(run));
     assert_eq!(
         dropped["receipt"],
         json!({ "reply": 0, "state": "dropped", "commands": "dropped" }),
@@ -18550,9 +17827,7 @@ const VALIDATORS_RUN: &str = "nx-heal-removal-revise";
 /// The linked engine no longer runs validators, so it reads such a record with
 /// the key set aside: the plan, the node's status, its settlement and the run's
 /// state are each held to the recorded files, and reading them leaves the
-/// launch record byte for byte as it was written. What it cannot do is judge an
-/// offer the way the run was launched to, so a reply handed to the run is
-/// refused in the engine's own words, and the run's channel holds nothing.
+/// launch record byte for byte as it was written.
 #[test]
 fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
     let recorded = Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -18659,33 +17934,6 @@ fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
         read_recorded("launch.json"),
         "reading the run rewrote its launch record"
     );
-
-    let refused = http::post(
-        serving.address,
-        &format!("{detail_path}/channel/reply"),
-        &json!({"version": 2, "commands": [
-            {"op": "finding", "message": "the run is worth a second look"}
-        ]})
-        .to_string(),
-    );
-    assert_eq!(refused.status, 422, "{}", refused.body);
-    let refused = refused.json();
-    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
-    let message = refused["error"]["message"].as_str().expect("a message");
-    for said in [
-        "launched with onemessagebus validators",
-        "this engine no longer runs",
-        "let the run settle, or stop it",
-    ] {
-        assert!(
-            message.contains(said),
-            "not refused saying {said:?}: {message}"
-        );
-    }
-    assert!(
-        !run_dir.join("channel").join("replies.jsonl").exists(),
-        "a refused reply reached the run's channel"
-    );
 }
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
@@ -18779,7 +18027,7 @@ fn dispatched_tasks(records: &Path) -> Vec<String> {
 /// this server's routes over a plan spanning a private and a public repository
 /// of one synthetic owner.
 ///
-/// A live edit relayed by the reply route that gives the public repository an
+/// A live edit sent through the engine's own reply that gives the public repository an
 /// ordinary dependency on the private node is refused in the engine's own
 /// neutral words, naming no node, and leaves the graph as it was. The adoption
 /// that follows dispatches both nodes through the pinned CLI driver:
@@ -18795,8 +18043,8 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
     let repos = scratch_repo::seed_boundary(&dir);
     let records = dir.join("dispatches");
     // llmlint: ignore[e2e_not_mocked] the harness program is the one process this
-    // journey stands in for, on the terms `write_harness_standin` states. The reply
-    // route, the pinned CLI driver, the engine's boundary, and the linked
+    // journey stands in for, on the terms `write_harness_standin` states. The engine's
+    // reply, the pinned CLI driver, the engine's boundary, and the linked
     // `onevcs` keeping, exporting and publishing over real git are all real; the
     // stand-in only commits the work a real agent would leave.
     let standin = write_exporting_harness_standin(&dir, &records);
@@ -18855,17 +18103,8 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
         "task": "Ship outer.\n\n## Acceptance criteria\n\n- outer is published.\n",
         "deps": [producer],
     }}]});
-    let refused = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/reply"),
-        &ordinary.to_string(),
-    );
-    assert_eq!(refused.status, 422, "{}", refused.body);
-    let refused = refused.json();
-    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
-    let said = refused["error"]["message"]
-        .as_str()
-        .expect("the refusal's words");
+    let said = engine_reply(&serving.runs_root(), run, None, &ordinary.to_string())
+        .expect_err("the engine refuses the ordinary dependency");
     assert!(said.contains("ordinary dependency"), "{said}");
     assert!(
         said.contains("generalize -> preserve -> export -> consume"),
@@ -18901,7 +18140,7 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
 /// A **private coordinating** plan — a `local-md` project classified private,
 /// holding the whole graph and its export edge, whose tasks state no visibility
 /// of their own — launched by the released `start` this crate pins, attested
-/// through this server and adopted through the pinned CLI, keeps its public task
+/// through the engine's own verb and adopted through the pinned CLI, keeps its public task
 /// public and hands it only the export.
 ///
 /// The engine this binary links classifies each task by its own declaration and
@@ -18910,9 +18149,9 @@ fn an_adopted_mixed_run_refuses_a_private_to_public_edge_and_hands_its_consumer_
 /// repository, as private — which no export consumer may be — and refused the
 /// launch, so a coordinating plan could never carry a public task at all. Here
 /// the served plan carries no classification for the consumer; a live edit relayed
-/// through this server's reply route is refused by the server's own linked engine
+/// through the engine's own reply is refused by the linked engine
 /// with the coordination guidance that engine documents; and after the attest
-/// route releases the approval and the adoption drives the run, the export reached
+/// verb releases the approval and the adoption drives the run, the export reached
 /// the public origin and nothing private did.
 #[cfg(unix)]
 #[test]
@@ -18920,7 +18159,7 @@ fn an_adopted_private_coordination_run_keeps_its_public_task_public_and_hands_it
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     let records = dir.join("dispatches");
-    // llmlint: ignore-block[e2e_not_mocked] two third-party boundaries are doubled here and nothing else: `seed_boundary`'s refusing `gh`, because asking a real forge about a synthetic owner is a third-party host call no journey may make, and the harness program, on the terms `write_harness_standin` states, because a real one bills a model provider. The store, the released `start`, the reply and attest routes, the pinned CLI driver, the engine's boundary, and the linked `onevcs` keeping, exporting and publishing over real git are all real; the stand-in only commits the work a real agent would leave.
+    // llmlint: ignore-block[e2e_not_mocked] two third-party boundaries are doubled here and nothing else: `seed_boundary`'s refusing `gh`, because asking a real forge about a synthetic owner is a third-party host call no journey may make, and the harness program, on the terms `write_harness_standin` states, because a real one bills a model provider. The store, the released `start`, the engine's reply and attest, the pinned CLI driver, the engine's boundary, and the linked `onevcs` keeping, exporting and publishing over real git are all real; the stand-in only commits the work a real agent would leave.
     let repos = scratch_repo::seed_boundary(&dir);
     let standin = write_exporting_harness_standin(&dir, &records);
     // llmlint: ignore-end[e2e_not_mocked]
@@ -19041,17 +18280,8 @@ fn an_adopted_private_coordination_run_keeps_its_public_task_public_and_hands_it
         "task": "Ship outer.\n\n## Acceptance criteria\n\n- outer is published.\n",
         "deps": [producer],
     }}]});
-    let refused = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/channel/reply"),
-        &ordinary.to_string(),
-    );
-    assert_eq!(refused.status, 422, "{}", refused.body);
-    let refused = refused.json();
-    assert_eq!(refused["error"]["code"], json!("refused"), "{refused}");
-    let said = refused["error"]["message"]
-        .as_str()
-        .expect("the refusal's words");
+    let said = engine_reply(&serving.runs_root(), &run, None, &ordinary.to_string())
+        .expect_err("the engine refuses the ordinary dependency");
     assert!(
         said.contains(
             "inside one private coordinating plan whose tasks each keep their own visibility"
@@ -19073,12 +18303,8 @@ fn an_adopted_private_coordination_run_keeps_its_public_task_public_and_hands_it
         "a refused edit changed the graph"
     );
 
-    let attested = http::post(
-        serving.address,
-        &format!("/api/v2/runs/{run}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
+    engine_attest(&serving.runs_root(), &run, fixture_run::APPROVAL_NODE_ID)
+        .expect("the engine attests the ready action");
     let driver = RetainedDriver(serving.drive_fixture(&run));
     eventually("both nodes of the coordination run settled", || {
         let graph = &detail()["graph"];
@@ -19551,8 +18777,7 @@ fn write_config_for(dir: &Path, name: &str, log: &Path) -> PathBuf {
 // oneharness history is under the journey's own state directory.
 #[cfg(unix)]
 #[test]
-fn graph_override_edits_relayed_by_the_reply_route_are_served_and_invalid_edits_leave_them_unchanged(
-) {
+fn graph_override_edits_the_engine_applied_are_served_and_invalid_edits_leave_them_unchanged() {
     let (workspace, root) = fixture_run::workspace();
     let dir = workspace.path().to_path_buf();
     let log = dir.join("harness.log");
@@ -19595,28 +18820,32 @@ fn graph_override_edits_relayed_by_the_reply_route_are_served_and_invalid_edits_
             ("XDG_STATE_HOME", &state.display().to_string()),
         ],
     );
-    let reply_route = format!("/api/v2/runs/{run}/channel/reply");
-    let reply = |envelope: &str| http::post(serving.address, &reply_route, envelope);
+    // Through the pinned CLI's `reply`, in the environment the server was given.
+    let (project_dir, state_home) = (dir.display().to_string(), state.display().to_string());
+    let reply = |envelope: &str| {
+        cli_reply(
+            &root,
+            run,
+            envelope,
+            &[
+                ("ONEPIPELINE_PROJECT_DIR", &project_dir),
+                ("XDG_STATE_HOME", &state_home),
+            ],
+        )
+    };
     let applied = |envelope: &str| {
-        let answered = reply(envelope);
-        assert_eq!(answered.status, 200, "{envelope}: {}", answered.body);
+        let answered = reply(envelope).unwrap_or_else(|said| panic!("{envelope}: {said}"));
         assert_eq!(
-            answered.json()["receipt"]["commands"],
+            answered["receipt"]["commands"],
             json!("applied"),
-            "{envelope}: {}",
-            answered.body
+            "{envelope}: {answered}"
         );
     };
     let refused = |envelope: &str, words: &str| {
-        let answered = reply(envelope);
-        assert_eq!(answered.status, 422, "{envelope}: {}", answered.body);
-        let answered = answered.json();
-        assert_eq!(answered["error"]["code"], json!("refused"), "{answered}");
+        let said = reply(envelope).expect_err("the engine refuses the edit");
         assert!(
-            answered["error"]["message"]
-                .as_str()
-                .is_some_and(|said| said.contains(words)),
-            "the refusal is the engine's, naming {words:?}: {answered}"
+            said.contains(words),
+            "the refusal is the engine's, naming {words:?}: {said}"
         );
     };
     let graph_of =
@@ -19639,10 +18868,9 @@ fn graph_override_edits_relayed_by_the_reply_route_are_served_and_invalid_edits_
             .cloned()
     };
 
-    // Nothing is driving the run, so each reply is applied by the call itself —
-    // byte for byte as sent, with a space and a newline the engine reads past
-    // and this server never re-encodes. A run-wide list replaced twice, and each
-    // node's own list replaced: one given an entry, one cleared with `[]`.
+    // Nothing is driving the run, so each reply is applied by the call itself.
+    // A run-wide list replaced twice, and each node's own list replaced: one
+    // given an entry, one cleared with `[]`.
     applied(&format!(
         "{{\"version\": 3, \"commands\": [{{\"op\": \"set-run-node-sets\", \"sets\": [{:?}]}}]}}\n",
         set(&stale)
@@ -20273,9 +19501,13 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
 
     // A mistyped run id is refused before anything is adopted.
 
-    let settled = http::post(serving.address, &format!("{detail_path}/channel/reply"),
-        &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string());
-    assert_eq!(settled.status, 200, "{}", settled.body);
+    cli_reply(
+        &serving.runs_root(),
+        run,
+        &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string(),
+        &[("CACHE_BOARD_TOKEN", board.token.as_str())],
+    )
+    .expect("the engine applies the settlement");
     let before_adoption = board.state()["requests"]
         .as_array()
         .expect("requests")
@@ -20548,9 +19780,13 @@ fn an_adopted_run_moves_the_card_of_its_plans_completed_task_to_done() {
     assert_eq!(grouped.status, 200, "{}", grouped.body);
     assert_eq!(grouped.json()["project"], json!("board:plan"));
 
-    let settled = http::post(serving.address, &format!("{detail_path}/channel/reply"),
-        &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string());
-    assert_eq!(settled.status, 200, "{}", settled.body);
+    cli_reply(
+        &serving.runs_root(),
+        run,
+        &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string(),
+        &[("CACHE_BOARD_TOKEN", board.token.as_str())],
+    )
+    .expect("the engine applies the settlement");
     let pid = serving.drive_fixture(run);
     let driver = RetainedDriver(pid);
     eventually("the adopted engine settled the plan", || {
@@ -20738,7 +19974,7 @@ fn an_adopted_run_that_settles_marks_its_plans_home_done() {
     let repos = scratch_repo::seed_boundary(&dir);
     let service = &repos.private;
     let log = dir.join("harness.log");
-    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the reply route, the pinned CLI driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only waits or commits what an agent would.
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the engine's reply, the pinned CLI driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only waits or commits what an agent would.
     let standin = write_held_once_harness_standin(&dir, &log);
     // llmlint: ignore-end[e2e_not_mocked]
     write_extending_config(&dir, &standin);
@@ -22114,6 +21350,84 @@ fn harness_timeline_metadata_uses_typed_records_and_recovers_from_unreadable_bou
         }
     }
 }
+
+/// The channel routes and the attestation route are gone with the browser
+/// controls that were their only client: each is a path no route owns, answered
+/// the error contract's `404 no_such_route` for a run that is there, and the
+/// `channel` subscription view is an unknown one, `400 invalid_subscription`.
+/// Nothing any of them asked for reaches the run.
+#[test]
+fn the_channel_and_attest_routes_are_paths_no_route_owns() {
+    let serving = Serving::start(|root| {
+        fixture_run::write_live(root, fixture_run::RUN_ID);
+    });
+    let run = fixture_run::RUN_ID;
+    let journal = serving.run_dir(run).join("events.jsonl");
+    let before = fs::read_to_string(&journal).expect("the run's journal");
+    for (method, suffix, body) in [
+        ("GET", "channel", ""),
+        ("POST", "channel/next", ""),
+        (
+            "POST",
+            "channel/reply",
+            r#"{"version":3,"commands":[{"op":"finding","message":"which way?","blocking":true}]}"#,
+        ),
+        (
+            "POST",
+            "channel/surface",
+            r#"{"kind":"finding","message":"the gate is red"}"#,
+        ),
+        (
+            "POST",
+            "attest",
+            &json!({ "reference": fixture_run::SIGNOFF_NODE_ID }).to_string(),
+        ),
+    ] {
+        let path = format!("/api/v2/runs/{run}/{suffix}");
+        let answer = if method == "GET" {
+            http::get(serving.address, &path)
+        } else {
+            http::post(serving.address, &path, body)
+        };
+        assert_eq!(answer.status, 404, "{method} {path}: {}", answer.body);
+        assert_eq!(
+            answer.json()["error"]["code"],
+            json!("no_such_route"),
+            "{method} {path}: {}",
+            answer.body
+        );
+    }
+    let subscribed = http::post(
+        serving.address,
+        "/api/v2/subscriptions",
+        &json!({ "view": { "type": "channel", "run_id": run } }).to_string(),
+    );
+    assert_eq!(subscribed.status, 400, "{}", subscribed.body);
+    let refused = subscribed.json();
+    assert_eq!(
+        refused["error"]["code"],
+        json!("invalid_subscription"),
+        "{refused}"
+    );
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .is_some_and(|said| said.contains("\"channel\"")),
+        "the refusal names the view it does not know: {refused}"
+    );
+    assert_eq!(
+        fs::read_to_string(&journal).expect("the run's journal"),
+        before,
+        "a removed route wrote to the run"
+    );
+    let status = http::get(serving.address, &format!("/api/v2/runs/{run}/status")).json();
+    assert_ne!(
+        status["node_status"][fixture_run::SIGNOFF_NODE_ID],
+        json!("done"),
+        "a removed route attested the ready action: {status}"
+    );
+}
+
 #[test]
 fn browser_supervision_is_removed_and_shutdown_is_host_only() {
     let serving = Serving::start_as(
@@ -22308,12 +21622,10 @@ fn no_route_starts_adopts_or_drives_a_run() {
                 http::get(serving.address, &path);
             }
             routes::Method::Post => {
-                let body = match route.path {
-                    routes::RUN_ATTEST => {
-                        json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string()
-                    }
-                    routes::SUBSCRIPTIONS => json!({ "run": run }).to_string(),
-                    _ => "{}".to_owned(),
+                let body = if route.path == routes::SUBSCRIPTIONS {
+                    json!({ "run": run }).to_string()
+                } else {
+                    "{}".to_owned()
                 };
                 http::post(serving.address, &path, &body);
             }
@@ -22370,7 +21682,7 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
     let repos = scratch_repo::seed_boundary(&dir);
     let service = &repos.private;
     let log = dir.join("harness.log");
-    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the attest route, the pinned CLI driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only commits what an agent would.
+    // llmlint: ignore-block[e2e_not_mocked] the harness program is the one process this journey stands in for, on the terms `write_harness_standin` states. The launch, the engine's attest, the pinned CLI driver, the linked `onevcs` cutting and landing the session over real git, and the linked store reading and writing the loopback board over HTTP are all real; the stand-in only commits what an agent would.
     let standin = write_closing_harness_standin(&dir, &log);
     // llmlint: ignore-end[e2e_not_mocked]
     write_extending_config(&dir, &standin);
@@ -22512,12 +21824,8 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
     );
     assert!(!log.exists(), "the launch dispatched the node");
 
-    let attested = http::post(
-        serving.address,
-        &format!("{detail_path}/attest"),
-        &json!({ "reference": fixture_run::APPROVAL_NODE_ID }).to_string(),
-    );
-    assert_eq!(attested.status, 200, "{}", attested.body);
+    engine_attest(&serving.runs_root(), &run, fixture_run::APPROVAL_NODE_ID)
+        .expect("the engine attests the ready action");
     let pid = serving.drive_fixture(run.as_str());
     let driver = RetainedDriver(pid);
     eventually("the adopted run's node settled", || {
@@ -22780,26 +22088,6 @@ fn check_visibility_records_reach_every_event_reading_and_the_node_checks() {
         }
     }
     let only_attention = urlencode(r#"{"include":[{"significance":"attention"}]}"#);
-    let next = http::post(
-        serving.address,
-        &format!("{base}/channel/next?filter={only_attention}"),
-        "",
-    );
-    assert_eq!(next.status, 200, "{}", next.body);
-    let next = next.json();
-    let events = next["events"].as_array().expect("attention events");
-    for record in records
-        .iter()
-        .filter(|record| record["kind"] == "change-check")
-    {
-        assert!(
-            events
-                .iter()
-                .any(|event| event["payload"] == record["payload"]
-                    && event["labels"]["significance"] == "attention"),
-            "{next}"
-        );
-    }
     let mut stream = http::stream(
         serving.address,
         &format!(

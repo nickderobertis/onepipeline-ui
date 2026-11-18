@@ -185,7 +185,7 @@ anything new here is a proposal to make upstream first.
 ## The server acts as one launching session, and writes to runs
 
 `onepipeline-api serve --session ID` (else `ONEPIPELINE_LAUNCHER_SESSION`, else
-unattributed) is the identity every stop and channel write is judged by.
+unattributed) is the identity every stop is judged by.
 The SDK's listing reads a run's channel under `ONEPIPELINE_RUNS_DIR`, and its
 advice reads `ONEPIPELINE_LAUNCHER_SESSION`, so `serve` exports both from
 `--runs-root` and the resolved session before serving requests. Run driving

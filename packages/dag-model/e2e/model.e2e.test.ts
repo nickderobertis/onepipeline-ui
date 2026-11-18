@@ -2,8 +2,6 @@ import { readFile } from "node:fs/promises";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- This verifies the package export as a consumer uses it.
 import {
   applyPatch,
-  channelNextSchema,
-  channelQueueSchema,
   conversationSchema,
   conversationTurnSchema,
   dagConversationSchema,
@@ -23,13 +21,8 @@ import {
   planTaskSchema,
   projectDetailSchema,
   projectListSchema,
-  REPLY_ENVELOPE_VERSION,
-  REPLY_OPS,
   renderedRootSchema,
   renderedRunSchema,
-  replyCommandSchema,
-  replyEnvelopeSchema,
-  replyReceiptSchema,
   runConversationsSchema,
   runDetailSchema,
   runStatusSchema,
@@ -43,7 +36,6 @@ import {
   stoppedSchema,
   subscribedSchema,
   subscriptionFrameSchema,
-  surfacedSchema,
   TELEMETRY_SCHEMA_VERSION,
   TIMELINE_SCHEMA_VERSION,
   unwatchedSchema,
@@ -903,29 +895,6 @@ test("the projects and every wrapped verb this repository serves parse through t
     }).projects[0]?.project,
   ).toBeNull();
 
-  // The channel, read and consumed, and what a reply and an attest come back as.
-  const queue = channelQueueSchema.parse(await served("run-channel.json"));
-  expect(queue.held).toBeNull();
-  expect(queue.surfaces).toEqual([]);
-  const next = channelNextSchema.parse(await served("run-channel-next.json"));
-  expect(next.status).toBe("surface");
-  expect(next.surface?.kind).toBe("finding");
-  expect(next.surface?.blocking).toBe(false);
-  const receipt = replyReceiptSchema.parse(
-    await served("run-channel-reply.json"),
-  );
-  expect(receipt.receipt.state).toBe("applied");
-  expect(receipt.receipt.commands).toBe("applied");
-  expect(receipt.receipt.verdict).toBeUndefined();
-  expect(receipt.advice).toEqual([]);
-  expect(
-    replyReceiptSchema.parse(await served("run-attest.json")).receipt,
-  ).toEqual(receipt.receipt);
-  const surfaced = surfacedSchema.parse(
-    await served("run-channel-surface.json"),
-  );
-  expect(surfaced.state).toBe("queued");
-
   const stopped = stoppedSchema.parse(await served("run-stop.json"));
   expect(stopped).toMatchObject({
     stopped: true,
@@ -966,216 +935,6 @@ test("the projects and every wrapped verb this repository serves parse through t
     await served("run-telemetry.json"),
   );
   expect(telemetry.telemetry.schema_version).toBe(2);
-});
-
-test("a reply envelope composed against the engine's grammar carries what the engine reads, and nothing else", () => {
-  // A verdict alone needs no version; an edit envelope names the one the engine
-  // reads, and every op the engine declares is one the grammar spells.
-  expect(
-    replyEnvelopeSchema.parse({ completion: false, message: "go on" }),
-  ).toEqual({ completion: false, message: "go on" });
-  expect(REPLY_OPS).toEqual([
-    "add",
-    "drop",
-    "reparent",
-    "retry",
-    "cancel",
-    "requeue",
-    "set-node-sets",
-    "set-run-node-sets",
-    "attest",
-    "complete",
-    "amend",
-    "note",
-    "withdraw-note",
-    "finding",
-    "settle",
-    "rework",
-    "retitle",
-    "review",
-    "readjust",
-    "decline",
-  ]);
-  const edit = replyEnvelopeSchema.parse({
-    version: REPLY_ENVELOPE_VERSION,
-    commands: [
-      { op: "note", id: "docs", addressee: "worker", text: "measure it too" },
-      { op: "drop", id: "obsolete", dependents: "detach" },
-      { op: "settle", id: "ship", outcome: "done", evidence: "landed as #12" },
-    ],
-  });
-  expect(edit.version).toBe(4);
-  expect(edit.commands).toHaveLength(3);
-  // The field the engine retired is refused by name, as the engine refuses it,
-  // and an op the engine does not declare never reaches the wire.
-  expect(
-    replyEnvelopeSchema.safeParse({
-      version: REPLY_ENVELOPE_VERSION,
-      commands: [{ op: "context", id: "docs", note: "hi" }],
-    }).success,
-  ).toBe(false);
-  expect(replyEnvelopeSchema.safeParse({ bogus: true }).success).toBe(false);
-  expect(
-    replyEnvelopeSchema.safeParse({
-      version: REPLY_ENVELOPE_VERSION,
-      commands: [{ op: "drop", id: "obsolete" }],
-    }).success,
-  ).toBe(false);
-  // Commands under no version, or another, are what the engine refuses as "an
-  // edit envelope requires version 4"; an envelope carrying neither half is one
-  // the engine answers, naming no verdict, so it parses.
-  const unversioned = replyEnvelopeSchema.safeParse({
-    commands: [{ op: "drop", id: "obsolete", dependents: "detach" }],
-  });
-  expect(unversioned.success).toBe(false);
-  expect(unversioned.error?.issues[0]?.message).toBe(
-    "an edit envelope requires version 4",
-  );
-  expect(
-    replyEnvelopeSchema.safeParse({
-      version: 2,
-      commands: [{ op: "complete", reason: "done" }],
-    }).success,
-  ).toBe(false);
-  expect(replyEnvelopeSchema.safeParse({}).success).toBe(true);
-});
-
-test("review replies preserve rework comments and retitles and refuse incomplete comments", () => {
-  const commands = [
-    {
-      op: "rework",
-      id: "build",
-      reason: "Review requested a correction",
-      instruction: "Fix the reported regression",
-      comments: [{ id: "review-1", url: "https://example.com/review/1" }],
-      title: "fix: correct the regression",
-      replacement: "build-rework-1",
-    },
-    {
-      op: "retitle",
-      id: "build",
-      title: "fix: correct the regression",
-      reason: "Match the change",
-    },
-    {
-      op: "decline",
-      id: "build",
-      comments: [{ id: "review-2", url: "https://example.com/review/2" }],
-      reason: "Out of scope for this change",
-    },
-  ];
-  const envelope = { version: REPLY_ENVELOPE_VERSION, commands };
-  expect(replyEnvelopeSchema.parse(envelope)).toEqual(envelope);
-  expect(
-    replyEnvelopeSchema.safeParse({
-      ...envelope,
-      commands: [{ ...commands[0], comments: [{ id: "review-1" }] }],
-    }).success,
-  ).toBe(false);
-  expect(
-    replyEnvelopeSchema.safeParse({
-      ...envelope,
-      commands: [{ ...commands[1], title: "" }],
-    }).success,
-  ).toBe(false);
-});
-
-test("the model's reply commands are the engine's, op for op and field for field", async () => {
-  // `tests/contract.rs` pins this golden to the fields the engine's own
-  // `channel::Command` declares; this half holds the browser's copy to it, so an
-  // op or a field on one side alone fails one of the two.
-  const engine = z
-    .object({
-      reply_envelope_version: z.number(),
-      commands: z.record(
-        z.string(),
-        z.object({
-          required: z.array(z.string()),
-          optional: z.array(z.string()),
-        }),
-      ),
-      node_list_fields: z.array(z.string()),
-    })
-    .parse(await served("reply-commands.json"));
-  expect(REPLY_ENVELOPE_VERSION).toBe(engine.reply_envelope_version);
-  expect([...REPLY_OPS].sort()).toEqual(Object.keys(engine.commands).sort());
-  for (const option of replyCommandSchema.options) {
-    const op = option.shape.op.value;
-    const fields = Object.entries(option.shape).filter(([key]) => key !== "op");
-    const required = fields
-      .filter(([, field]) => !field.safeParse(undefined).success)
-      .map(([key]) => key)
-      .sort();
-    const optional = fields
-      .filter(([, field]) => field.safeParse(undefined).success)
-      .map(([key]) => key)
-      .sort();
-    expect({ op, required, optional }).toEqual({ op, ...engine.commands[op] });
-  }
-  // A node's list fields are ones the plan task declares, a list and optional.
-  for (const field of engine.node_list_fields) {
-    const shape: Record<string, z.ZodType> = planTaskSchema.shape;
-    expect(shape[field]?.safeParse(undefined).success).toBe(true);
-    expect(shape[field]?.safeParse(["a=1"]).success).toBe(true);
-    expect(shape[field]?.safeParse("a=1").success).toBe(false);
-  }
-});
-
-test("a node's graph overrides are kept as written, in order, through every command that carries a node", () => {
-  const sets = [
-    "members.worker.agent.model=large",
-    "members.worker.agent.model=small",
-  ];
-  const node = {
-    id: "build",
-    persona: "engineer",
-    task: "## What\nbuild",
-    sets,
-  };
-  // `add` and `retry` carry a whole node, `sets` and an explicit `[]` alike.
-  const parsed = replyEnvelopeSchema.parse({
-    version: REPLY_ENVELOPE_VERSION,
-    commands: [
-      { op: "add", node },
-      { op: "retry", id: "build", node: { ...node, id: "build-2", sets: [] } },
-      { op: "requeue", id: "parked", amend: { sets: [] } },
-      { op: "requeue", id: "parked", amend: { sets, max_turns: 3 } },
-      { op: "set-node-sets", id: "build", sets },
-      { op: "set-node-sets", id: "build", sets: [] },
-      { op: "set-run-node-sets", sets: ["members.worker.agent.model=run"] },
-      { op: "set-run-node-sets", sets: [] },
-    ],
-  });
-  expect(parsed.commands).toEqual([
-    { op: "add", node },
-    { op: "retry", id: "build", node: { ...node, id: "build-2", sets: [] } },
-    { op: "requeue", id: "parked", amend: { sets: [] } },
-    { op: "requeue", id: "parked", amend: { sets, max_turns: 3 } },
-    { op: "set-node-sets", id: "build", sets },
-    { op: "set-node-sets", id: "build", sets: [] },
-    { op: "set-run-node-sets", sets: ["members.worker.agent.model=run"] },
-    { op: "set-run-node-sets", sets: [] },
-  ]);
-  // Each replacement names its whole list: an absent one is not a clear, and
-  // a node edit names its node.
-  for (const command of [
-    { op: "set-node-sets", id: "build" },
-    { op: "set-node-sets", sets: [] },
-    { op: "set-node-sets", id: "", sets: [] },
-    { op: "set-run-node-sets" },
-    { op: "set-run-node-sets", sets: "members.worker.agent.model=run" },
-    { op: "set-run-node-sets", sets: [], id: "build" },
-    { op: "requeue", id: "parked", amend: { sets: "a=1" } },
-    { op: "add", node: { ...node, sets: [1] } },
-  ]) {
-    expect(
-      replyEnvelopeSchema.safeParse({
-        version: REPLY_ENVELOPE_VERSION,
-        commands: [command],
-      }).success,
-      JSON.stringify(command),
-    ).toBe(false);
-  }
 });
 
 test("the graph serves a node's overrides and the run-wide list, and absent reads as none", async () => {
