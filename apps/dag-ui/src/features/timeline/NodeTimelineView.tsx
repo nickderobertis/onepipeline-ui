@@ -50,8 +50,6 @@ import {
   recordedReason,
 } from "../../lib/run-model";
 
-const HISTORY_START_TEXT = "No earlier history remains";
-
 const OFF_GRAPH_TASK =
   "This node is not on the run's graph, so the plan holds no task for it.";
 
@@ -711,11 +709,6 @@ function NodeExecution({
         className="node-transcript"
         ref={transcriptRef}
       >
-        {history.readToStart && history.failure === undefined && (
-          <p className="history-start" role="status">
-            {HISTORY_START_TEXT}
-          </p>
-        )}
         {history.failure !== undefined && (
           <HistoryFailed
             failure={history.failure}

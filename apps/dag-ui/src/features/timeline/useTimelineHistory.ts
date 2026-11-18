@@ -66,8 +66,6 @@ export interface TimelineHistory {
   readonly timeline?: RunTimeline;
   /** Stretches of the plot no held row covers. */
   readonly unheld: readonly Interval[];
-  /** Whether a node's every row has been read, back to its first. */
-  readonly readToStart: boolean;
   /** Read one span whole: its fields and its rows, once. */
   readonly loadSpan: (spanId: string) => void;
   /** Read every row of a node's share of Overall; once. */
@@ -223,7 +221,6 @@ export function useTimelineHistory({
     if (scope !== "node" || !nodeLoading) return [];
     return unheldStretches(merged?.spans ?? []);
   }, [merged, scope, nodeLoading]);
-  const readToStart = scope === "node" && nodeLoad?.state === "held";
   const shownFailure = nodeLoad?.failure ?? failure;
 
   const readAll = useCallback(
@@ -312,7 +309,6 @@ export function useTimelineHistory({
   return {
     ...(merged === undefined ? {} : { timeline: merged }),
     unheld,
-    readToStart,
     loadSpan,
     loadRow,
     loadStretch,
