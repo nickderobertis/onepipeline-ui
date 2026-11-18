@@ -261,7 +261,9 @@ describe("one node's slice of the run timeline", () => {
   };
 
   /** One hold toggling: queued, held behind a node, released. */
-  const HOLD_PASS = [
+  const HOLD_PASS: readonly (Partial<TimelineEvent> & {
+    readonly kind: string;
+  })[] = [
     { kind: "node-requeued" },
     {
       kind: "node-held",
@@ -271,7 +273,7 @@ describe("one node's slice of the run timeline", () => {
       kind: "node-unheld",
       fields: { released: [{ kind: "dependencies", blocking: ["schema"] }] },
     },
-  ] as const;
+  ];
 
   test("a loop gone round twelve times is one block of one pass, its count and its span", () => {
     const rows = nodeWith(Array.from({ length: 12 }, () => HOLD_PASS).flat());
@@ -345,7 +347,10 @@ describe("one node's slice of the run timeline", () => {
 
   test("a row reads the same only with the same label: two different holds are no loop", () => {
     const rows = nodeWith([
-      HOLD_PASS[1],
+      {
+        kind: "node-held",
+        fields: { reasons: [{ kind: "dependencies", blocking: ["schema"] }] },
+      },
       {
         kind: "node-held",
         fields: { reasons: [{ kind: "dependencies", blocking: ["other"] }] },
