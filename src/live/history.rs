@@ -1,4 +1,5 @@
-//! `GET /api/v2/runs/{run}/timeline/events`: the rows a span's list leaves out.
+//! `GET /api/v2/runs/{run}/timeline/events`: the rows a span's list leaves out; and
+//! `GET /api/v2/runs/{run}/timeline/node-stream`: every row of one node's timeline.
 //!
 //! Before a run's complete read ends this reads one share of its journal alone
 //! and never waits on that read; after, it reads a share's timeline kept inside
@@ -9,7 +10,9 @@ use onepipeline::journal::{self, Selection};
 use serde_json::{json, Map, Value};
 
 use super::{agents_of, lock, Held, Hub, LiveRun};
-use crate::contract::{Envelope, PageCursor, PageOwner, RunId, TimelineEventsQuery};
+use crate::contract::{
+    Envelope, NodeId, NodeStreamSplit, PageCursor, PageOwner, RunId, TimelineEventsQuery,
+};
 use crate::error::ApiError;
 use crate::payload::live::{Indexed, LiveTimeline, TimelineScope};
 use crate::payload::{self, ItemsWindow};
@@ -69,6 +72,99 @@ impl Hub {
         };
         Ok(RunStore::envelope(page))
     }
+}
+
+/// Every row of one node's own timeline, newest first, and where the server's time
+/// on it went: what `GET .../timeline/node-stream` sends.
+#[derive(Debug)]
+pub struct NodeStream {
+    /// Every row, one per record, newest first.
+    pub rows: Vec<Value>,
+    /// The heads read, the node's fetch and the build, in seconds.
+    pub split: NodeStreamSplit,
+}
+
+impl Hub {
+    /// Every row of `node`'s own timeline, read apart from any subscription's reading
+    /// and without the run's lock: the run's heads, then the node's records by their
+    /// handles ([`super::first_screen::read_node`]), built whole and unfiltered.
+    ///
+    /// # Errors
+    ///
+    /// `404` for a run or node the run does not hold, and the engine's refusal of
+    /// the read.
+    pub fn node_stream(&self, run: &RunId, node: &NodeId) -> Result<NodeStream, ApiError> {
+        let paths = self.0.store.present(run)?;
+        let read = super::first_screen::read_node(&paths, node.as_str())
+            .map_err(|error| ApiError::from_engine(run, error))?;
+        let building = std::time::Instant::now();
+        let view = read.view;
+        if !(payload::plan_names(&view, node.as_str())
+            || view
+                .events
+                .iter()
+                .any(|event| event.labels.node.as_deref() == Some(node.as_str())))
+        {
+            return Err(ApiError::NodeNotFound(node.clone()));
+        }
+        let filter = RunStore::resolve(&view, None)?;
+        let declared = self.0.store.declared(&view);
+        let agents = agents_of(&paths);
+        let built = LiveTimeline::build(
+            &view,
+            &read.indexed,
+            &declared,
+            TimelineScope::Node(node.clone()),
+            filter,
+            agents.as_ref(),
+            ItemsWindow::All,
+        );
+        let payload = built.payload();
+        let spans = payload["spans"].as_array().map_or(&[][..], Vec::as_slice);
+        let mut rows = rows_by_record(spans, |_| true);
+        rows.reverse();
+        let rows: Vec<Value> = rows.into_iter().map(|(_, row)| row).collect();
+        Ok(NodeStream {
+            rows,
+            split: NodeStreamSplit {
+                heads_s: read.heads_s,
+                fetch_s: read.fetch_s,
+                build_s: building.elapsed().as_secs_f64(),
+            },
+        })
+    }
+}
+
+/// The key a row is held under: the record it reads, so the rows of two records
+/// sharing a row `id` — a turn's opening and its close — are both kept. A row
+/// naming no record falls back to its `id`.
+fn record_key(row: &Value) -> &str {
+    row["record_id"]
+        .as_str()
+        .or_else(|| row["id"].as_str())
+        .unwrap_or_default()
+}
+
+/// Every row of `spans` that `keep` admits, once per record (the first span listing
+/// it owns it), each with its `span_id`, oldest first.
+fn rows_by_record(spans: &[Value], keep: impl Fn(i128) -> bool) -> Vec<((i128, u64), Value)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut rows: Vec<((i128, u64), Value)> = Vec::new();
+    for owner in spans {
+        for row in owner["events"].as_array().into_iter().flatten() {
+            let Some(order) = payload::row_order(row) else {
+                continue;
+            };
+            if !keep(order.0) || !seen.insert(record_key(row).to_owned()) {
+                continue;
+            }
+            let mut served = row.clone();
+            served["span_id"] = owner["id"].clone();
+            rows.push((order, served));
+        }
+    }
+    rows.sort_by_key(|(order, _)| *order);
+    rows
 }
 
 fn read_share(
@@ -259,30 +355,10 @@ fn page_of(spans: &Value, query: &TimelineEventsQuery) -> Result<Value, ApiError
         }
         None => (spans, None),
     };
-    let mut seen = std::collections::HashSet::new();
-    let mut rows: Vec<((i128, u64), Value)> = Vec::new();
-    for owner in spans {
-        for row in owner["events"].as_array().into_iter().flatten() {
-            let Some(order) = payload::row_order(row) else {
-                continue;
-            };
-            if query.from.is_some_and(|from| order.0 < from)
-                || query.to.is_some_and(|to| order.0 > to)
-            {
-                continue;
-            }
-            if span.is_none() {
-                let id = row["id"].as_str().unwrap_or_default().to_owned();
-                if !seen.insert(id) {
-                    continue;
-                }
-            }
-            let mut served = row.clone();
-            served["span_id"] = owner["id"].clone();
-            rows.push((order, served));
-        }
-    }
-    rows.sort_by_key(|(order, _)| *order);
+    // Once per record across spans, keyed as the node stream keys them.
+    let mut rows = rows_by_record(spans, |at| {
+        !(query.from.is_some_and(|from| at < from) || query.to.is_some_and(|to| at > to))
+    });
     let total = rows.len();
     let older = query.cursor.map_or(rows.len(), |cursor| {
         rows.partition_point(|(order, _)| {

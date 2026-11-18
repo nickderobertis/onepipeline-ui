@@ -45,6 +45,12 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN, "run.json"),
     (routes::RUN_TIMELINE, "run-timeline.json"),
     (routes::RUN_TIMELINE_EVENTS, "run-timeline-events.json"),
+    // Its body is lines rather than one document: the golden is those lines as a
+    // list, which `tests/e2e/live.rs` pins from the real route.
+    (
+        routes::RUN_TIMELINE_NODE_STREAM,
+        "run-timeline-node-stream.json",
+    ),
     (routes::RUN_CONVERSATION, "run-conversation.json"),
     (routes::RUN_ARTIFACT, "run-artifact.json"),
     (routes::EVENTS, "events.json"),
@@ -1081,6 +1087,30 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
     assert_eq!(Release::linked().as_str(), onepipeline::VERSION);
 }
 
+/// The node stream's golden is a list of [`NodeStreamLine`]s, each re-serialized to
+/// itself: the Rust half of the drift gate whose other half is
+/// `packages/dag-model`'s schema reading the same file.
+#[test]
+fn the_node_stream_golden_is_the_contracts_lines() {
+    let raw = read_fixture("run-timeline-node-stream.json");
+    let lines: Vec<Value> = serde_json::from_str(&raw).expect("a list of lines");
+    let typed: Vec<onepipeline_ui::contract::NodeStreamLine> = lines
+        .iter()
+        .map(|line| serde_json::from_value(line.clone()).expect("a line of the contract's"))
+        .collect();
+    assert!(matches!(
+        typed.first(),
+        Some(onepipeline_ui::contract::NodeStreamLine::Start { .. })
+    ));
+    assert_eq!(
+        typed.last(),
+        Some(&onepipeline_ui::contract::NodeStreamLine::End)
+    );
+    for (line, value) in typed.iter().zip(&lines) {
+        assert_eq!(&serde_json::to_value(line).expect("serialize"), value);
+    }
+}
+
 #[test]
 fn every_enveloped_fixture_round_trips_byte_for_byte() {
     for (route, fixture) in ROUTE_FIXTURES {
@@ -1089,13 +1119,15 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
             routes::EVENTS,
             routes::SUBSCRIPTIONS,
             routes::SUBSCRIPTION,
+            routes::RUN_TIMELINE_NODE_STREAM,
         ]
         .contains(&route)
             || route.starts_with(routes::HUMAN_ITEMS)
         {
             // Not enveloped, and enveloped one level down, and a list of frames;
             // the human-item routes serve the engine's own records, which
-            // `every_human_item_fixture_is_the_engines_record` reconciles.
+            // `every_human_item_fixture_is_the_engines_record` reconciles; the
+            // node stream's lines `the_node_stream_golden_is_the_contracts_lines` reads.
             continue;
         }
         let raw = read_fixture(fixture);

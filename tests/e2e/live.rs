@@ -15,6 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use onepipeline_ui::contract::{NodeStreamLine, NODE_STREAM_ROWS_PER_LINE};
 use onepipeline_ui::patch::{self, Op};
 use serde_json::{json, Value};
 
@@ -4359,4 +4360,267 @@ fn a_queued_surface_gains_its_reading_and_its_answer_as_the_engine_writes_them()
         assert_eq!(state["reply"]["provenance"], json!("user"), "{state}");
     }
     held_as_fresh(&tab, "answered");
+}
+
+/// How many turns [`busy_node_run`] adds to the fixture node: three records each,
+/// a turn's opening and close sharing its row `id`, so the node holds more rows
+/// than one line of the node stream carries.
+const BUSY_TURNS: u64 = 700;
+
+/// The fixture run, its node grown by [`BUSY_TURNS`] turns of its worker's session
+/// after the two it recorded: each a `turn-started`, a tool call and a
+/// `turn-completed`, the opening and the close of one turn naming the same turn
+/// and so served under one row `id`.
+fn busy_node_run(root: &Path, run: &str) {
+    fixture_run::write(root, run);
+    let journal = root.join(run).join("events.jsonl");
+    let text = fs::read_to_string(&journal).expect("a journal");
+    let last: Value = text
+        .lines()
+        .rev()
+        .find_map(|line| serde_json::from_str(line).ok())
+        .expect("a record to follow");
+    let stream = last["stream"].as_str().expect("a stream").to_owned();
+    let mut seq = text
+        .lines()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .filter(|record| record["stream"] == stream.as_str())
+        .filter_map(|record| record["seq"].as_u64())
+        .max()
+        .unwrap_or(0);
+    let labels = json!({
+        "run_id": run, "node": fixture_run::NODE_ID, "member": "worker", "persona": "worker",
+        "session": fixture_run::CONVERSATION_ID,
+    });
+    let start = time::macros::datetime!(2026-08-07 12:00:05.001 UTC);
+    let format = time::macros::format_description!(
+        "[year]-[month]-[day]T[hour]:[minute]:[second].[subsecond digits:3]Z"
+    );
+    let mut lines = String::new();
+    for turn in 0..BUSY_TURNS {
+        for (step, kind, payload) in [
+            (
+                0,
+                "turn-started",
+                json!({ "turn": turn + 3, "role": "assistant", "instruction": "Carry on." }),
+            ),
+            (
+                1,
+                "turn-activity",
+                json!({ "kind": "tool_call", "name": "Bash", "detail": format!("step {turn}"),
+                        "truncated": false, "index": turn * 3 + 1 }),
+            ),
+            (
+                2,
+                "turn-completed",
+                json!({ "turn": turn + 3, "role": "assistant",
+                        "usage": { "input_tokens": 1, "output_tokens": 1 } }),
+            ),
+        ] {
+            seq += 1;
+            let at = start
+                + time::Duration::milliseconds(i64::try_from(turn * 3 + step).expect("small"));
+            let record = json!({
+                "v": 1, "ts": at.format(&format).expect("a stamp"), "stream": stream, "seq": seq,
+                "source": "agentgraph", "kind": kind, "labels": labels, "payload": payload,
+                "artifacts": [],
+            });
+            lines.push_str(&format!("{record}\n"));
+        }
+    }
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .open(&journal)
+        .expect("the journal opens for append");
+    std::io::Write::write_all(&mut file, lines.as_bytes()).expect("append the turns");
+    live_journal::receipt_for(&journal);
+}
+
+/// A row's record: what the node stream and a page key a row by.
+fn record_of(row: &Value) -> String {
+    row["record_id"]
+        .as_str()
+        .or_else(|| row["id"].as_str())
+        .expect("a row names its record")
+        .to_owned()
+}
+
+/// The node stream's body, read line by line into the contract's own line type.
+fn node_stream_lines(live: &Live, run: &str, node: &str) -> Vec<NodeStreamLine> {
+    let path = format!("/api/v2/runs/{run}/timeline/node-stream?scope=node&node={node}");
+    let answer = http::get(live.address(), &path);
+    assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+    assert!(
+        answer.body.ends_with('\n'),
+        "every line ends: {}",
+        answer.body
+    );
+    answer
+        .body
+        .lines()
+        .map(|line| {
+            serde_json::from_str(line).unwrap_or_else(|error| {
+                panic!("{error}: a line that is not the contract's: {line}")
+            })
+        })
+        .collect()
+}
+
+/// A node's whole timeline arrives through one streamed read: a start line counting
+/// every record, `rows` lines of at most a thousand rows newest first, and an end
+/// line — every record once, the opening and close of a turn both, though they share
+/// a row `id`. A page walked to the start lists every one of them too.
+#[test]
+fn a_nodes_stream_serves_every_record_once_newest_first() {
+    let run = fixture_run::RUN_ID;
+    let node = fixture_run::NODE_ID;
+    let live = Live::start(|root| busy_node_run(root, run));
+
+    // Every record of the node's complete timeline, by record.
+    let timeline = http::get(
+        live.address(),
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node={node}"),
+    )
+    .json();
+    let mut expected = std::collections::BTreeSet::new();
+    let mut ids: BTreeMap<String, std::collections::BTreeSet<String>> = BTreeMap::new();
+    for span in timeline["spans"].as_array().expect("spans") {
+        for row in span["events"].as_array().expect("events") {
+            expected.insert(record_of(row));
+            ids.entry(row["id"].as_str().expect("an id").to_owned())
+                .or_default()
+                .insert(record_of(row));
+        }
+    }
+    let shared = ids.values().filter(|records| records.len() > 1).count();
+    assert!(
+        shared >= usize::try_from(BUSY_TURNS).expect("small"),
+        "the node's turns share their row ids across records: {shared} ids are shared"
+    );
+    let total_records = usize::try_from(BUSY_TURNS * 3).expect("small");
+    assert!(expected.len() > total_records, "{}", expected.len());
+
+    let lines = node_stream_lines(&live, run, node);
+    let (first, rest) = lines.split_first().expect("a start line");
+    let NodeStreamLine::Start { total, split } = first else {
+        panic!("the body opens on its start line: {first:?}");
+    };
+    assert!(
+        split.heads_s >= 0.0 && split.fetch_s >= 0.0 && split.build_s >= 0.0,
+        "{split:?}"
+    );
+    let (last, middle) = rest.split_last().expect("an end line");
+    assert_eq!(
+        *last,
+        NodeStreamLine::End,
+        "the body closes on its end line"
+    );
+    let mut rows = Vec::new();
+    for line in middle {
+        let NodeStreamLine::Rows { rows: batch } = line else {
+            panic!("only rows lines between the start and the end: {line:?}");
+        };
+        assert!(
+            !batch.is_empty() && batch.len() <= NODE_STREAM_ROWS_PER_LINE,
+            "a rows line holds 1 to {NODE_STREAM_ROWS_PER_LINE} rows: {}",
+            batch.len()
+        );
+        rows.extend(batch.iter().cloned());
+    }
+    assert!(middle.len() >= 3, "{} rows lines", middle.len());
+    assert_eq!(*total, rows.len(), "the start line counts every row sent");
+    let keys: Vec<String> = rows.iter().map(record_of).collect();
+    let held: std::collections::BTreeSet<String> = keys.iter().cloned().collect();
+    assert_eq!(held.len(), keys.len(), "no record is sent twice");
+    assert!(
+        held == expected,
+        "every record of the node, and only those: missing {:?}, extra {:?}",
+        expected.difference(&held).collect::<Vec<_>>(),
+        held.difference(&expected).collect::<Vec<_>>()
+    );
+    let order = |row: &Value| {
+        (
+            row["at"].as_str().expect("an instant").to_owned(),
+            row["journal_order"].as_u64().expect("a journal order"),
+        )
+    };
+    assert!(
+        rows.windows(2)
+            .all(|pair| order(&pair[0]) >= order(&pair[1])),
+        "rows arrive newest first"
+    );
+    assert!(
+        rows.iter().all(|row| row["span_id"].is_string()),
+        "each row is a timeline/events row, its span named"
+    );
+
+    // The paged route, walked to its start, lists every record too.
+    let (paged, _) = walk_query(&live, run, &format!("scope=node&node={node}&limit=500"));
+    let paged_keys: Vec<String> = paged.iter().map(record_of).collect();
+    let paged_held: std::collections::BTreeSet<String> = paged_keys.iter().cloned().collect();
+    assert_eq!(
+        paged_held.len(),
+        paged_keys.len(),
+        "no page repeats a record"
+    );
+    assert!(
+        paged_held == expected,
+        "the pages list every record of the node: missing {:?}, extra {:?}",
+        expected.difference(&paged_held).collect::<Vec<_>>(),
+        paged_held.difference(&expected).collect::<Vec<_>>()
+    );
+}
+
+/// The node stream over the fixture run, pinned: the golden
+/// `packages/dag-model`'s schema reads, so the line shapes this crate declares and
+/// the ones the view parses cannot part unnoticed. The server's own timings are the
+/// one thing a reading cannot repeat, and are pinned as zero.
+#[test]
+fn the_node_stream_is_the_golden_the_contract_pins() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let mut lines: Vec<Value> = node_stream_lines(&live, run, fixture_run::NODE_ID)
+        .iter()
+        .map(|line| serde_json::to_value(line).expect("a line serializes"))
+        .collect();
+    lines[0]["split"] = json!({ "heads_s": 0.0, "fetch_s": 0.0, "build_s": 0.0 });
+    pin_golden("run-timeline-node-stream.json", &Value::Array(lines));
+}
+
+/// What the node stream refuses, before it writes a line: a scope other than a
+/// node's, a node it is not told, a node or run the store does not hold.
+#[test]
+fn the_node_stream_refuses_what_it_cannot_answer() {
+    let run = fixture_run::RUN_ID;
+    let live = Live::start(|root| growing_run(root, run));
+    let base = format!("/api/v2/runs/{run}/timeline/node-stream");
+    for (query, status, code) in [
+        ("?scope=run".to_owned(), 422, "invalid_request"),
+        (String::new(), 422, "invalid_request"),
+        ("?scope=node".to_owned(), 422, "invalid_node_id"),
+        ("?scope=node&node=..".to_owned(), 422, "invalid_node_id"),
+        (
+            "?scope=node&node=no-such-node".to_owned(),
+            404,
+            "node_not_found",
+        ),
+    ] {
+        let answer = http::get(live.address(), &format!("{base}{query}"));
+        assert_eq!(answer.status, status, "{query}: {}", answer.body);
+        assert_eq!(
+            answer.json()["error"]["code"],
+            code,
+            "{query}: {}",
+            answer.body
+        );
+    }
+    let missing = http::get(
+        live.address(),
+        &format!(
+            "/api/v2/runs/run-no-such/timeline/node-stream?scope=node&node={}",
+            fixture_run::NODE_ID
+        ),
+    );
+    assert_eq!(missing.status, 404, "{}", missing.body);
+    assert_eq!(missing.json()["error"]["code"], "run_not_found");
 }

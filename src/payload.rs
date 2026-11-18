@@ -5582,10 +5582,11 @@ pub(crate) enum ItemsWindow {
 #[derive(Debug, Default)]
 pub(crate) struct Rendered {
     pub(crate) entries: std::collections::HashMap<usize, (Option<String>, Value)>,
-    /// Under [`ItemsWindow::Page`], the id of every row its bounds admit but
-    /// the cursor: what its `total` counts.
+    /// Under [`ItemsWindow::Page`], the record of every row its bounds admit but
+    /// the cursor: what its `total` counts. By record rather than row `id`, which
+    /// a turn's opening and its close share.
     pub(crate) counted: HashSet<String>,
-    /// Under [`ItemsWindow::Page`], the id of every row older than its cursor:
+    /// Under [`ItemsWindow::Page`], the record of every row older than its cursor:
     /// the page and every page after it.
     pub(crate) older: HashSet<String>,
     /// How many entries were rendered rather than reused, since this was made.
@@ -5603,17 +5604,10 @@ impl Lens<'_> {
         Some((millis_of(&event.ts)?, u64::try_from(position).ok()?))
     }
 
-    /// The id a record's row is served under, without rendering it.
-    fn row_id(&self, index: usize) -> String {
-        let position = self
-            .positions
-            .and_then(|positions| positions.get(index).copied())
-            .unwrap_or(index);
-        self.turns
-            .get(index)
-            .and_then(Option::as_ref)
-            .filter(|turn| turn.held == Held::Describes)
-            .map_or_else(|| format!("e{position}"), |turn| turn.id.clone())
+    /// The record a row reads, as its `record_id` names it: what a page counts its
+    /// rows by, so two records served under one row `id` are two rows.
+    fn row_record(event: &Envelope) -> String {
+        format!("{}.{}", event.stream, event.seq)
     }
 
     /// The events of one span, as the reader asked for them, into `span`:
@@ -5654,9 +5648,8 @@ impl Lens<'_> {
             });
             if let Some(rendered) = self.rendered {
                 let mut rendered = rendered.borrow_mut();
-                for (index, _) in &ordered {
-                    let id = self.row_id(*index);
-                    rendered.counted.insert(id);
+                for (_, event) in &ordered {
+                    rendered.counted.insert(Self::row_record(event));
                 }
             }
             ordered.retain(|(index, event)| {
@@ -5665,9 +5658,8 @@ impl Lens<'_> {
             });
             if let Some(rendered) = self.rendered {
                 let mut rendered = rendered.borrow_mut();
-                for (index, _) in &ordered {
-                    let id = self.row_id(*index);
-                    rendered.older.insert(id);
+                for (_, event) in &ordered {
+                    rendered.older.insert(Self::row_record(event));
                 }
             }
             if let Some(since) = self.since {

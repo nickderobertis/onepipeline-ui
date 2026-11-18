@@ -417,6 +417,54 @@ pub const TIMELINE_EVENTS_PAGE: usize = 100;
 /// The most rows one page may hold.
 pub const TIMELINE_EVENTS_PAGE_MAX: usize = 500;
 
+/// The most rows one `rows` line of `GET .../timeline/node-stream` holds.
+pub const NODE_STREAM_ROWS_PER_LINE: usize = 1_000;
+
+/// One line of `GET .../timeline/node-stream`'s `application/x-ndjson` body, which
+/// is a [`Start`](Self::Start), then [`Rows`](Self::Rows) lines newest first, then
+/// [`End`](Self::End) — or, once the start line is written, an [`Error`](Self::Error)
+/// that ends the body in its place.
+///
+/// Declared once here; `packages/dag-model`'s `nodeStreamLineSchema` mirrors it,
+/// and reads the golden `tests/fixtures/run-timeline-node-stream.json` this
+/// crate's journey pins from the real route, so the two cannot part silently.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum NodeStreamLine {
+    /// How many rows the body lists, and where the server spent its time.
+    Start {
+        /// Every row the `rows` lines that follow hold together.
+        total: usize,
+        /// The server's time on the read, in seconds.
+        split: NodeStreamSplit,
+    },
+    /// At most [`NODE_STREAM_ROWS_PER_LINE`] rows, each a `timeline/events` row.
+    Rows {
+        /// The rows, newest first, continuing the line before.
+        rows: Vec<Value>,
+    },
+    /// Every row was sent.
+    End,
+    /// The read failed after its start line; nothing follows.
+    Error {
+        /// What failed, for a reader.
+        message: String,
+    },
+}
+
+/// Where the node stream's server time went, in seconds: the run's heads read, the
+/// fetch of the node's records by their handles, and building its rows.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NodeStreamSplit {
+    /// [`onepipeline::views::RunView::heads`] over the run.
+    pub heads_s: f64,
+    /// [`onepipeline::journal::fetch`] of the node's own records.
+    pub fetch_s: f64,
+    /// Building the node's timeline and its rows.
+    pub build_s: f64,
+}
+
 /// The routes `docs/contract.md` defines, as axum path templates.
 pub mod routes {
     /// Liveness that never touches run storage.
@@ -429,6 +477,8 @@ pub mod routes {
     pub const RUN_TIMELINE: &str = "/api/v2/runs/{run}/timeline";
     /// One page of a run's timeline rows, on demand.
     pub const RUN_TIMELINE_EVENTS: &str = "/api/v2/runs/{run}/timeline/events";
+    /// Every row of one node's own timeline, streamed as newline-delimited JSON.
+    pub const RUN_TIMELINE_NODE_STREAM: &str = "/api/v2/runs/{run}/timeline/node-stream";
     /// One conversation of one run.
     pub const RUN_CONVERSATION: &str = "/api/v2/runs/{run}/conversations/{id}";
     /// One recorded artifact of one run.
@@ -552,7 +602,7 @@ pub mod routes {
     }
 
     /// How many routes the contract defines.
-    pub const COUNT: usize = 34;
+    pub const COUNT: usize = 35;
 
     /// Every route above with its method, in the order `docs/contract.md`
     /// lists them.
@@ -562,6 +612,7 @@ pub mod routes {
         get(RUN),
         get(RUN_TIMELINE),
         get(RUN_TIMELINE_EVENTS),
+        get(RUN_TIMELINE_NODE_STREAM),
         get(RUN_CONVERSATION),
         get(RUN_ARTIFACT),
         get(EVENTS),

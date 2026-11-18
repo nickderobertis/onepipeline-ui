@@ -99,6 +99,7 @@ GET /api/v2/runs                      # list w/ session attribution
 GET /api/v2/runs/{run}                ?include_conversations=bool
 GET /api/v2/runs/{run}/timeline       ?scope=run|node&node=ID
 GET /api/v2/runs/{run}/timeline/events  ?scope=run|node&node=ID&span=SPAN&cursor=C&from=&to=&filter=&limit=N
+GET /api/v2/runs/{run}/timeline/node-stream  ?scope=node&node=ID  (application/x-ndjson)
 GET /api/v2/runs/{run}/conversations/{id}
 GET /api/v2/runs/{run}/artifacts/{id}
 GET /api/v2/events                    # SSE; a subscription's changes, else a fresh snapshot per connection

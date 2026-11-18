@@ -389,7 +389,12 @@ fn the_run_list_pages_by_opaque_cursor() {
 /// Returned paired with the template each was built from, so a caller tells the
 /// stream and the unenveloped liveness apart by that template rather than by a
 /// string it spelled itself.
-fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'static str, String)> {
+fn every_route_over(
+    run: &str,
+    node: &str,
+    conversation: &str,
+    artifact: &str,
+) -> Vec<(&'static str, String)> {
     use onepipeline_ui::contract::routes;
     routes::TABLE
         .iter()
@@ -415,11 +420,34 @@ fn every_route_over(run: &str, conversation: &str, artifact: &str) -> Vec<(&'sta
                 .replace("/artifacts/{id}", &format!("/artifacts/{artifact}"));
             let path = match template {
                 routes::RUN_TIMELINE | routes::RUN_TIMELINE_EVENTS => format!("{path}?scope=run"),
+                // A node's own timeline, whole: there is no run-scoped stream.
+                routes::RUN_TIMELINE_NODE_STREAM => {
+                    format!("{path}?scope=node&node={node}")
+                }
                 _ => path,
             };
             (template, path)
         })
         .collect()
+}
+
+/// A node stream's body is its lines, opened by a start line and closed by an end
+/// line, rather than an envelope.
+fn assert_node_stream(body: &str, path: &str) {
+    let lines: Vec<Value> = body
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap_or_else(|err| panic!("{path}: {err}")))
+        .collect();
+    assert_eq!(
+        lines.first().map(|line| &line["kind"]),
+        Some(&json!("start")),
+        "{path}: {body}"
+    );
+    assert_eq!(
+        lines.last().map(|line| &line["kind"]),
+        Some(&json!("end")),
+        "{path}: {body}"
+    );
 }
 
 /// A project id as a client sends it on the wire: path-encoded, so the `:`
@@ -623,6 +651,7 @@ fn a_run_launched_from_a_plan_store_project_is_served_by_every_route() {
     // own bytes.
     for (template, path) in every_route_over(
         fixture_run::RUN_ID,
+        fixture_run::NODE_ID,
         fixture_run::CONVERSATION_ID,
         fixture_run::ARTIFACT_ID,
     ) {
@@ -642,7 +671,9 @@ fn a_run_launched_from_a_plan_store_project_is_served_by_every_route() {
         }
         let response = http::get(serving.address, &path);
         assert_eq!(response.status, 200, "{path}: {}", response.body);
-        if template != onepipeline_ui::contract::routes::HEALTHZ {
+        if template == onepipeline_ui::contract::routes::RUN_TIMELINE_NODE_STREAM {
+            assert_node_stream(&response.body, &path);
+        } else if template != onepipeline_ui::contract::routes::HEALTHZ {
             assert_enveloped(&response.json());
         }
     }
@@ -10601,7 +10632,12 @@ fn a_journal_carrying_a_judges_decision_is_served_by_every_route() {
         "reason": REASON,
     }]);
 
-    for (template, path) in every_route_over(fixture_run::RUN_ID, SESSION, "artifact-long-log") {
+    for (template, path) in every_route_over(
+        fixture_run::RUN_ID,
+        fixture_run::SHIP_NODE_ID,
+        SESSION,
+        "artifact-long-log",
+    ) {
         if template == onepipeline_ui::contract::routes::EVENTS {
             let mut stream = http::stream(serving.address, &path, None);
             assert_eq!(stream.status, 200, "{path}");
@@ -10619,6 +10655,10 @@ fn a_journal_carrying_a_judges_decision_is_served_by_every_route() {
         let response = http::get(serving.address, &path);
         assert_eq!(response.status, 200, "{path}: {}", response.body);
         if template == onepipeline_ui::contract::routes::HEALTHZ {
+            continue;
+        }
+        if template == onepipeline_ui::contract::routes::RUN_TIMELINE_NODE_STREAM {
+            assert_node_stream(&response.body, &path);
             continue;
         }
         let body = response.json();
@@ -21763,6 +21803,8 @@ fn no_route_starts_adopts_or_drives_a_run() {
                     || route.path == routes::RUN_TIMELINE_EVENTS
                 {
                     format!("{path}?scope=run")
+                } else if route.path == routes::RUN_TIMELINE_NODE_STREAM {
+                    format!("{path}?scope=node&node={}", fixture_run::APPROVAL_NODE_ID)
                 } else {
                     path
                 };
