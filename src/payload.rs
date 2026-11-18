@@ -4522,20 +4522,28 @@ fn live_transcript<'a>(events: &[&'a Envelope]) -> BTreeMap<(u64, String), LiveT
 /// tool activity: onejudge's settled report deliberately keeps no narration. The
 /// history file oneharness wrote is the record of what the agent said, and it is
 /// read through [`transcript::session`], the reader the harness-session artifact
-/// serves the same invocation through. The invocation is the one whose prompt
-/// begins with the instruction the turn's own `turn-started` carried
-/// ([`transcript::TurnSources`]); where that names none, or more than one, the
-/// turn takes no words from any file rather than another turn's.
+/// serves the same invocation through. The invocation is the one the turn's own
+/// `turn-started` names: by its `transcript` reference, which a producer writing
+/// references carries, and otherwise the one whose prompt begins with the
+/// instruction the record copied ([`transcript::TurnSources`]) — where that
+/// names none, or more than one, the turn takes no words from any file rather
+/// than another turn's.
 fn narrated(sources: &transcript::Sources<'_>, turn: &RelayedTurn<'_>) -> Option<Words> {
     use transcript::Candidates as _;
     if turn.opened.kind.0 != graph::TURN_STARTED {
         return None;
     }
-    let ran = transcript::TurnSources::of(sources, Some(turn.opened));
-    let [location] = ran.candidates() else {
-        return None;
+    let read = match transcript::referenced(turn.opened) {
+        Some(location) => transcript::session(&location),
+        None => {
+            let ran = transcript::TurnSources::of(sources, Some(turn.opened));
+            let [location] = ran.candidates() else {
+                return None;
+            };
+            transcript::session(location)
+        }
     };
-    let words = Words::recorded(&transcript::session(location));
+    let words = Words::recorded(&read);
     (!words.is_empty()).then_some(words)
 }
 

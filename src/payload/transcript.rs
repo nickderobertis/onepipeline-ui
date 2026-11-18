@@ -254,6 +254,12 @@ fn location(fields: &Value) -> Option<Transcript> {
     .ok()
 }
 
+/// The invocation one turn record's `transcript` reference names, or `None` for a
+/// record carrying none — one written before references, which carries a copy.
+pub(crate) fn referenced(event: &Envelope) -> Option<Transcript> {
+    location(event.payload.get("transcript")?)
+}
+
 /// What one relayed record's content reads as, or `None` for a record that
 /// carries no turn content.
 pub(crate) fn read(event: &Envelope, sources: Option<&dyn Candidates>) -> Option<Read> {

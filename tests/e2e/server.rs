@@ -12160,7 +12160,14 @@ fn a_members_words_are_served_in_the_order_its_history_recorded_them() {
         stopped_early: false,
     };
 
-    for settled in [false, true] {
+    // Read while it runs; settled, by a producer that copied the instruction and
+    // relayed a pointer at the invocation; and settled, by one that wrote a
+    // `transcript` reference on the turn and relayed nothing else naming the file.
+    for (reading, settled, referenced) in [
+        ("live", false, false),
+        ("settled", true, false),
+        ("settled, by reference", true, true),
+    ] {
         let store = tempfile::tempdir().expect("the oneharness history store");
         let recorded = harness_history::record_with_events(
             store.path(),
@@ -12171,19 +12178,21 @@ fn a_members_words_are_served_in_the_order_its_history_recorded_them() {
         );
         let serving = Serving::start(|root| {
             let dir = fixture_run::write_live(root, fixture_run::RUN_ID);
-            fixture_run::relay_harness_session(
-                &dir,
-                &fixture_run::HarnessSession {
-                    stream: STREAM,
-                    node: fixture_run::SHIP_NODE_ID,
-                    member: "worker",
-                    history_dir: Some(&recorded.dir),
-                    history_project: &recorded.project,
-                    history_session: &recorded.session,
-                    history_id: &recorded.history_id,
-                    bytes: recorded.bytes(),
-                },
-            );
+            if !referenced {
+                fixture_run::relay_harness_session(
+                    &dir,
+                    &fixture_run::HarnessSession {
+                        stream: STREAM,
+                        node: fixture_run::SHIP_NODE_ID,
+                        member: "worker",
+                        history_dir: Some(&recorded.dir),
+                        history_project: &recorded.project,
+                        history_session: &recorded.session,
+                        history_id: &recorded.history_id,
+                        bytes: recorded.bytes(),
+                    },
+                );
+            }
             let relay = |kind: &str, payload: Value| {
                 fixture_run::append_relayed(
                     &dir,
@@ -12199,15 +12208,27 @@ fn a_members_words_are_served_in_the_order_its_history_recorded_them() {
                     payload,
                 );
             };
-            relay(
-                "turn-started",
+            let opened = if referenced {
+                json!({
+                    "turn": 1,
+                    "role": "assistant",
+                    "transcript": {
+                        "history_dir": recorded.dir,
+                        "history_project": recorded.project,
+                        "history_session": recorded.session,
+                        "history_id": recorded.history_id,
+                    },
+                    "started_at": "2026-08-07T12:04:00.000Z",
+                })
+            } else {
                 json!({
                     "turn": 1,
                     "role": "assistant",
                     "instruction": PROMPT,
                     "started_at": "2026-08-07T12:04:00.000Z",
-                }),
-            );
+                })
+            };
+            relay("turn-started", opened);
             // What a running member relays from inside the turn: each event of
             // the history as `turn-activity`, its words carried as its output.
             for event in &history {
@@ -12242,7 +12263,6 @@ fn a_members_words_are_served_in_the_order_its_history_recorded_them() {
                 );
             }
         });
-        let reading = if settled { "settled" } else { "live" };
 
         let conversation = http::get(
             serving.address,
@@ -12280,6 +12300,10 @@ fn a_members_words_are_served_in_the_order_its_history_recorded_them() {
             turns[0]
         );
 
+        // The invocation as an artifact, which only a relayed pointer names.
+        if referenced {
+            continue;
+        }
         let artifact = http::get(
             serving.address,
             &format!(
