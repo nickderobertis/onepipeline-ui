@@ -153,6 +153,57 @@ test.describe("repeated loops", () => {
     await expect(blocks(transcript).nth(1).getByRole("article")).toHaveCount(1);
   });
 
+  test("a loop of eighteen rows gone round twice is one block of its pass, and opens into all 36 rows in order", async ({
+    page,
+  }) => {
+    // Six holds on six producers make a pass of eighteen distinct rows, longer
+    // than the stretch a loop is first looked for over, so only the search for
+    // where a long pass starts again can find it.
+    const events = await nodeEvents(page, "rounds");
+    const held = events.filter(({ kind }) => kind === "node-held");
+    const unheld = events.filter(({ kind }) => kind === "node-unheld");
+    expect(held).toHaveLength(12);
+    const transcript = await openNode(page, "rounds");
+    await expect(blocks(transcript)).toHaveCount(1);
+    const block = blocks(transcript).first();
+    await expect(block).toHaveAccessibleName(/^18 events repeated 2 times: /u);
+    await expect(block.getByText("×2", { exact: true })).toBeVisible();
+    const pass = block.getByRole("article");
+    await expect(pass).toHaveCount(18);
+    const producers = [
+      "schema",
+      "types",
+      "client",
+      "server",
+      "docs",
+      "release",
+    ];
+    expect(
+      await pass.evaluateAll((articles) =>
+        articles.map((article) => article.getAttribute("aria-label")),
+      ),
+    ).toEqual(
+      producers.flatMap((producer) => [
+        `Queued waiting on ${producer}`,
+        `Held waiting on ${producer}`,
+        "Released from dependencies",
+      ]),
+    );
+    await block.getByRole("button", { name: "Show all 36" }).click();
+    await expect(pass).toHaveCount(36);
+    expect(
+      await pass.evaluateAll((articles) =>
+        articles.map((article) => article.getAttribute("data-row-id")),
+      ),
+    ).toEqual(
+      held.flatMap((hold, index) => [
+        `queued.rounds.${hold.journal_order}`,
+        hold.record_id,
+        unheld[index]?.record_id,
+      ]),
+    );
+  });
+
   test("a sequence that never repeats back to back is not collapsed", async ({
     page,
   }) => {

@@ -38,6 +38,12 @@
               "deps": []
             },
             {
+              "id": "rounds",
+              "task": "Wait on each of six producers in turn.",
+              "persona": "engineer",
+              "deps": []
+            },
+            {
               "id": "loops",
               "task": "Poll the upstream run.",
               "persona": "engineer",
@@ -459,6 +465,342 @@
       },
       "gap": 30,
       "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["schema"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["schema"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["types"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["types"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["client"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["client"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["server"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["server"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["docs"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["docs"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["release"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["release"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["schema"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["schema"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["types"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["types"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["client"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["client"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["server"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["server"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["docs"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["docs"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-held",
+      "payload": {
+        "reasons": [
+          {
+            "kind": "dependencies",
+            "blocking": ["release"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-unheld",
+      "payload": {
+        "released": [
+          {
+            "kind": "dependencies",
+            "blocking": ["release"]
+          }
+        ]
+      },
+      "gap": 1,
+      "node": "rounds"
     },
     {
       "source": "pipeline",
@@ -1144,6 +1486,16 @@
       },
       "gap": 1,
       "node": "held"
+    },
+    {
+      "source": "pipeline",
+      "kind": "node-settled",
+      "payload": {
+        "status": "done",
+        "outcome": "merged"
+      },
+      "gap": 1,
+      "node": "rounds"
     },
     {
       "source": "pipeline",
