@@ -126,7 +126,9 @@ anything new here is a proposal to make upstream first.
   surface serves the result as `surface_state`. The live index keeps the same
   fold and touches every owner holding a record of a surface that moved. A
   per-surface fold the SDK published beside the channel's records would
-  replace it.
+  replace it: that is asked of the engine in
+  <https://github.com/nickderobertis/onepipeline/issues/1702>, and the fold
+  stays here until it ships.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,

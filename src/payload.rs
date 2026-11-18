@@ -6975,6 +6975,7 @@ impl SurfaceRecord {
     }
 }
 
+// llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the surface fold belongs in the onepipeline SDK, but engine 0.113.6 publishes none, and the event list's one row per surface needs the reply the driver journals under no node joined to the node's question; kept here on the manager's ruling a9 until the engine publishes the fold asked for in https://github.com/nickderobertis/onepipeline/issues/1702, when this becomes a call to it (src/AGENTS.md says the same).
 /// What each of a run's surfaces came to, folded over every record a reading
 /// holds — never the share or the filtered list being served, so a filter
 /// cannot change it.
@@ -7132,6 +7133,7 @@ impl SurfaceStates {
         Some(Value::Object(state))
     }
 }
+// llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 
 /// One journal envelope as a timeline event.
 fn timeline_event(
