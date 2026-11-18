@@ -854,12 +854,17 @@ describe("a hold reason read without the contract's zod", () => {
   );
 
   test("a hold lists the reasons it can read and drops the rest", () => {
-    const held = {
+    // A served event as the fixture holds it, recording one reason it can read
+    // and one it cannot.
+    const served = timeline.spans.flatMap((span) => span.events)[0];
+    if (served === undefined) throw new Error("the fixture serves no event");
+    const held: TimelineEvent = {
+      ...served,
       kind: "node-held",
       fields: {
         reasons: [{ kind: "upstream", blocking: ["build"] }, { kind: "" }],
       },
-    } as unknown as TimelineEvent;
+    };
     expect(holdReasonsOf(held)).toEqual([
       { kind: "upstream", blocking: ["build"] },
     ]);
