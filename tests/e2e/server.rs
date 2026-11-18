@@ -17630,8 +17630,11 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
 /// stream-json` and writes the task as one `user` message, then holds stdin
 /// open for control frames, so it reads that line and no more. Where oneharness
 /// refuses control — on macOS a long `$TMPDIR` puts the control socket past the
-/// 104-byte `sun_path` — the task rides `-p` as its positional instead and stdin
-/// is empty; either way the task is somewhere on the one line.
+/// 104-byte `sun_path` — the task rides stdin as plain text under `-p
+/// --input-format text`, which closes stdin after it, so this reads all of it and
+/// folds its lines onto the one; a oneharness before 0.34 put it in `-p`'s
+/// positional with stdin empty instead. Either way the task is somewhere on the
+/// one line.
 ///
 /// The harness program is the one process this suite stands in for, and it is
 /// the narrowest place to cut: everything above it — the pinned engine CLI, the
@@ -17660,6 +17663,8 @@ fn write_named_harness_standin(dir: &Path, name: &str, log: &Path) -> PathBuf {
         &standin,
         format!(
             "#!/bin/sh\nIFS= read -r prompt\n\
+             case \" $* \" in *' --input-format text '*) \
+             prompt=\"$prompt $(tr '\\n' ' ')\";; esac\n\
              printf '%s %s %s\\n' \"$0\" \"$*\" \"$prompt\" >> {:?}\n\
              printf '{{\"type\":\"result\",\
              \"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\
@@ -18694,8 +18699,10 @@ fn a_run_launched_with_validators_is_read_as_its_engine_recorded_it() {
 
 /// A harness stand-in for a dispatch on either side of the publication boundary:
 /// it records the argv it was given in `argv-<pid>.txt` under `records`, and the
-/// first line of its stdin — the stream-json prompt frame, where the turn was
-/// opened with control — beside it in `stdin-<pid>.txt`, and
+/// prompt it was handed on stdin beside it in `stdin-<pid>.txt` — the first line,
+/// which is the stream-json prompt frame, where the turn was opened with control,
+/// and the whole of stdin under `--input-format text`, which closes it after the
+/// prompt — and
 /// commits one file under [`fixture_run::EXPORT_SOURCE_DIRECTORY`] in the
 /// worktree it is run in — the one directory an export producer may change — in
 /// words that name nothing private.
@@ -18714,6 +18721,8 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
         &standin,
         format!(
             "#!/bin/sh\nIFS= read -r prompt\nprintf '%s\\n' \"$*\" > {records:?}/argv-$$.txt\n\
+             case \" $* \" in *' --input-format text '*) rest=$(cat)\n\
+             [ -n \"$rest\" ] && prompt=\"$prompt\n$rest\";; esac\n\
              printf '%s' \"$prompt\" > {records:?}/stdin-$$.txt\n\
              mkdir -p {dir}\nprintf 'a generic example\\n' > {dir}/sample-$$.md\n\
              git add {dir} && git commit -q -m 'feat: add a generic example' >&2 || exit 1\n\
@@ -18733,9 +18742,10 @@ fn write_exporting_harness_standin(dir: &Path, records: &Path) -> PathBuf {
 
 /// Every dispatch [`write_exporting_harness_standin`] recorded under `records`:
 /// each one's argv followed by the task it was handed, which the adapter writes
-/// as a stream-json `user` frame on stdin where the turn has control and as
-/// `-p`'s positional where oneharness refused it (see `write_harness_standin`) —
-/// so the text is read from whichever carried it.
+/// as a stream-json `user` frame on stdin where the turn has control and, where
+/// oneharness refused it, as plain text on stdin under `--input-format text` or as
+/// `-p`'s positional (see `write_harness_standin`) — so the text is read from
+/// whichever carried it.
 #[cfg(unix)]
 fn dispatched_tasks(records: &Path) -> Vec<String> {
     fs::read_dir(records)
@@ -18756,16 +18766,20 @@ fn dispatched_tasks(records: &Path) -> Vec<String> {
             );
             let stdin = fs::read_to_string(&stdin_of).expect("a stdin record");
             let streamed = argv.contains("--input-format stream-json");
+            let piped = argv.contains("--input-format text");
             if stdin.is_empty() {
                 assert!(
-                    !streamed,
-                    "a stream-json turn was written no prompt frame: {argv}"
+                    !streamed && !piped,
+                    "a turn that reads its prompt from stdin was written none: {argv}"
                 );
                 return argv;
             }
+            if piped {
+                return format!("{argv}{stdin}");
+            }
             assert!(
                 streamed,
-                "a prompt reached stdin outside a stream-json turn: {argv}"
+                "a prompt reached stdin without a flag that reads it: {argv}"
             );
             let frame: Value = serde_json::from_str(&stdin).unwrap_or_else(|err| {
                 panic!("the prompt is not a stream-json frame: {err}: {stdin}")
