@@ -316,6 +316,26 @@ test.describe("commands", () => {
     await expect(detail).not.toContainText('["bun"');
   });
 
+  test("an empty argument and a single quote read as a shell would take them", async ({
+    page,
+  }) => {
+    const transcript = await openNode(page, "quoted");
+    const line = String.raw`printf '%s\n' '' 'it'\''s'`;
+    await expect(row(transcript, line)).toHaveCount(1);
+    await expect(
+      page.getByRole("region", { name: "Command" }).getByText(line, {
+        exact: true,
+      }),
+    ).toBeVisible();
+    await row(transcript, line).getByRole("button").click();
+    await expect(
+      page
+        .getByRole("complementary", { name: "Item detail panel" })
+        .getByRole("region", { name: "Recorded fields" })
+        .getByText(line, { exact: true }),
+    ).toBeVisible();
+  });
+
   test("a 400-character command is cut with an ellipsis in its row and shown whole in its detail and header", async ({
     page,
   }) => {

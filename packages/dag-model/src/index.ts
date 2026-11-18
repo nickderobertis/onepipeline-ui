@@ -1615,6 +1615,7 @@ export const timelineSurfaceSchema = openObject({
  * reply's own words under `reply`. Every member is present only where a record
  * carried it, and the words are open, as `surface`'s are.
  */
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] this package is where this repository keeps every read-API record's parser — `docs/dag-ui.md` holds the app to declaring no schema of its own — and `surface_state` is a field of the timeline event whose schema, `timelineEventSchema`, sits beside it here with the `surface` record it extends; a package for one field of one event would split the timeline record across two packages.
 export const timelineSurfaceStateSchema = openObject({
   id: counter,
   correlation: z.string().min(1).optional(),
