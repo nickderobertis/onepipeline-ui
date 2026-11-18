@@ -166,3 +166,20 @@ test("reads a run, node or item the API could never serve as unnamed", () => {
   expect(result.current.nodeId).toBeUndefined();
   expect(result.current.itemId).toBeUndefined();
 });
+
+test("the event types a reader hid are kept in the address, and an unknown word is no type", () => {
+  window.history.replaceState(
+    null,
+    "",
+    "/?run=r&hide-event=surface&hide-event=detailed",
+  );
+  const { result } = renderHook(() => useUrlSelection());
+  expect(result.current.hiddenEventTypes).toEqual(["surface"]);
+  act(() => result.current.selectEventTypes(["reply", "edit"]));
+  expect(
+    new URLSearchParams(window.location.search).getAll("hide-event"),
+  ).toEqual(["reply", "edit"]);
+  expect(result.current.hiddenEventTypes).toEqual(["reply", "edit"]);
+  act(() => result.current.selectEventTypes([]));
+  expect(window.location.search).toBe("?run=r");
+});

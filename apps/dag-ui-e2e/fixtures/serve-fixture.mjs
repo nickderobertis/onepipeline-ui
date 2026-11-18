@@ -20,6 +20,7 @@
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --command-steps-corpus
+ *                      | --event-list-corpus
  *                      | --transcripts-corpus
  *                      | --held-turn-corpus | --large-run-views-corpus
  *                      | --readability-corpus | --human-items-world NAME]
@@ -32,7 +33,9 @@
  *                                                  reworked stack's with
  *                                                  --review-loop-corpus, the
  *                                                  command steps' with
- *                                                  --command-steps-corpus, and the
+ *                                                  --command-steps-corpus, the
+ *                                                  event lists' with
+ *                                                  --event-list-corpus, and the
  *                                                  held turn's with
  *                                                  --held-turn-corpus, and the
  *                                                  large-run views' with
@@ -84,6 +87,7 @@ import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import { humanItemsWorld } from "./human-items-world.mjs";
 import {
   buildCommandStepsRuns,
+  buildEventListRuns,
   buildHeldTurnRuns,
   buildLargeRunViews,
   buildPreservedRuns,
@@ -95,6 +99,7 @@ import {
   buildTranscriptRuns,
   churnLive,
   commandStepsFacts,
+  eventListFacts,
   facts,
   graphRecordsFor,
   growTranscript,
@@ -480,6 +485,7 @@ function parseArgs(argv) {
     "--review-corpus",
     "--review-loop-corpus",
     "--command-steps-corpus",
+    "--event-list-corpus",
     "--held-turn-corpus",
     "--large-run-views-corpus",
     "--readability-corpus",
@@ -841,6 +847,8 @@ if (args.stall) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
       } else if (args["command-steps-corpus"]) {
         corpus = { build: buildCommandStepsRuns, facts: commandStepsFacts };
+      } else if (args["event-list-corpus"]) {
+        corpus = { build: buildEventListRuns, facts: eventListFacts };
       } else if (args["large-run-views-corpus"]) {
         corpus = { build: buildLargeRunViews, facts: largeRunViewsFacts };
       } else if (args["readability-corpus"]) {

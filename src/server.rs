@@ -6,9 +6,6 @@
 //! the body at the trust boundary, ask the [`RunApi`] for the payload, render
 //! the envelope or the error contract — so a route cannot serve a status and a
 //! code that disagree, and a raw `String` from a URL never reaches storage.
-//! The one body that is *not* parsed here is a channel reply's: it is the
-//! envelope's bytes, handed to the engine verbatim, because the engine is what
-//! rules on it.
 //!
 //! Reads block: a run list walks the whole root and a detail folds a journal.
 //! None of that runs on the async runtime. Each handler defers its read to a
@@ -37,13 +34,12 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::api::RunApi;
 use crate::contract::{
-    routes, ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventId,
-    EventsPageLimit, EventsQuery, HumanItemAnswerRequest, HumanItemAnswersRequest,
-    HumanItemCompleteRequest, HumanItemDismissRequest, HumanItemId, HumanItemNoteRequest,
-    HumanItemReopenRequest, NextQuery, NodeId, PageCursor, PageLimit, PageOwner, ProjectId, RunId,
-    RunQuery, RunSelection, RunsPage, RunsQuery, ShutdownRequest, SpanId, StopRequest,
-    SubscribeRequest, SubscriptionId, SurfaceRequest, TimelineEventsQuery, TimelineQuery,
-    TimelineScope, TranscriptQuery,
+    routes, ArtifactId, ConversationId, Envelope, EventId, EventsPageLimit, EventsQuery,
+    HumanItemAnswerRequest, HumanItemAnswersRequest, HumanItemCompleteRequest,
+    HumanItemDismissRequest, HumanItemId, HumanItemNoteRequest, HumanItemReopenRequest, NodeId,
+    PageCursor, PageLimit, PageOwner, ProjectId, RunId, RunQuery, RunSelection, RunsPage,
+    RunsQuery, ShutdownRequest, SpanId, StopRequest, SubscribeRequest, SubscriptionId,
+    TimelineEventsQuery, TimelineQuery, TimelineScope, TranscriptQuery,
 };
 use crate::error::ApiError;
 use crate::filter::FilterSpec;
@@ -87,8 +83,7 @@ struct Serving {
 // of, which that document's owner decides and this repository is forbidden from editing to
 // suit the code. The trust boundary this surface *does* have is validated at every handler
 // above: each `{...}` a route interpolates is an identifier newtype, every query and every
-// body is parsed before a run is opened, the one body that is not parsed is handed to the
-// engine that rules on it, and no raw `String` reaches storage.
+// body is parsed before a run is opened, and no raw `String` reaches storage.
 fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<View>) -> Router {
     Router::new()
         .route(routes::HEALTHZ, get(healthz))
@@ -101,11 +96,6 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::EVENTS, get(events))
         .route(routes::PROJECTS, get(projects))
         .route(routes::PROJECT, get(project))
-        .route(routes::RUN_CHANNEL, get(channel))
-        .route(routes::RUN_CHANNEL_NEXT, post(channel_next))
-        .route(routes::RUN_CHANNEL_REPLY, post(channel_reply))
-        .route(routes::RUN_CHANNEL_SURFACE, post(channel_surface))
-        .route(routes::RUN_ATTEST, post(attest))
         .route(routes::RUN_STOP, post(stop))
         .route(routes::SHUTDOWN, post(shutdown))
         .route(routes::UNWATCHED, get(unwatched))
@@ -545,7 +535,7 @@ fn subscription_events(
 }
 
 /// `POST /api/v2/subscriptions`: the subscription and its initial state, `201`.
-// llmlint: ignore[authorization_enforced_server_side] a subscription is a read: it serves exactly what the read routes beside it serve — the run list's rows, a run's detail, timeline and channel — to the same caller those routes serve, under `docs/contract.md`'s one surface with no principal but the server's one `--session` and `--bind` on loopback by default, and it creates read state only, never ownership of a run. What this handler owes is the boundary it keeps: the body, the view, the filter and every id are parsed and refused before anything is opened.
+// llmlint: ignore[authorization_enforced_server_side] a subscription is a read: it serves exactly what the read routes beside it serve — the run list's rows, a run's detail and timeline — to the same caller those routes serve, under `docs/contract.md`'s one surface with no principal but the server's one `--session` and `--bind` on loopback by default, and it creates read state only, never ownership of a run. What this handler owes is the boundary it keeps: the body, the view, the filter and every id are parsed and refused before anything is opened.
 async fn subscribe(State(serving): Store, raw: String) -> Response {
     let request = match SubscribeRequest::parse(&raw) {
         Ok(request) => request,
@@ -793,59 +783,6 @@ fn run_id(run: &str) -> Result<RunId, ApiError> {
     RunId::try_from(run)
 }
 
-async fn channel(State(serving): Store, Path(run): Path<String>) -> Response {
-    let run = match run_id(&run) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    answer(move || serving.store.channel(&run)).await
-}
-
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
-async fn channel_next(
-    State(serving): Store,
-    Path(run): Path<String>,
-    Query(raw): Query<HashMap<String, String>>,
-) -> Response {
-    let run = match run_id(&run) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    let query = match filter_spec(&raw) {
-        Ok(filter) => NextQuery { filter },
-        Err(error) => return error.into_response(),
-    };
-    answer(move || serving.store.channel_next(&run, &query)).await
-}
-
-/// The envelope's bytes, verbatim: the engine parses them, so the only thing
-/// checked here is that they are text at all, which is what an envelope is.
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
-async fn channel_reply(
-    State(serving): Store,
-    Path(run): Path<String>,
-    Query(raw): Query<HashMap<String, String>>,
-    body: String,
-) -> Response {
-    let run = match run_id(&run) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    let correlation = match raw.get("correlation") {
-        None => None,
-        Some(value) => match Correlation::try_from(value.as_str()) {
-            Ok(correlation) => Some(correlation),
-            Err(error) => return error.into_response(),
-        },
-    };
-    answer(move || {
-        serving
-            .store
-            .channel_reply(&run, correlation.as_ref(), &body)
-    })
-    .await
-}
-
 /// A JSON body, or the contract's refusal of what was sent.
 ///
 /// Parsed by hand rather than through axum's `Json` extractor so a body the
@@ -854,32 +791,6 @@ async fn channel_reply(
 fn body<T: serde::de::DeserializeOwned>(what: &str, body: &str) -> Result<T, ApiError> {
     serde_json::from_str(body)
         .map_err(|error| ApiError::InvalidRequest(format!("the body is not {what}: {error}")))
-}
-
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
-async fn channel_surface(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
-    let run = match run_id(&run) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    let request: SurfaceRequest = match body("{kind, message}", &raw) {
-        Ok(request) => request,
-        Err(error) => return error.into_response(),
-    };
-    answer(move || serving.store.channel_surface(&run, &request)).await
-}
-
-// llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.
-async fn attest(State(serving): Store, Path(run): Path<String>, raw: String) -> Response {
-    let run = match run_id(&run) {
-        Ok(run) => run,
-        Err(error) => return error.into_response(),
-    };
-    let request: AttestRequest = match body("{reference}", &raw) {
-        Ok(request) => request,
-        Err(error) => return error.into_response(),
-    };
-    answer(move || serving.store.attest(&run, &request)).await
 }
 
 // llmlint: ignore[authorization_enforced_server_side] there is no principal to authenticate against: `docs/contract.md` fixes this surface with **one** acting session for the whole server, resolved once at startup from `--session`, and every write this handler makes is judged by the engine's own ownership rule under that session — exactly as a shell holding `onepipeline` is — with `--bind` on loopback by default and whatever the host puts in front of a wider bind. An authentication layer is a change to the contract this crate is the Rust rendering of, which its owner decides; what this handler owes is the trust boundary it keeps, validating the path and the body before the engine is asked.

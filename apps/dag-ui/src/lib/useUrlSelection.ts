@@ -1,4 +1,8 @@
 import { isProjectId } from "@onepipeline-ui/dag-model";
+import {
+  type EventType,
+  isEventType,
+} from "@onepipeline-ui/timeline-categories";
 import { useCallback, useSyncExternalStore } from "react";
 import { isOpaqueId } from "../first-screen/address";
 import { appRootPath } from "./humanItemsRoute";
@@ -20,6 +24,13 @@ export interface UrlSelection {
   readonly hiddenKinds: readonly string[];
   readonly selectHost: () => void;
   readonly selectKinds: (kinds: readonly string[]) => void;
+  /**
+   * The event types the reader hid from an event list, every one of them shown
+   * where the address names none. Kept in the address as `hide-event`, once per
+   * type, so a reload and a shared link read the list the way it was narrowed.
+   */
+  readonly hiddenEventTypes: readonly EventType[];
+  readonly selectEventTypes: (hidden: readonly EventType[]) => void;
   /**
    * The project whose page is open, as the address spells it: a qualified
    * project id, or {@link NO_PROJECT_KEY} for the group of runs that recorded
@@ -161,6 +172,14 @@ export function useUrlSelection(): UrlSelection {
     list,
     host: params.get("page") === "host",
     hiddenKinds: params.getAll("hide-kind"),
+    hiddenEventTypes: [...new Set(params.getAll("hide-event"))].filter(
+      isEventType,
+    ),
+    selectEventTypes: (hidden) =>
+      update((next) => {
+        next.delete("hide-event");
+        for (const type of hidden) next.append("hide-event", type);
+      }, true),
     selectHost: () =>
       update((next) => {
         next.set("page", "host");

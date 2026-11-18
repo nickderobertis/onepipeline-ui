@@ -102,7 +102,7 @@ function telemetry() {
     variants[`settled-${view}`] = variant("settled", view, 1, 0.1 * (at + 1));
     variants[`stopped-${view}`] = variant("stopped", view, 1, 0.2 * (at + 1));
   });
-  for (const view of [...views, "channel"]) {
+  for (const view of views) {
     const n = view === "node" ? 2 : 1;
     variants[`live-${view}`] = variant("live", view, 1, n);
     variants[`live-${view}-2-tabs`] = variant("live", view, 2, n * 3);

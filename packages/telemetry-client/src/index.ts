@@ -5,10 +5,6 @@ import {
   type ArtifactContent,
   apiErrorSchema,
   artifactContentSchema,
-  type ChannelNext,
-  type ChannelQueue,
-  channelNextSchema,
-  channelQueueSchema,
   type DagConversation,
   dagConversationSchema,
   type HostShutdownScope,
@@ -30,14 +26,12 @@ import {
   projectDetailSchema,
   projectListSchema,
   type RenderedRoot,
-  type ReplyReceipt,
   type RunAgents,
   type RunDetail,
   type RunList,
   type RunStatus,
   type RunTimeline,
   renderedRootSchema,
-  replyReceiptSchema,
   runAgentsSchema,
   runDetailSchema,
   runListSchema,
@@ -48,13 +42,11 @@ import {
   type Stopped,
   type Subscribed,
   type SubscriptionView,
-  type Surfaced,
   shutdownReportSchema,
   sseEventDataSchema,
   sseEventNameSchema,
   stoppedSchema,
   subscribedSchema,
-  surfacedSchema,
   type TimelineEventsPage,
   timelineEventsPageSchema,
   type Unwatched,
@@ -461,71 +453,6 @@ export class TelemetryClient {
     );
   }
 
-  /** The run's channel, read and never consumed. */
-  async getChannel(runId: string): Promise<ChannelQueue> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.channel(runId)),
-      channelQueueSchema.parse,
-    );
-  }
-
-  /**
-   * Claim the next surface, as `onepipeline next` does: the channel's only
-   * consumer. `filter` shapes the `events` answered and nothing else.
-   */
-  async claimNext(runId: string, filter?: string): Promise<ChannelNext> {
-    requireOpaqueId(runId, "run ID");
-    const url = this.#url(API_V2_PATHS.channelNext(runId));
-    if (filter !== undefined) url.searchParams.set(API_V2_QUERY.filter, filter);
-    return this.#request(url, channelNextSchema.parse, { method: "POST" });
-  }
-
-  /**
-   * Send a reply envelope **as the bytes given**. Nothing here reads or reshapes
-   * them: a malformed envelope is the engine's refusal in the engine's words, and
-   * the author the body names is granted or refused by the run's own launch
-   * configuration. `correlation` names the question a verdict answers.
-   */
-  async reply(
-    runId: string,
-    envelope: string,
-    correlation?: string,
-  ): Promise<ReplyReceipt> {
-    requireOpaqueId(runId, "run ID");
-    const url = this.#url(API_V2_PATHS.channelReply(runId));
-    if (correlation !== undefined)
-      url.searchParams.set(API_V2_QUERY.correlation, correlation);
-    return this.#request(url, replyReceiptSchema.parse, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: envelope,
-    });
-  }
-
-  /** Raise a surface on the run's channel under `kind`, with `message`. */
-  async surface(
-    runId: string,
-    surface: { readonly kind: string; readonly message: string },
-  ): Promise<Surfaced> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.channelSurface(runId)),
-      surfacedSchema.parse,
-      json("POST", surface),
-    );
-  }
-
-  /** Attest a ready human action by its reference, as the planner's own `attest`. */
-  async attest(runId: string, reference: string): Promise<ReplyReceipt> {
-    requireOpaqueId(runId, "run ID");
-    return this.#request(
-      this.#url(API_V2_PATHS.attest(runId)),
-      replyReceiptSchema.parse,
-      json("POST", { reference }),
-    );
-  }
-
   /**
    * Stop the run as the acting session. A run another session owns is refused
    * `409 not_owner` naming the owner unless `force` is set, in which case the
@@ -540,7 +467,7 @@ export class TelemetryClient {
     );
   }
 
-  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` and every route call in `@onepipeline-ui/telemetry-client` — the runs, channel, host, agents and subscription records live here the same way, and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own — and the plan names these two packages as the ones this change touches. A human-item package of its own would be the only API domain split out of that layout.
+  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` and every route call in `@onepipeline-ui/telemetry-client` — the runs, host, agents and subscription records live here the same way, and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own — and the plan names these two packages as the ones this change touches. A human-item package of its own would be the only API domain split out of that layout.
   /**
    * The host-wide action items the server's session owns, in the engine's order.
    *

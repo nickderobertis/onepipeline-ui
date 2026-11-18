@@ -41,8 +41,6 @@ export interface DagTelemetryOptions {
   readonly view: RunViewKind;
   /** The node a node timeline is of. */
   readonly nodeId?: string;
-  /** The filter profile every payload is read under. */
-  readonly filter?: string;
   /**
    * Whether an address naming no run opens the first one served: not on the
    * Host page, which is about the host rather than any run.
@@ -154,16 +152,8 @@ export function useDagTelemetry(
         options.host ? undefined : runId,
         options.view,
         options.nodeId,
-        options.filter,
       ),
-    [
-      options.humanItems,
-      options.host,
-      runId,
-      options.view,
-      options.nodeId,
-      options.filter,
-    ],
+    [options.humanItems, options.host, runId, options.view, options.nodeId],
   );
   const live = useRef<LiveView | undefined>(undefined);
   const viewRef = useRef(view);

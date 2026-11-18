@@ -1074,7 +1074,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(views.at(-1)).toStrictEqual({
       type: "detail",
       run_id: LIVE_RUN,
-      filter: "detailed",
     });
     expect(paths().some((url) => isConversation(url))).toBe(false);
 
@@ -1084,7 +1083,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         type: "timeline",
         run_id: LIVE_RUN,
         scope: "run",
-        filter: "detailed",
       }),
     );
     const runLevelConversationReads = paths().filter((url) =>
@@ -1095,7 +1093,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
       expect(views.at(-1)).toStrictEqual({
         type: "detail",
         run_id: LIVE_RUN,
-        filter: "detailed",
       }),
     );
 
@@ -1106,7 +1103,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
         run_id: LIVE_RUN,
         scope: "node",
         node: "dashboard",
-        filter: "detailed",
       }),
     );
     await openTranscript(/engineer-dashboard/);
@@ -1910,11 +1906,12 @@ describe("the reading a viewer asks for", () => {
       .map((view) => ("filter" in view ? view.filter : undefined) ?? "");
 
   test(
-    "reads every view under the detailed profile, whatever an old address names",
+    "reads every view unfiltered, whatever an old address names",
     JOURNEY_TIMEOUT,
     async () => {
-      // The Decisions reading is retired with its switch: a bookmark that named it
-      // opens the whole reading rather than a narrower one nothing on screen says.
+      // The Decisions reading is retired with its switch, and so is the profile
+      // every view was read under: a bookmark that named either opens the whole
+      // reading, and the event list's own filter is what narrows it.
       window.history.replaceState(
         null,
         "",
@@ -1926,7 +1923,7 @@ describe("the reading a viewer asks for", () => {
       await waitFor(() =>
         expect(filtersAsked(views).length).toBeGreaterThan(0),
       );
-      expect(new Set(filtersAsked(views))).toEqual(new Set(["detailed"]));
+      expect(new Set(filtersAsked(views))).toEqual(new Set([""]));
       expect(
         screen.queryByRole("group", { name: "Level of detail" }),
       ).toBeNull();

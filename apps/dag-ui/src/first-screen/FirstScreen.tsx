@@ -14,6 +14,7 @@
  */
 import { layoutDag } from "@onepipeline-ui/dag-layout";
 import type { LiveRunDetail, RunTimeline } from "@onepipeline-ui/dag-model";
+import { isEventType } from "@onepipeline-ui/timeline-categories";
 import {
   Fragment,
   type ReactNode,
@@ -23,9 +24,12 @@ import {
 } from "react";
 import { graphTimeline } from "../features/timeline/graph-timeline";
 import {
-  collapseLabel,
+  cycleLabel,
+  eventList,
   nodeTimelineV2,
+  readingRows,
   type TimelineRow,
+  type TranscriptEntry,
   transcriptEntries,
   transcriptRuns,
 } from "../features/timeline/timeline-model";
@@ -506,10 +510,18 @@ function useFirstNodeTimeline(
   nodeId: string,
 ) {
   const projection = nodeTimelineV2(timeline, nodeId);
-  const reading = transcriptEntries(projection.tree, new Set());
-  const rows = reading.flatMap((entry) =>
-    entry.entryKind === "row" ? [entry.row] : [],
+  // The event list as the app reads it under the address's filter, so the swap
+  // draws the same rows in the same blocks.
+  const hidden = new Set(
+    new URLSearchParams(window.location.search)
+      .getAll("hide-event")
+      .filter(isEventType),
   );
+  const reading = transcriptEntries(
+    eventList(projection.tree, hidden),
+    new Set(),
+  );
+  const rows = readingRows(reading);
   const entries = reading;
   const starts = projection.items.map((item) => item.start);
   const ends = projection.items.map((item) => item.end ?? item.start);
@@ -618,21 +630,18 @@ function NodeTimeline({
                   Load earlier rows
                 </button>
               )}
+              <Reserved className="event-list-head">
+                <h3>Events</h3>
+                <details className="kind-filter event-type-filter">
+                  <summary>
+                    <span>Event types</span>
+                    <IconRoom size={14} />
+                  </summary>
+                </details>
+              </Reserved>
               {transcriptRuns(entries).map((run) => {
-                const items = run.entries.map((entry) =>
-                  entry.entryKind === "row" ? (
-                    <FirstRow key={entry.row.id} row={entry.row} />
-                  ) : (
-                    <Reserved
-                      className="transcript-collapsed"
-                      key={`collapse-${entry.group.id}`}
-                    >
-                      <span>
-                        <span aria-hidden="true">…</span>
-                        {`Show ${collapseLabel(entry.hidden, entry.group.kind)}`}
-                      </span>
-                    </Reserved>
-                  ),
+                const items = (
+                  <FirstEntries entries={run.entries} key={run.id} />
                 );
                 return run.dispatch === undefined ? (
                   <Fragment key={run.id}>{items}</Fragment>
@@ -652,6 +661,38 @@ function NodeTimeline({
         </div>
       </div>
     </section>
+  );
+}
+
+/** A reading's rows, each repeated loop in the block the app draws it in. */
+function FirstEntries({
+  entries,
+}: {
+  readonly entries: readonly TranscriptEntry[];
+}) {
+  return entries.map((entry) =>
+    entry.entryKind === "row" ? (
+      <FirstRow key={entry.row.id} row={entry.row} />
+    ) : (
+      <section
+        aria-label={`${cycleLabel(entry.group)}: ${entry.group.displayLabel}`}
+        className="transcript-cycle"
+        data-cycle-count={entry.group.count}
+        key={entry.group.id}
+      >
+        <Reserved className="transcript-cycle-head">
+          <IconRoom size={14} />
+          <strong className="transcript-cycle-count">
+            ×{entry.group.count}
+          </strong>
+          <span className="transcript-cycle-span">
+            {cycleLabel(entry.group)}
+          </span>
+          <span>{`Show all ${entry.group.children.length}`}</span>
+        </Reserved>
+        <FirstEntries entries={entry.entries} />
+      </section>
+    ),
   );
 }
 
@@ -676,11 +717,19 @@ function FirstRow({ row }: { readonly row: TimelineRow }) {
           {row.rowKind === "event" && <IconRoom size={12} />}
           {row.displayKind}
         </span>
-        <strong>{row.displayLabel}</strong>
+        <strong className="transcript-label" title={row.displayLabel}>
+          {row.displayLabel}
+        </strong>
         <span className="transcript-facts">
           <Timestamp at={row.startedAt} />
           {row.durationMs !== null && ` · ${formatDuration(row.durationMs)}`}
           {` · ${row.status ?? "recorded"}`}
+          {row.statusAt !== undefined && (
+            <>
+              {" "}
+              <Timestamp at={row.statusAt} />
+            </>
+          )}
           {row.sessionName !== undefined && ` · ${row.sessionName}`}
         </span>
       </button>

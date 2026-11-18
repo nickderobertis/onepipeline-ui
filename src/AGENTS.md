@@ -118,6 +118,17 @@ anything new here is a proposal to make upstream first.
   every session with no role — reported nowhere, because the server cannot tell
   a graph that declared nothing from a record it could not find; the SDK
   publishing the declarations beside the run would close that.
+- **What each surface came to.** A surface's records are written apart — queued
+  on the node it is about, taken by `next`, answered by a `planner-replied` the
+  driver journals under no node — and the engine folds none of them together
+  for a reader, so `payload::SurfaceStates` joins them by surface id and by the
+  correlation the reply echoes, over the whole reading, and every record of a
+  surface serves the result as `surface_state`. The live index keeps the same
+  fold and touches every owner holding a record of a surface that moved. A
+  per-surface fold the SDK published beside the channel's records would
+  replace it: that is asked of the engine in
+  <https://github.com/nickderobertis/onepipeline/issues/1702>, and the fold
+  stays here until it ships.
 - **The last account of each observed check.** `onevcs` reports every transition
   of every check it waits on, and `payload::observed_checks` keeps the last of
   each with the state it moved from. The transitions themselves are still served,
@@ -185,7 +196,7 @@ anything new here is a proposal to make upstream first.
 ## The server acts as one launching session, and writes to runs
 
 `onepipeline-api serve --session ID` (else `ONEPIPELINE_LAUNCHER_SESSION`, else
-unattributed) is the identity every stop and channel write is judged by.
+unattributed) is the identity every stop is judged by.
 The SDK's listing reads a run's channel under `ONEPIPELINE_RUNS_DIR`, and its
 advice reads `ONEPIPELINE_LAUNCHER_SESSION`, so `serve` exports both from
 `--runs-root` and the resolved session before serving requests. Run driving

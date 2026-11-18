@@ -12,7 +12,9 @@ import { z } from "zod";
 import { graphTimeline } from "../../dag-ui/src/features/timeline/graph-timeline";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
 import {
+  eventList,
   nodeTimelineV2,
+  readingRows,
   transcriptEntries,
 } from "../../dag-ui/src/features/timeline/timeline-model";
 // eslint-disable-next-line @nx/enforce-module-boundaries -- the mark checks the screen against the app's own view models, the spike's check, so the expected value cannot be a second reading of the app.
@@ -306,9 +308,11 @@ function checkNode(
       range[1],
     ),
   );
-  const rows = transcriptEntries(projection.tree, new Set()).flatMap((entry) =>
-    entry.entryKind === "row" ? [entry.row.displayLabel] : [],
-  );
+  // The event list as the app draws it with every type shown and no block opened:
+  // one row per surface, and each repeated loop as one pass inside its block.
+  const rows = readingRows(
+    transcriptEntries(eventList(projection.tree), new Set()),
+  ).map((row) => row.displayLabel);
   if (state.rows.length !== rows.length)
     out.push(`rows: ${state.rows.length} drawn, the answer has ${rows.length}`);
   rows.forEach((row, index) => {

@@ -1,5 +1,5 @@
 //! The operations a pushed change is written in, as `docs/contract.md` states
-//! them for `detail.patch`, `timeline.patch` and `channel.patch`.
+//! them for `detail.patch` and `timeline.patch`.
 //!
 //! Three operations and nothing else: set an object member or replace an existing
 //! array element (`{p, v}`), append to an array (`{p, a}`), and delete an object

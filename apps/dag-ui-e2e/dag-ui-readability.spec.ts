@@ -690,7 +690,9 @@ test("a bookmark naming the retired Channel view or Decisions reading opens Over
   const view = z
     .object({ view: z.object({ filter: z.string().optional() }) })
     .parse((await subscribed).postDataJSON()).view;
-  expect(view.filter).toBe("detailed");
+  // Read whole: no profile narrows it, and the event list's own filter is
+  // what narrows what is listed.
+  expect(view.filter).toBeUndefined();
   await expect(page.getByRole("tab", { name: "Overall" })).toHaveAttribute(
     "aria-selected",
     "true",

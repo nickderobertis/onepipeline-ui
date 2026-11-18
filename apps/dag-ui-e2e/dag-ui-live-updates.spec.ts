@@ -678,7 +678,6 @@ test("a dropped stream resumes from its last frame, and every change made meanwh
         .filter((type) => type?.endsWith(".patch")),
     );
     if (view === "graph") expect(patched.has("timeline.patch")).toBe(false);
-    expect(patched.has("channel.patch")).toBe(false);
   }
 });
 

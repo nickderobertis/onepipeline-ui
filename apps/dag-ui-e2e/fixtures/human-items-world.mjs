@@ -425,6 +425,7 @@ function boardSeed(plans, createdPrefix) {
             priority: step.priority ?? "low",
             title: step.title,
             body,
+            ...(step.choices === undefined ? {} : { choices: step.choices }),
           },
         },
         name,
@@ -1176,6 +1177,53 @@ function buildProvenanceGallery(workspace, token) {
   return { ids, runs: {}, plans: {} };
 }
 
+/**
+ * A launched plan whose two `kind: human` steps a person resolves from Action
+ * items: a question offering choices, and a task.
+ */
+const ATTEST_PLANS = {
+  release: [
+    {
+      id: "columns",
+      title: "Which export columns ship?",
+      question: true,
+      priority: "high",
+      body: "The export writer is ready. Pick the columns it ships with.",
+      choices: [
+        {
+          id: "keep",
+          title: "Keep the v1 columns",
+          description: "Every reader keeps working.",
+        },
+        {
+          id: "drop",
+          title: "Drop the v1 columns",
+          description: "The writer gets simpler.",
+        },
+      ],
+    },
+    {
+      id: "signoff",
+      title: "Sign off the release notes",
+      priority: "high",
+      body: "Read the release notes and complete this once they are right.",
+    },
+  ],
+};
+
+function buildAttest(workspace, token) {
+  const plan = "board:release";
+  const run = start(workspace, token, plan);
+  return {
+    ids: {
+      columns: stepItem(workspace, token, run, "columns"),
+      signoff: stepItem(workspace, token, run, "signoff"),
+    },
+    runs: { release: run },
+    plans: { release: plan },
+  };
+}
+
 const WORLDS = {
   sessions: { plans: {}, build: buildSessions },
   queue: { plans: QUEUE_PLANS, build: buildQueue },
@@ -1195,6 +1243,7 @@ const WORLDS = {
   },
   provenance: { plans: {}, build: buildProvenance },
   "provenance-gallery": { plans: {}, build: buildProvenanceGallery },
+  attest: { plans: ATTEST_PLANS, build: buildAttest },
 };
 
 /**

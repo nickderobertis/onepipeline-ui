@@ -317,3 +317,119 @@ export function eventCategory(kind: string): EventCategory {
   );
   return matched?.[0] ?? DEFAULT_EVENT_CATEGORY;
 }
+
+/**
+ * The types an event list can be narrowed to, one per row, in the order the
+ * filter offers them.
+ *
+ * Coarser than a wire kind and finer than a glyph's category where a reader
+ * filters for it: the six message kinds a run's channel carries — what it raised
+ * to somebody, what came back, the edits and commands it was sent, the notes it
+ * showed, what a person resolved, and the commands it ran itself — are types of
+ * their own, and every other row reads under the glyph category it is already
+ * drawn with. So every row has exactly one type, and the list a journey counts
+ * is this one.
+ */
+export const EVENT_TYPES = [
+  "surface",
+  "reply",
+  "edit",
+  "note",
+  "human",
+  "command",
+  ...EVENT_CATEGORIES.filter((category) => category !== "human"),
+] as const;
+
+export type EventType = (typeof EVENT_TYPES)[number];
+
+/** What each event type is called in the filter, where its word alone is not enough. */
+const EVENT_TYPE_LABELS: Readonly<Partial<Record<EventType, string>>> = {
+  surface: "Surfaces and questions",
+  reply: "Replies",
+  edit: "Edits and commands",
+  note: "Notes",
+  human: "Human items",
+  command: "Command steps",
+};
+
+/** The event type as the filter names it. */
+export function eventTypeLabel(type: EventType): string {
+  const named = EVENT_TYPE_LABELS[type];
+  if (named !== undefined) return named;
+  return isEventCategory(type)
+    ? eventCategoryLabel(type)
+    : `${type.charAt(0).toUpperCase()}${type.slice(1)}`;
+}
+
+/** Whether an event type is one of the glyph categories, read under its word. */
+function isEventCategory(value: string): value is EventCategory {
+  return (EVENT_CATEGORIES as readonly string[]).includes(value);
+}
+
+/** Whether a word read off an address is one of the types. */
+export function isEventType(value: string): value is EventType {
+  return (EVENT_TYPES as readonly string[]).includes(value);
+}
+
+/** The kinds a surface is made of: raised, read, dropped, and the records written beside one. */
+const SURFACE_KINDS: ReadonlySet<string> = new Set([
+  "planner-surface-queued",
+  "planner-surfaced",
+  "planner-surface-dropped",
+  "quiet-worker",
+]);
+
+/** The kinds a live edit or a submitted command is recorded under, with its outcome. */
+const EDIT_KINDS: ReadonlySet<string> = new Set([
+  "edit-committed",
+  "edit-rejected",
+  "command-accepted",
+]);
+
+/** The kinds a `kind: command` node's own command is recorded under. */
+const COMMAND_KINDS: ReadonlySet<string> = new Set([
+  "command-started",
+  "command-exited",
+]);
+
+/** What a row is, as far as its type is decided. */
+export interface TypedRow {
+  /** A journal record's wire kind, or a span's kind. */
+  readonly kind: string;
+  /** Whether the row is a span rather than a journal record. */
+  readonly span?: boolean;
+  /** Whether the record belongs to a surface: it raised, read or answered one. */
+  readonly surface?: boolean;
+  /** Whether the record is a note delivered into, or deferred from, a running turn. */
+  readonly note?: boolean;
+}
+
+/**
+ * The span kinds and the type each is read under. A session is the agent's own
+ * work; everything else is read under the category its records would be.
+ */
+const SPAN_TYPES: Readonly<Record<string, EventType>> = {
+  dispatch: "session",
+  "pr-drafting": "session",
+  queued: "contention",
+  rollup: "contention",
+  verification: "verification",
+  publication: "publication",
+  "conflict-resolution": "publication",
+  "human-wait": "human",
+  step: "lifecycle",
+  node: "lifecycle",
+  run: "lifecycle",
+};
+
+/** The one type a row is read under. */
+export function eventType(row: TypedRow): EventType {
+  if (row.span === true) return SPAN_TYPES[row.kind] ?? "lifecycle";
+  if (row.surface === true || SURFACE_KINDS.has(row.kind)) return "surface";
+  if (row.kind === "planner-replied") return "reply";
+  if (row.note === true || row.kind === "note-shown") return "note";
+  if (EDIT_KINDS.has(row.kind)) return "edit";
+  if (COMMAND_KINDS.has(row.kind)) return "command";
+  const category = eventCategory(row.kind);
+  return category;
+}

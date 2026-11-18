@@ -1,7 +1,7 @@
 import {
-  formatAbsoluteTimestamp,
-  formatRelativeTimestamp,
-  formatTimestamp,
+  formatParsedAbsolute,
+  formatParsedRelative,
+  formatParsedTimestamp,
   parseTimestamp,
 } from "./time";
 
@@ -31,9 +31,9 @@ export function Timestamp({
     <time
       className={className}
       dateTime={parsed.toISOString()}
-      title={formatAbsoluteTimestamp(at)}
+      title={formatParsedAbsolute(parsed)}
     >
-      {relative ? formatRelativeTimestamp(at) : formatTimestamp(at)}
+      {relative ? formatParsedRelative(parsed) : formatParsedTimestamp(parsed)}
     </time>
   );
 }

@@ -61,15 +61,6 @@ export const API_V2_PATHS = {
    */
   project: (projectId: string) =>
     `/api/v2/projects/${encodeURIComponent(projectId)}`,
-  channel: (runId: string) =>
-    `/api/v2/runs/${encodeURIComponent(runId)}/channel`,
-  channelNext: (runId: string) =>
-    `/api/v2/runs/${encodeURIComponent(runId)}/channel/next`,
-  channelReply: (runId: string) =>
-    `/api/v2/runs/${encodeURIComponent(runId)}/channel/reply`,
-  channelSurface: (runId: string) =>
-    `/api/v2/runs/${encodeURIComponent(runId)}/channel/surface`,
-  attest: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/attest`,
   stop: (runId: string) => `/api/v2/runs/${encodeURIComponent(runId)}/stop`,
   /** Shut down every run on the host. */
   shutdown: "/api/v2/shutdown",
@@ -148,12 +139,6 @@ export const API_V2_QUERY = {
    * a change of attention rather than a different account of what happened.
    */
   filter: "filter",
-  /**
-   * The question a reply's verdict answers, on `POST .../channel/reply`. Parsed by
-   * the bus's own correlation parser server-side and refused as
-   * `422 invalid_correlation` where it is not one, so nothing here shapes it.
-   */
-  correlation: "correlation",
   /**
    * What ends a watch, beside the run finishing and nothing driving it: the CLI's
    * own conditions — `settled`, `surface`, `nothing-driving`, `node-settled`,
@@ -366,8 +351,18 @@ export const TELEMETRY_SCHEMA_VERSION = 29;
  * `description`, the server's (the engine resolver's) one line for the entry it
  * points at, and a `turn-activity` event `tool`, where it sits in its
  * conversation. The browser shows the line and never derives its own.
+ *
+ * `15` names each check's requirement: a `change-check`'s `review` gains
+ * `requirement` and `url`.
+ *
+ * `16` serves every payload field and what a surface came to. An event's
+ * `fields` are every key of its record's payload under the record's own wire
+ * key — a server on `15` served a selection under English labels — and a
+ * surface's records gain `surface_id`, `correlation` and `surface_state`, the
+ * surface folded over the whole reading, so a node's queued question reads as
+ * answered by the reply the run journalled under no node.
  */
-export const TIMELINE_SCHEMA_VERSION = 15;
+export const TIMELINE_SCHEMA_VERSION = 16;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1613,6 +1608,34 @@ export const timelineSurfaceSchema = openObject({
   }
 });
 /**
+ * What one surface came to (timeline schema 16), on every record of it: folded
+ * by the server over the whole reading, whatever filter the event was listed
+ * under. `queued_at` is when it was sent, `read_at` when it was first taken and
+ * `replied_at` when the reply echoing its correlation was journalled, with that
+ * reply's own words under `reply`. Every member is present only where a record
+ * carried it, and the words are open, as `surface`'s are.
+ */
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] this package is where this repository keeps every read-API record's parser — `docs/dag-ui.md` holds the app to declaring no schema of its own — and `surface_state` is a field of the timeline event whose schema, `timelineEventSchema`, sits beside it here with the `surface` record it extends; a package for one field of one event would split the timeline record across two packages.
+export const timelineSurfaceStateSchema = openObject({
+  id: counter,
+  correlation: z.string().min(1).optional(),
+  node: z.string().min(1).optional(),
+  kind: z.string().min(1).optional(),
+  message: z.string().min(1).optional(),
+  source: z.string().min(1).optional(),
+  blocking: z.boolean().optional(),
+  queued_at: timestamp.optional(),
+  read_at: timestamp.optional(),
+  replied_at: timestamp.optional(),
+  reply: openObject({
+    author: z.string().min(1).optional(),
+    message: z.string().min(1).optional(),
+    completion: z.boolean().optional(),
+    reason: z.string().min(1).optional(),
+    provenance: z.string().min(1).optional(),
+  }).optional(),
+});
+/**
  * Where a change request's review stood, on the six `onevcs` records that say so:
  * a check's `name`, `required` and `state`; a draft's `kind` (`awaiting-checks` for
  * the draft a publication opens while its checks run) and `base`; an early lift's
@@ -1720,6 +1743,11 @@ export const timelineEventSchema = openObject({
   persona: z.string().min(1).optional(),
   dispatch_id: z.string().min(1).optional(),
   dispatch_group: timelineDispatchGroupSchema.optional(),
+  /**
+   * Every fact the record's payload carried (timeline schema 16), under its own
+   * wire key and as recorded, less the values that say nothing and a `vcs`
+   * session's `token`. The keys are the producer's; a reader humanizes them.
+   */
   fields: z.record(z.string().min(1), z.json()).optional(),
   kind: z.string().min(1),
   at: timestamp,
@@ -1749,6 +1777,15 @@ export const timelineEventSchema = openObject({
    */
   // llmlint: ignore[boundary_inputs_validated] the pairing of `surface` with a `kind` is the same constraint this parser may not enforce as the `release` pairing above, and for the same reason: the surface kinds are `onepipeline`'s, released on its own schedule, so a conforming server relaying one of them under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `surface` itself carries is validated above, down to refusing one that carries nothing.
   surface: timelineSurfaceSchema.optional(),
+  /**
+   * The surface a record names by id (timeline schema 16): a queued or taken
+   * surface, a quiet worker, a failed check or checks left unfollowed.
+   */
+  surface_id: z.number().int().nonnegative().optional(),
+  /** The correlation a surface was sent or taken under, or a reply echoed. */
+  correlation: z.string().min(1).optional(),
+  /** What the surface this record belongs to came to, over the whole reading. */
+  surface_state: timelineSurfaceStateSchema.optional(),
   /**
    * Where a change request's review stood, on the six `onevcs` kinds that say so
    * and on no other. Not *keyed* on those names, for the reason `surface` is not.
@@ -2041,403 +2078,6 @@ export const provenanceSchema: z.ZodType<Provenance> = z.enum([
 /** `provenance` as a record states it, absent read as the engine reads it: `manager`. */
 export const provenanceOf = (stated: unknown): Provenance =>
   stated === "user" ? "user" : "manager";
-
-/** What kind of ruling a dispatch declined, as the engine's `RulingKind` spells it. */
-export const rulingKindSchema = z.enum(["note", "amendment", "answer"]);
-
-/**
- * The record every `declined-ruling` surface carries beside its message, as the
- * engine's `channel::DeclinedRuling` declares it (its `schemas/planner-channel.json`):
- * the node the ruling was addressed to, the reference it was given, its party,
- * its kind, the id of the reply envelope that carried it, its text and the reason
- * it was declined. Closed, as the engine closes it. A reader takes every fact of a
- * declined ruling from here and never from the surface's `message`.
- */
-export const declinedRulingSchema = z.strictObject({
-  node: z.string(),
-  ruling: z.string(),
-  provenance: provenanceSchema,
-  kind: rulingKindSchema,
-  reply: counter,
-  text: z.string(),
-  reason: z.string(),
-});
-
-/** The surface kind whose record is a {@link declinedRulingSchema}. */
-export const DECLINED_RULING_KIND = "declined-ruling";
-
-/**
- * One surface the run raised, as the engine's own channel records it.
- *
- * `kind` and `source` are the host's own words, relayed as recorded: the engine
- * relays any well-formed kind a host's observer binding defines and any author its
- * launch declared, so neither is an enum here. `blocking` says whether the run is
- * waiting on the answer — a blocking surface is a decision point holding the
- * subtree under `workstream`. `abandoned` is set when the process serving the
- * surface exited without an answer, and omitted from the wire while false.
- */
-export const channelSurfaceSchema = openObject({
-  id: counter,
-  correlation: z.string().min(1).optional(),
-  kind: z.string().min(1),
-  message: z.string(),
-  source: z.string().min(1),
-  blocking: z.boolean(),
-  queued_at: nonnegative,
-  workstream: z.string().min(1).optional(),
-  abandoned: z.boolean().optional(),
-  declined_ruling: declinedRulingSchema.optional(),
-}).superRefine((surface, context) => {
-  // The engine holds every write to this: the record is on every
-  // `declined-ruling` surface and on no other.
-  if (
-    (surface.kind === DECLINED_RULING_KIND) !==
-    (surface.declined_ruling !== undefined)
-  )
-    context.addIssue({
-      code: "custom",
-      path: ["declined_ruling"],
-      message:
-        "a declined-ruling surface, and only one, carries its declined ruling",
-    });
-});
-
-/**
- * The reply envelope, as the engine's `Reply` schema states it.
- *
- * Two halves with two readers. The **verdict** — `completion`, `message`,
- * `reason` — answers a pending surface; the **commands** are the reconciler's,
- * reconciled against the graph in order. An envelope carrying commands must name
- * `version` {@link REPLY_ENVELOPE_VERSION}, which the engine refuses otherwise; a
- * verdict alone needs none. `author` omitted is `planner`, and any other author
- * is judged by the run's launch configuration inside the engine.
- *
- * Declared here rather than in the browser because the composer's shortcuts
- * render to it: a shape this client did not declare is one it cannot hold a form
- * to. The engine still reads the bytes it is sent, not this parse — a client
- * sends the envelope verbatim and shows the engine's refusal verbatim.
- */
-export const REPLY_ENVELOPE_VERSION = 4;
-
-/** Who a note is for: the worker's task, the supervisor's, or both parties. */
-export const noteAddresseeSchema = z.enum(["worker", "supervisor", "both"]);
-/** Whether a note is attempted on the running turn (`live`) or held for the next dispatch. */
-export const noteDeliverSchema = z.enum(["live", "next"]);
-/**
- * What a dropped node's direct dependents become. Detaching first: a form that
- * offers the two in this order defaults to the one that loses nothing.
- */
-export const dropDependentsSchema = z.enum(["detach", "drop"]);
-/** How a `settle` closes a node out. */
-export const settleOutcomeSchema = z.enum(["done", "failed"]);
-
-/**
- * The partial node a `requeue` merges onto a parked node before it is
- * redispatched. Open, because any node field may be amended; typed where the
- * field is one this client reads, so an amendment replacing the node's `sets` —
- * `[]` included, which clears them — is held to the list's shape.
- */
-export const requeueAmendSchema = openObject({
-  sets: nodeSetsSchema.optional(),
-});
-
-/**
- * One graph edit, discriminated on `op`, with exactly the required fields the
- * engine's `Command` declares. Every object is closed: the engine refuses a field
- * it does not declare by name, and a composer that let one through would be
- * composing a refusal.
- */
-export const replyCommandSchema = z.discriminatedUnion("op", [
-  z.object({ op: z.literal("add"), node: planTaskSchema }).strict(),
-  z
-    .object({
-      op: z.literal("drop"),
-      id: z.string().min(1),
-      dependents: dropDependentsSchema,
-      reason: z.string().min(1).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("reparent"),
-      id: z.string().min(1),
-      deps: z.array(z.string().min(1)),
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("retry"),
-      id: z.string().min(1),
-      node: planTaskSchema,
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("cancel"),
-      id: z.string().min(1),
-      reason: z.string().min(1).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("requeue"),
-      id: z.string().min(1),
-      amend: requeueAmendSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("set-node-sets"),
-      id: z.string().min(1),
-      sets: nodeSetsSchema,
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("set-run-node-sets"),
-      sets: nodeSetsSchema,
-    })
-    .strict(),
-  z.object({ op: z.literal("attest"), ref: z.string().min(1) }).strict(),
-  z.object({ op: z.literal("complete"), reason: z.string().min(1) }).strict(),
-  z
-    .object({
-      op: z.literal("amend"),
-      id: z.string().min(1),
-      text: z.string().min(1),
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("note"),
-      id: z.string().min(1),
-      addressee: noteAddresseeSchema,
-      text: z.string().min(1),
-      criterion: z.string().min(1).optional(),
-      deliver: noteDeliverSchema.optional(),
-      persist: z.boolean().optional(),
-      delivery_timeout_seconds: z.number().int().positive().optional(),
-    })
-    .strict(),
-  // Take back a note an earlier envelope sent, named by that envelope's id and
-  // the note's 0-based position among its commands.
-  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
-  z
-    .object({
-      op: z.literal("withdraw-note"),
-      envelope: z.string().min(1),
-      index: z.number().int().nonnegative(),
-      reason: z.string().min(1),
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("finding"),
-      message: z.string().min(1),
-      blocking: z.boolean().optional(),
-      id: z.string().min(1).optional(),
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("settle"),
-      id: z.string().min(1),
-      outcome: settleOutcomeSchema,
-      evidence: z.string().min(1),
-      landing: z.string().min(1).optional(),
-      release: z
-        .object({ target: z.string().min(1), version: z.string().min(1) })
-        .strict()
-        .optional(),
-    })
-    .strict(),
-  // llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the engine owns these command declarations; this browser package validates the reply wire format it consumes. `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` reads the linked engine schema into the golden, and the consumer journey compares this union with that golden op for op and field for field. These are reconciled wire schemas, not implementations of rework or retitle.
-  z
-    .object({
-      op: z.literal("rework"),
-      id: z.string().min(1),
-      reason: z.string().min(1),
-      instruction: z.string().min(1),
-      comments: z
-        .array(z.object({ id: z.string(), url: z.string() }).strict())
-        .optional(),
-      title: z.string().optional(),
-      replacement: z.string().optional(),
-    })
-    .strict(),
-  z
-    .object({
-      op: z.literal("retitle"),
-      id: z.string().min(1),
-      title: z.string().min(1),
-      reason: z.string().min(1),
-    })
-    .strict(),
-  // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
-  // An explicit discovery pass: the engine reads the run's review comments and
-  // changes nothing in the graph, so the command carries no field at all.
-  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
-  z.object({ op: z.literal("review") }).strict(),
-  // Readjust the run's drafts onto what has landed: the engine surfaces no
-  // comment and changes nothing in the graph, so the command carries no field.
-  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
-  z.object({ op: z.literal("readjust") }).strict(),
-  // Decline review comments on a node's draft: the engine drafts and posts one
-  // reply per named comment from the reason, and changes nothing in the graph.
-  // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the engine owns this command; this entry restates it for the browser's reply grammar, and `tests/contract.rs::the_browser_clients_copy_of_the_reply_commands_matches_the_engines` regenerates `reply-commands.json` from the linked onepipeline's Command schema, which `e2e/model.e2e.test.ts` holds this union to op for op, so the copy cannot drift and the pin move fails without it.
-  z
-    .object({
-      op: z.literal("decline"),
-      id: z.string().min(1),
-      comments: z.array(z.object({ id: z.string(), url: z.string() }).strict()),
-      reason: z.string().min(1),
-    })
-    .strict(),
-]);
-
-/** The ops the envelope may carry, in schema order. */
-export const REPLY_OPS = replyCommandSchema.options.map(
-  (option) => option.shape.op.value,
-);
-
-export const replyEnvelopeSchema = z
-  .object({
-    version: counter.optional(),
-    author: z.string().min(1).optional(),
-    completion: z.boolean().optional(),
-    message: z.string().optional(),
-    reason: z.string().optional(),
-    commands: z.array(replyCommandSchema).optional(),
-    // Whose words the envelope is; absent, the manager's. The read API records
-    // what the browser sends as the user's and refuses a body claiming the
-    // manager's, so a composer never writes it.
-    provenance: provenanceSchema.optional(),
-  })
-  .strict()
-  // An edit envelope is read at exactly the version the engine writes: a
-  // `commands` array under any other `version`, or none, is refused by the
-  // engine with "an edit envelope requires version 4", so it is refused here
-  // first. An envelope carrying neither half is deliberately *not* refused —
-  // the engine answers one, naming no verdict — and a verdict alone names no
-  // version, so nothing else is required.
-  .superRefine((envelope, context) => {
-    if (
-      envelope.commands !== undefined &&
-      envelope.commands.length > 0 &&
-      envelope.version !== REPLY_ENVELOPE_VERSION
-    ) {
-      context.addIssue({
-        code: "custom",
-        path: ["version"],
-        message: `an edit envelope requires version ${REPLY_ENVELOPE_VERSION}`,
-      });
-    }
-  });
-
-/**
- * One reply the planner wrote, as the channel keeps it: the envelope, when, and
- * the question it was bound to where it was.
- *
- * The recorded envelope is read **open** rather than through
- * {@link replyEnvelopeSchema}: it is what an earlier build wrote, possibly under a
- * vocabulary this one does not spell, and a queue that fails to parse for one old
- * reply is a queue nobody can read.
- */
-export const queuedReplySchema = openObject({
-  id: counter,
-  reply: arbitraryRecord,
-  at: nonnegative,
-  correlation: z.string().min(1).optional(),
-});
-
-/** One submitted edit envelope awaiting the reconciler: its author and its commands, open. */
-export const queuedCommandsSchema = openObject({
-  id: counter,
-  author: z.string().min(1).optional(),
-  commands: z.array(arbitraryRecord),
-  // Whose words the envelope is, written only for `user`.
-  provenance: provenanceSchema.optional(),
-});
-
-/** What became of one command of an envelope, in the reconciler's own words. */
-export const commandResultSchema = openObject({
-  op: z.string().min(1).optional(),
-  outcome: z.string().min(1).optional(),
-  reason: z.string().optional(),
-});
-
-/**
- * The reconciler's answer to one envelope: all-or-nothing on `applied`, with one
- * entry per command in `results` where this build writes them.
- */
-export const commandOutcomeSchema = openObject({
-  id: counter,
-  applied: z.boolean(),
-  reason: z.string().optional(),
-  results: z.array(commandResultSchema).optional(),
-});
-
-/**
- * `GET /api/v2/runs/{run}/channel`: the queue, read and never consumed — every
- * surface raised, the ones nobody has read, whatever the pending slot holds, every
- * reply written, the edit envelopes the reconciler has not claimed, and its answers
- * to the ones it has.
- */
-export const channelQueueSchema = openObject({
-  ...verbEnvelope,
-  run_id: z.string().min(1),
-  surfaces: z.array(channelSurfaceSchema),
-  waiting: z.array(channelSurfaceSchema),
-  held: channelSurfaceSchema.nullable(),
-  replies: z.array(queuedReplySchema),
-  commands: z.array(queuedCommandsSchema),
-  outcomes: z.array(commandOutcomeSchema),
-});
-
-/** Whether `next` claimed a surface, and if not, whether the run is over. */
-export const nextStatusSchema = z.enum(["surface", "running", "finished"]);
-
-/**
- * `POST /api/v2/runs/{run}/channel/next`: the channel's only consumer. `surface`
- * is the one claimed by this read, and `events` the run's store shaped through
- * the reader's profile — the engine's own machine records, passed through.
- */
-export const channelNextSchema = openObject({
-  ...verbEnvelope,
-  run_id: z.string().min(1),
-  status: nextStatusSchema,
-  surface: channelSurfaceSchema.nullable(),
-  events: z.array(arbitraryRecord),
-});
-
-/**
- * The receipt `reply` and `attest` answer with — entry 64 of the engine's
- * divergence record — under `receipt`, with the engine's `advice` beside it as
- * the sentences its binary prints, in order.
- *
- * `state` is the engine's word for what the envelope became, and `verdict` and
- * `commands` are present exactly when that half was carried. Open words, because
- * they are the engine's to extend and a receipt is shown as served.
- */
-export const replyReceiptSchema = openObject({
-  ...verbEnvelope,
-  run_id: z.string().min(1),
-  receipt: openObject({
-    reply: counter,
-    state: z.string().min(1),
-    verdict: z.string().min(1).optional(),
-    commands: z.string().min(1).optional(),
-  }),
-  advice: z.array(z.string()),
-});
-
-/** `POST /api/v2/runs/{run}/channel/surface`: the queued surface's id and `queued`. */
-export const surfacedSchema = openObject({
-  ...verbEnvelope,
-  run_id: z.string().min(1),
-  surface: counter,
-  state: z.string().min(1),
-});
 
 /**
  * `POST /api/v2/runs/{run}/stop`: `verbs::Stopped`. `owner` is the owner as the
@@ -2804,7 +2444,6 @@ export const subscriptionViewSchema = z.union([
     node: z.string().min(1),
     filter: z.string().min(1).optional(),
   }),
-  z.strictObject({ type: z.literal("channel"), run_id: z.string().min(1) }),
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
   z.strictObject({
     type: z.literal("human-items"),
@@ -2857,12 +2496,6 @@ export const visibleStateSchema = z.union([
     detail: liveRunDetailSchema,
     timeline: runTimelineSchema,
   }),
-  z.strictObject({
-    type: z.literal("channel"),
-    run_id: z.string().min(1),
-    detail: liveRunDetailSchema,
-    channel: channelQueueSchema,
-  }),
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
   humanItemsVisibleSchema,
 ]);
@@ -2870,7 +2503,7 @@ export const visibleStateSchema = z.union([
 export const subscriptionSnapshotSchema = z.strictObject({
   id: eventIdSchema,
   /**
-   * The rows, or `null` for a `detail`, `timeline` or `channel` view (schema 28),
+   * The rows, or `null` for a `detail` or `timeline` view (schema 28),
    * whose rows are its stream's first frame, `sidebar.snapshot`.
    */
   sidebar: z.array(sidebarRowSchema).nullable(),
@@ -2939,12 +2572,6 @@ export const subscriptionFrameSchema = z.union([
     node: z.string().min(1),
     ops: z.array(patchOpSchema),
   }),
-  z.strictObject({
-    ...frameCommon,
-    type: z.literal("channel.patch"),
-    run_id: z.string().min(1),
-    ops: z.array(patchOpSchema),
-  }),
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
   z.strictObject({
     ...frameCommon,
@@ -2960,7 +2587,6 @@ export const SUBSCRIPTION_FRAME_TYPES = [
   "run.removed",
   "detail.patch",
   "timeline.patch",
-  "channel.patch",
   // llmlint: ignore[code_lands_in_the_domain_that_owns_it] the subscription protocol is one closed contract, `docs/contract.md`'s, whose views and frames this one union declares for every consumer and `tests/fixtures` pins; the human-item records themselves live in `./human-items.ts`, and the plan names this union as what gains the view.
   "human-items.patch",
 ] as const;
@@ -3338,6 +2964,7 @@ export type ReleaseAwaited = z.infer<typeof releaseAwaitedSchema>;
 export type TimelineRelease = z.infer<typeof timelineReleaseSchema>;
 /** What one surface record said about the surface it raised or consumed. */
 export type TimelineSurface = z.infer<typeof timelineSurfaceSchema>;
+export type TimelineSurfaceState = z.infer<typeof timelineSurfaceStateSchema>;
 export type DagConversation = z.infer<typeof dagConversationSchema>;
 export type NodeConversations = z.infer<typeof nodeConversationsSchema>;
 export type RunConversations = z.infer<typeof runConversationsSchema>;
@@ -3364,19 +2991,6 @@ export type SseEventName = z.infer<typeof sseEventNameSchema>;
 export type ProjectGroup = z.infer<typeof projectGroupSchema>;
 export type ProjectList = z.infer<typeof projectListSchema>;
 export type ProjectDetail = z.infer<typeof projectDetailSchema>;
-export type ChannelSurface = z.infer<typeof channelSurfaceSchema>;
-export type DeclinedRuling = z.infer<typeof declinedRulingSchema>;
-export type ReplyCommand = z.infer<typeof replyCommandSchema>;
-export type ReplyOp = ReplyCommand["op"];
-export type ReplyEnvelope = z.infer<typeof replyEnvelopeSchema>;
-export type NoteAddressee = z.infer<typeof noteAddresseeSchema>;
-export type QueuedReply = z.infer<typeof queuedReplySchema>;
-export type QueuedCommands = z.infer<typeof queuedCommandsSchema>;
-export type CommandOutcome = z.infer<typeof commandOutcomeSchema>;
-export type ChannelQueue = z.infer<typeof channelQueueSchema>;
-export type ChannelNext = z.infer<typeof channelNextSchema>;
-export type ReplyReceipt = z.infer<typeof replyReceiptSchema>;
-export type Surfaced = z.infer<typeof surfacedSchema>;
 export type Stopped = z.infer<typeof stoppedSchema>;
 export type ShutdownScope = z.infer<typeof shutdownScopeSchema>;
 export type HostShutdownScope = z.infer<typeof hostShutdownScopeSchema>;
@@ -3400,5 +3014,5 @@ export const parseRunDetail = (value: unknown): RunDetail =>
   runDetailSchema.parse(value);
 export const parseRunTimeline = (value: unknown): RunTimeline =>
   runTimelineSchema.parse(value);
-// llmlint: ignore[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` — the runs, channel, host, agents and subscription records are exported from this same barrel — and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own; the plan names this package as one this change touches.
+// llmlint: ignore[code_lands_in_the_domain_that_owns_it] this repository keeps every read-API record's parser in `@onepipeline-ui/dag-model` — the runs, host, agents and subscription records are exported from this same barrel — and `docs/dag-ui.md` holds the app to declaring no schema or API path of its own; the plan names this package as one this change touches.
 export * from "./human-items.js";

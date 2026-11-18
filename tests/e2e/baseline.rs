@@ -70,7 +70,7 @@ use crate::fixture_run;
 use crate::http;
 use crate::serving::{ForeignServing, Serving};
 use crate::sibling;
-use crate::timeline_schema::TIMELINE_EVENT_ADDITIONS;
+use crate::timeline_schema::{TIMELINE_EVENT_ADDITIONS, WIRE_KEYED_FIELDS};
 
 /// The environment variable naming the provisioned baseline server.
 ///
@@ -223,7 +223,6 @@ fn asked(run: &str) -> Vec<(&'static str, String)> {
             routes::PROJECT,
             routes::PROJECT.replace("{project}", fixture_run::PLAN_PROJECT),
         ),
-        (routes::RUN_CHANNEL, for_run(routes::RUN_CHANNEL)),
         (routes::UNWATCHED, routes::UNWATCHED.to_owned()),
         (routes::HOST, routes::HOST.to_owned()),
         (routes::RUN_STATUS, for_run(routes::RUN_STATUS)),
@@ -330,6 +329,12 @@ fn walk(value: &Value, at: String, found: &mut BTreeSet<String>) {
     }
 }
 
+/// Whether `field` is a key inside a timeline event's `fields`, on a span's
+/// events or on a history page's rows.
+fn is_event_field(field: &str) -> bool {
+    field.contains("events[].fields.") || field.contains("rows[].fields.")
+}
+
 /// The `onepipeline` this clone provisioned, as an older server may need it.
 ///
 /// This build runs no `onepipeline` process; a base commit from before that may
@@ -397,8 +402,21 @@ fn every_field_the_base_commit_served_is_served_by_this_build() {
                 "{path}: the base commit answered it and this build does not: {}",
                 after.body
             );
-            let dropped: Vec<String> = fields(&before.json())
-                .difference(&fields(&after.json()))
+            let (before, after) = (before.json(), after.json());
+            // Schema 16 keys an event's `fields` by wire key rather than label, so
+            // a labelled key the base served is not served under that name now;
+            // that every value it held still is, on the same event, is what
+            // `every_span_and_event_the_base_commits_timeline_served_is_served_unchanged`
+            // holds.
+            let rekeyed = before["timeline_schema_version"]
+                .as_u64()
+                .is_some_and(|schema| schema < WIRE_KEYED_FIELDS)
+                && after["timeline_schema_version"]
+                    .as_u64()
+                    .is_some_and(|schema| schema >= WIRE_KEYED_FIELDS);
+            let dropped: Vec<String> = fields(&before)
+                .difference(&fields(&after))
+                .filter(|field| !(rekeyed && is_event_field(field)))
                 .cloned()
                 .collect();
             assert!(
@@ -643,7 +661,17 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
         before.body
     );
     assert_eq!(after.status, 200, "{path} now: {}", after.body);
-    let (mut before, mut after) = (before.json(), after.json());
+    timelines_of(before.json(), after.json(), newer, path)
+}
+
+/// [`timelines`], over two bodies already read; `newer` is asked again for the
+/// run's own timeline where a node's needs it.
+fn timelines_of(
+    mut before: Value,
+    mut after: Value,
+    newer: SocketAddr,
+    path: &str,
+) -> (Value, Value, u64) {
     telemetry_schemas_are_compatible(&before, &after)
         .unwrap_or_else(|error| panic!("{path}: {error}"));
     let base_schema = before["timeline_schema_version"]
@@ -751,6 +779,13 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
             }
         }
     }
+    // Schema 16 keys `fields` by the record's wire key and serves every one of
+    // them where the base served a selection under English labels. Every value
+    // the base served is still served on the same event; the keys are compared
+    // no further.
+    if base_schema < WIRE_KEYED_FIELDS && schema >= WIRE_KEYED_FIELDS {
+        rekeyed_fields_still_carry_the_base(&mut before, &mut after, path);
+    }
     for body in [&mut before, &mut after] {
         let body = body.as_object_mut().expect("a timeline");
         body.remove("observed_at");
@@ -762,10 +797,78 @@ fn timelines(older: SocketAddr, newer: SocketAddr, path: &str) -> (Value, Value,
     (before, as_served_at(after, base_schema), base_schema)
 }
 
+/// Hold every value a base event served under a labelled `fields` key to being
+/// served among the same event's wire-keyed `fields` now, then set both aside.
+fn rekeyed_fields_still_carry_the_base(before: &mut Value, after: &mut Value, path: &str) {
+    let served_now: std::collections::HashMap<String, Value> = after["spans"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|span| span["events"].as_array().into_iter().flatten())
+        .filter_map(|event| Some((event["id"].as_str()?.to_owned(), event["fields"].clone())))
+        .collect();
+    for event in before["spans"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|span| span["events"].as_array().into_iter().flatten())
+    {
+        let Some(labelled) = event["fields"].as_object() else {
+            continue;
+        };
+        let id = event["id"].as_str().unwrap_or_default();
+        let now = served_now
+            .get(id)
+            .and_then(Value::as_object)
+            .unwrap_or_else(|| {
+                panic!("{path}: event {id} lost the fields the base served: {event}")
+            });
+        for (label, value) in labelled {
+            assert!(
+                now.values().any(|served| served == value),
+                "{path}: event {id} no longer serves the base's {label} = {value}: {now:?}"
+            );
+        }
+    }
+    for body in [before, after] {
+        for span in body["spans"].as_array_mut().into_iter().flatten() {
+            for event in span["events"].as_array_mut().into_iter().flatten() {
+                if let Some(event) = event.as_object_mut() {
+                    event.remove("fields");
+                }
+            }
+        }
+    }
+}
+
 /// What `path` serves now that the base commit's schema served differently, as
 /// the failure to report — or nothing, when every span and event is the same.
 fn served_differently(older: SocketAddr, newer: SocketAddr, path: &str) -> Option<String> {
     let (before, after, base_schema) = timelines(older, newer, path);
+    (after != before).then(|| {
+        format!(
+            "{path}: this build serves a span or event the base commit's schema \
+             {base_schema} served differently\n  base: {before}\n  this: {after}"
+        )
+    })
+}
+
+/// [`served_differently`], between two servers of this build over two stores
+/// written alike: each store's own location, which a record names where it
+/// keeps a file under it — a report's path — is set aside on both sides, so
+/// what is compared is what the two stores recorded.
+fn served_differently_between(older: &Serving, newer: &Serving, path: &str) -> Option<String> {
+    let read = |serving: &Serving| -> Value {
+        let answer = http::get(serving.address, path);
+        assert_eq!(answer.status, 200, "{path}: {}", answer.body);
+        let root = serving.runs_root();
+        let workspace = root.parent().expect("a store's workspace");
+        let text = answer
+            .body
+            .replace(&workspace.display().to_string(), "{workspace}");
+        serde_json::from_str(&text).expect("a timeline")
+    };
+    let (before, after, base_schema) = timelines_of(read(older), read(newer), newer.address, path);
     (after != before).then(|| {
         format!(
             "{path}: this build serves a span or event the base commit's schema \
@@ -915,7 +1018,14 @@ fn every_span_and_event_the_base_commits_timeline_served_is_served_unchanged() {
 #[test]
 fn a_span_or_event_served_differently_from_the_base_fails_the_comparison() {
     let unchanged = Serving::start(compared_store);
-    let same = Serving::start(compared_store);
+    // A second server of this build over the very same store: a record may name
+    // a file the store keeps beside it by its absolute path, which a second store
+    // written alike would name elsewhere.
+    let same = ForeignServing::start(
+        &assert_cmd::cargo::cargo_bin("onepipeline-api"),
+        &unchanged.runs_root(),
+        &[],
+    );
     for (run, nodes) in COMPARED_RUNS {
         for path in timeline_paths(run, nodes) {
             assert_eq!(
@@ -941,13 +1051,13 @@ fn a_span_or_event_served_differently_from_the_base_fails_the_comparison() {
     };
     let review_run = timeline_paths(fixture_run::REVIEW_DRAFT_RUN_ID, &[])[0].clone();
     let verdict = rewritten("passed-with-skipped", "passed");
-    let refused = served_differently(unchanged.address, verdict.address, &review_run)
+    let refused = served_differently_between(&unchanged, &verdict, &review_run)
         .expect("a review event served with another verdict is refused");
     assert!(refused.contains("passed-with-skipped"), "{refused}");
     // One span of it: the kept draft's publication, ending where the run's watch
     // of it ended, which moves with the record that watch ended on.
     let watch = rewritten("2026-08-07T12:00:11.000Z", "2026-08-07T12:00:11.250Z");
-    let refused = served_differently(unchanged.address, watch.address, &review_run)
+    let refused = served_differently_between(&unchanged, &watch, &review_run)
         .expect("a publication served ending elsewhere is refused");
     assert!(refused.contains("2026-08-07T12:00:11.250Z"), "{refused}");
 
@@ -967,7 +1077,7 @@ fn a_span_or_event_served_differently_from_the_base_fails_the_comparison() {
     for (run, nodes) in COMPARED_RUNS {
         let refused = timeline_paths(run, nodes)
             .iter()
-            .any(|path| served_differently(unchanged.address, truncated.address, path).is_some());
+            .any(|path| served_differently_between(&unchanged, &truncated, path).is_some());
         if refused {
             refused_runs.push(*run);
         }

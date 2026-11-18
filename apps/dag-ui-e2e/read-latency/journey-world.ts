@@ -422,7 +422,6 @@ export function visibleOf(body: unknown): Visible {
   const { visible } = initial.snapshot;
   switch (visible.type) {
     case "detail":
-    case "channel":
       return { detail: visible.detail };
     case "timeline":
       return { detail: visible.detail, timeline: visible.timeline };

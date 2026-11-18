@@ -386,7 +386,7 @@ test("a package consumer reads the agents a run, a node and a project launched o
   }
 });
 
-test("a package consumer sends an envelope as the bytes it typed and reads the engine's receipt or refusal verbatim", async () => {
+test("a package consumer stops a run and reads the engine's answer or refusal verbatim", async () => {
   const received: { method: string; path: string; body: string }[] = [];
   const server = await serveLoopback(async (request) => {
     const url = new URL(request.url);
@@ -397,60 +397,6 @@ test("a package consumer sends an envelope as the bytes it typed and reads the e
       body,
     });
     switch (url.pathname) {
-      case "/api/v2/runs/run-1/channel":
-        return Response.json({
-          ...enveloped,
-          run_id: "run-1",
-          surfaces: [],
-          waiting: [],
-          held: null,
-          replies: [],
-          commands: [],
-          outcomes: [],
-        });
-      case "/api/v2/runs/run-1/channel/next":
-        return Response.json({
-          ...enveloped,
-          run_id: "run-1",
-          status: "running",
-          surface: null,
-          events: [],
-        });
-      case "/api/v2/runs/run-1/channel/reply":
-        // A malformed envelope is the engine's refusal, in the engine's words.
-        if (!body.startsWith("{"))
-          return Response.json(
-            {
-              error: {
-                code: "refused",
-                message:
-                  "refused: the reply is malformed: expected value at line 1 column 1",
-              },
-            },
-            { status: 422 },
-          );
-        return Response.json({
-          ...enveloped,
-          run_id: "run-1",
-          receipt: { reply: 3, state: "delivered", verdict: "delivered" },
-          advice: [
-            "nothing is driving run-1; adopt it for the reply to be read",
-          ],
-        });
-      case "/api/v2/runs/run-1/channel/surface":
-        return Response.json({
-          ...enveloped,
-          run_id: "run-1",
-          surface: 4,
-          state: "queued",
-        });
-      case "/api/v2/runs/run-1/attest":
-        return Response.json({
-          ...enveloped,
-          run_id: "run-1",
-          receipt: { reply: 0, state: "applied", commands: "applied" },
-          advice: [],
-        });
       case "/api/v2/runs/run-1/stop":
         if (body === '{"force":false}')
           return Response.json(
@@ -481,30 +427,6 @@ test("a package consumer sends an envelope as the bytes it typed and reads the e
   });
   try {
     const client = new TelemetryClient(`http://127.0.0.1:${server.port}`);
-    expect((await client.getChannel("run-1")).held).toBeNull();
-    expect((await client.claimNext("run-1", "planner")).status).toBe("running");
-    // The bytes on the wire are the bytes given — whitespace, key order and all.
-    const typed = '{ "completion": false,\n  "message": "keep going" }';
-    const receipt = await client.reply("run-1", typed, "corr-1");
-    expect(receipt.receipt).toEqual({
-      reply: 3,
-      state: "delivered",
-      verdict: "delivered",
-    });
-    expect(receipt.advice).toHaveLength(1);
-    await expect(client.reply("run-1", "not json")).rejects.toMatchObject({
-      status: 422,
-      code: "refused",
-      message:
-        "refused: the reply is malformed: expected value at line 1 column 1",
-    });
-    expect(
-      (await client.surface("run-1", { kind: "finding", message: "red" }))
-        .surface,
-    ).toBe(4);
-    expect((await client.attest("run-1", "signoff")).receipt.state).toBe(
-      "applied",
-    );
     await expect(client.stop("run-1")).rejects.toMatchObject({
       status: 409,
       code: "not_owner",
@@ -513,19 +435,11 @@ test("a package consumer sends an envelope as the bytes it typed and reads the e
     expect((await client.stop("run-1", true)).forced).toBe(true);
 
     expect(received.map(({ method, path }) => `${method} ${path}`)).toEqual([
-      "GET /api/v2/runs/run-1/channel",
-      "POST /api/v2/runs/run-1/channel/next?filter=planner",
-      "POST /api/v2/runs/run-1/channel/reply?correlation=corr-1",
-      "POST /api/v2/runs/run-1/channel/reply",
-      "POST /api/v2/runs/run-1/channel/surface",
-      "POST /api/v2/runs/run-1/attest",
       "POST /api/v2/runs/run-1/stop",
       "POST /api/v2/runs/run-1/stop",
     ]);
-    expect(received[2]?.body).toBe(typed);
-    expect(received[4]?.body).toBe('{"kind":"finding","message":"red"}');
-    expect(received[5]?.body).toBe('{"reference":"signoff"}');
-    expect(received[7]?.body).toBe('{"force":true}');
+    expect(received[0]?.body).toBe('{"force":false}');
+    expect(received[1]?.body).toBe('{"force":true}');
   } finally {
     await server.stop();
   }

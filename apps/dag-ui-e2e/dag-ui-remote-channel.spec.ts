@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import { fixture, runs } from "./fixture-facts";
 import { startFixtureServer } from "./fixture-server";
 import { appendRecords } from "./load/journal";
+import { openRepeatedLoops } from "./observatory-locators";
 
 test("Remote retains publication and release and follows each check's destination", async ({
   page,
@@ -172,6 +173,13 @@ test("Remote displays incomplete check records without inventing a status or lin
     ).toHaveAccessibleName("not recorded");
     await expect(row.getByRole("link")).toHaveCount(0);
     await page.getByRole("tab", { name: "Timeline", exact: true }).click();
+    await expect(
+      page
+        .getByRole("region", { name: "Node transcript" })
+        .getByRole("article")
+        .first(),
+    ).toBeVisible();
+    await openRepeatedLoops(page);
     // Both records are rows of the node's timeline.
     await expect(
       page.getByRole("button", { name: "Open change-check", exact: true }),

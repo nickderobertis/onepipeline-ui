@@ -104,11 +104,6 @@ GET /api/v2/runs/{run}/artifacts/{id}
 GET /api/v2/events                    # SSE; a subscription's changes, else a fresh snapshot per connection
 GET /api/v2/projects                  # runs grouped by project, as `onepipeline runs` groups them
 GET /api/v2/projects/{project}
-GET /api/v2/runs/{run}/channel        # the channel, consuming nothing
-POST /api/v2/runs/{run}/channel/next  # claim the next surface
-POST /api/v2/runs/{run}/channel/reply # the envelope's bytes, verbatim; ?correlation=C
-POST /api/v2/runs/{run}/channel/surface
-POST /api/v2/runs/{run}/attest
 POST /api/v2/runs/{run}/stop          # as the session `--session` names
 POST /api/v2/shutdown                 # host scope only; {scope: "host", grace?, force?}
 GET /api/v2/unwatched
@@ -139,7 +134,8 @@ The first seven are the read surface the browser view was written against;
 the rest wrap the supported post-launch verbs — each a thin call into
 `onepipeline::verbs`, never a re-implementation
 and never the binary. Launching a plan and driving the planning stage are
-outside this API; a reply on any run's channel is inside it. The server acts as
+outside this API, and so is a run's channel: claiming, replying, raising a
+surface and attesting are the CLI's alone. The server acts as
 one launching session (`--session ID`, else `ONEPIPELINE_LAUNCHER_SESSION`),
 which is what its stops and shutdowns are judged by.
 

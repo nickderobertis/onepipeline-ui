@@ -84,9 +84,6 @@ pub enum ApiError {
     /// A page named a span the timeline does not hold.
     #[error("no such span: {0}")]
     SpanNotFound(crate::contract::SpanId),
-    /// `?correlation=` is not a token the bus's own parser accepts.
-    #[error("invalid correlation: {0}")]
-    InvalidCorrelation(String),
     /// `?filter=` named a profile the run being read does not have.
     ///
     /// Separate from [`InvalidRequest`](Self::InvalidRequest) because it is not
@@ -234,7 +231,6 @@ impl ApiError {
             Self::HumanItemNotFound(_) => "human_item_not_found",
             Self::HumanItemNotOwner(_) => "human_item_not_owner",
             Self::HumanItemConflict(_) => "human_item_conflict",
-            Self::InvalidCorrelation(_) => "invalid_correlation",
             Self::InvalidSubscription(_) => "invalid_subscription",
             Self::NodeNotFound(_) => "node_not_found",
             Self::SpanNotFound(_) => "span_not_found",
@@ -272,7 +268,6 @@ impl ApiError {
             | Self::InvalidDispatchId(_)
             | Self::InvalidProjectId(_)
             | Self::InvalidHumanItemId(_)
-            | Self::InvalidCorrelation(_)
             | Self::Refused(_) => StatusCode::UNPROCESSABLE_ENTITY,
             Self::RemovedRoute(_)
             | Self::NoSuchRoute

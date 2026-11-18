@@ -6,9 +6,15 @@ import { describe, expect, test } from "vitest";
 import {
   DEFAULT_EVENT_CATEGORY,
   EVENT_CATEGORIES,
+  EVENT_TYPES,
   type EventCategory,
+  type EventType,
   eventCategory,
   eventCategoryLabel,
+  eventType,
+  eventTypeLabel,
+  isEventType,
+  type TypedRow,
 } from "./index.js";
 
 /** A file of this repository, by its path from the root. */
@@ -353,5 +359,49 @@ describe("the category one journal record is read under", () => {
     // that category is *drawn* as is the app's, and is held in its own suite.
     expect(eventCategory(FUTURE_KIND)).toBe(DEFAULT_EVENT_CATEGORY);
     expect(EVENT_CATEGORIES).toContain(DEFAULT_EVENT_CATEGORY);
+  });
+});
+
+describe("event types", () => {
+  test("every type has a label, and a row of each is filed under it", () => {
+    const rows: readonly [TypedRow, EventType][] = [
+      [{ kind: "planner-surface-queued" }, "surface"],
+      [{ kind: "check-failed", surface: true }, "surface"],
+      [{ kind: "planner-replied" }, "reply"],
+      [{ kind: "planner-replied", surface: true }, "surface"],
+      [{ kind: "edit-committed" }, "edit"],
+      [{ kind: "edit-committed", note: true }, "note"],
+      [{ kind: "edit-rejected" }, "edit"],
+      [{ kind: "note-shown" }, "note"],
+      [{ kind: "human-attested" }, "human"],
+      [{ kind: "human-wait", span: true }, "human"],
+      [{ kind: "command-started" }, "command"],
+      [{ kind: "node-requeued" }, "recovery"],
+      [{ kind: "check-failed" }, "failure"],
+      [{ kind: "decision-pending" }, "planning"],
+      [{ kind: "node-held" }, "contention"],
+      [{ kind: "queued", span: true }, "contention"],
+      [{ kind: "gate-run" }, "verification"],
+      [{ kind: "pr-created" }, "publication"],
+      [{ kind: "session-opened" }, "session"],
+      [{ kind: "dispatch", span: true }, "session"],
+      [{ kind: "push" }, "repository"],
+      [{ kind: "node-settled" }, "lifecycle"],
+      [{ kind: "worktree-pruned" }, "activity"],
+    ];
+    for (const [row, type] of rows) expect(eventType(row)).toBe(type);
+    expect(new Set(rows.map(([, type]) => type))).toEqual(new Set(EVENT_TYPES));
+    for (const type of EVENT_TYPES) {
+      expect(eventTypeLabel(type)).toMatch(/^[A-Z]/u);
+      expect(isEventType(type)).toBe(true);
+    }
+    expect(new Set(EVENT_TYPES.map(eventTypeLabel)).size).toBe(
+      EVENT_TYPES.length,
+    );
+    expect(isEventType("detailed")).toBe(false);
+  });
+
+  test("a span kind nothing names reads as the run's lifecycle, never as nothing", () => {
+    expect(eventType({ kind: "something-new", span: true })).toBe("lifecycle");
   });
 });

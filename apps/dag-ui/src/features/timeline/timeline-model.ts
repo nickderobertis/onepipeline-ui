@@ -12,7 +12,9 @@ import type {
   TimelineSpanKind,
   TransportRole,
 } from "@onepipeline-ui/dag-model";
+import { type EventType, eventType } from "@onepipeline-ui/timeline-categories";
 import { createElement } from "react";
+import { argvOf, commandLine } from "../../lib/command-line";
 import { type EventCategory, eventCategory } from "./event-category";
 import { MarkerReading } from "./item-reading";
 
@@ -20,23 +22,11 @@ import { MarkerReading } from "./item-reading";
  * One node's slice of the served run timeline, as rows a rail can render.
  *
  * The served payload is a flat span list carrying the tree in `parent_id`; this
- * rebuilds that tree for one node, merges each span's child spans with its own
- * events into one recorded order, and collapses long runs of same-kind siblings so
- * a node that dispatched two hundred sessions is a row rather than two hundred.
+ * rebuilds that tree for one node and merges each span's child spans with its own
+ * events into one recorded order. What the event list then reads is
+ * {@link eventList}: one row per surface, the types the reader chose, and every
+ * back-to-back repeat collapsed into one block.
  */
-
-/**
- * Consecutive siblings of one kind collapse into a group once a run reaches this
- * many.
- *
- * **One rule for every kind of row.** A run of dispatch spans and a run of
- * `turn-activity` records are the same problem — near-identical rows burying the
- * one that matters — so they collapse at the same count and are presented the same
- * way, and a reader learns the behaviour once. Four is where a run stops being
- * scannable at the row height this list is drawn at: three of a kind read as three
- * things, and the fourth is where the eye starts skipping.
- */
-export const GROUP_THRESHOLD = 4;
 
 /**
  * One onejudge dispatch: the agent session and the judge and lint sessions that
@@ -81,6 +71,15 @@ interface RowBase {
   readonly sessionName?: string;
   /** The onejudge dispatch this session belongs to; absent on every other row. */
   readonly dispatch?: DispatchGroup;
+  /** The one type the event-type filter reads this row under. */
+  readonly type: EventType;
+  /** When the row's `status` came about, where that is not when the row began. */
+  readonly statusAt?: string;
+  /**
+   * The ids of the other records this one row stands for — the records of a
+   * surface joined into its row — so an address naming any of them opens it.
+   */
+  readonly aliases?: readonly string[];
 }
 
 export type TimelineRow =
@@ -96,7 +95,16 @@ export type TimelineRow =
        */
       readonly category: EventCategory;
     })
-  | (RowBase & { readonly rowKind: "group"; readonly count: number });
+  | (RowBase & {
+      /**
+       * A loop the record went round back to back: `pass` is one time round it,
+       * `count` how many times it went round, and `children` every row it stands
+       * for, in order.
+       */
+      readonly rowKind: "group";
+      readonly count: number;
+      readonly pass: readonly TimelineRow[];
+    });
 
 export interface NodeTimeline {
   /** The node's own span, when the recorded stream opened one. */
@@ -445,7 +453,7 @@ export function nodeTimelineV2(
 ): NodeTimelineV2 {
   const projected = nodeTimeline(timeline, nodeId).rows;
   const rows = flattenRows(projected);
-  const plottedRows = flattenRows(projected, false);
+  const plottedRows = flattenRows(plotRuns(projected), false);
   const items = plottedRows.flatMap((row): TimelineItem<TimelineRow>[] => {
     const lane = laneId(row);
     if (lane === null) return [];
@@ -518,29 +526,89 @@ export function nodeTimelineV2(
   };
 }
 
-/** One thing the reading draws: a row, or the control standing for a collapsed run. */
+/**
+ * Consecutive siblings of one kind plot as one segment once a run reaches this
+ * many: the plot's own reading of a node that dispatched two hundred sessions,
+ * one bar rather than two hundred. The event list collapses loops on its own rule
+ * ({@link collapseCycles}); this is what the plot draws.
+ */
+export const PLOT_GROUP_THRESHOLD = 4;
+
+/** The rows as the plot draws them: each long run of one kind as one segment. */
+function plotRuns(rows: readonly TimelineRow[]): TimelineRow[] {
+  const grouped: TimelineRow[] = [];
+  const siblings = rows.map((row) =>
+    row.children.length === 0
+      ? row
+      : { ...row, children: plotRuns(row.children) },
+  );
+  for (let index = 0; index < siblings.length; index += 1) {
+    const first = siblings[index];
+    if (first === undefined) continue;
+    let end = index;
+    while (end + 1 < siblings.length && sameKind(first, siblings[end + 1]))
+      end += 1;
+    const run = siblings.slice(index, end + 1);
+    const last = run.at(-1);
+    if (run.length < PLOT_GROUP_THRESHOLD || last === undefined) {
+      grouped.push(...run);
+    } else {
+      grouped.push({
+        rowKind: "group",
+        count: run.length,
+        pass: run,
+        id: `group-${first.id}`,
+        kind: first.kind,
+        label: `${run.length} × ${first.kind}`,
+        startedAt: first.startedAt,
+        endedAt: last.endedAt,
+        status: undefined,
+        durationMs: elapsed(first.startedAt, last.endedAt),
+        children: run,
+        displayLabel: `${run.length} grouped ${first.displayKind.toLowerCase()} activities`,
+        displayKind: first.displayKind,
+        type: first.type,
+        ...(first.role === undefined ? {} : { role: first.role }),
+        ...(first.transport === undefined
+          ? {}
+          : { transport: first.transport }),
+      });
+    }
+    index = end;
+  }
+  return grouped;
+}
+
+/** Whether two consecutive rows are of one kind, for {@link plotRuns}. */
+function sameKind(first: TimelineRow, next: TimelineRow | undefined): boolean {
+  return (
+    next !== undefined &&
+    first.rowKind !== "group" &&
+    next.rowKind === first.rowKind &&
+    first.kind === next.kind &&
+    first.role === next.role &&
+    first.transport === next.transport
+  );
+}
+
+/** One thing the reading draws: a row, or a block standing for a repeated loop. */
 export type TranscriptEntry =
   | { readonly entryKind: "row"; readonly row: TimelineRow }
   | {
-      readonly entryKind: "collapse";
-      /** The group the control speaks for; its `count` is the whole run. */
-      readonly group: TimelineRow;
-      /** How many rows the control is standing in for — the run less its ends. */
-      readonly hidden: number;
+      readonly entryKind: "cycle";
+      /** The loop the block speaks for; its `count` is how many times it repeated. */
+      readonly group: Extract<TimelineRow, { rowKind: "group" }>;
+      /** What the block holds now: one pass, or every row it stands for. */
+      readonly entries: readonly TranscriptEntry[];
       readonly expanded: boolean;
     };
 
 /**
- * The reading, in the order it is read, with each collapsed run standing as its
- * first row, one control, and its last row.
- *
- * The first and the last are shown **in full** because they are what says where the
- * run began and where it ended — which is the reading a run of two hundred
- * near-identical rows otherwise buries. The control between them carries the count
- * and the kind as text, and expanding it puts the middle back exactly where it was.
+ * The reading, in the order it is read, with each repeated loop standing as one
+ * block that holds one pass through it — or, opened, every row it stands for.
  *
  * `expanded` is the reader's own state and is passed in rather than held here: the
- * projection is a pure function of what was served, and which runs a reader has
+ * projection is a pure function of what was served, and which blocks a reader has
  * opened is not something the run recorded.
  */
 export function transcriptEntries(
@@ -548,45 +616,360 @@ export function transcriptEntries(
   expanded: ReadonlySet<string>,
 ): readonly TranscriptEntry[] {
   const seen = new Set<string>();
-  const entries: TranscriptEntry[] = [];
-  const visit = (nested: readonly TimelineRow[]) => {
+  const visit = (nested: readonly TimelineRow[]): TranscriptEntry[] => {
+    const entries: TranscriptEntry[] = [];
     for (const row of nested) {
       if (row.rowKind === "group") {
         const open = expanded.has(row.id);
-        const members = row.children;
-        const first = members.at(0);
-        const last = members.at(-1);
-        if (first !== undefined) visit([first]);
         entries.push({
-          entryKind: "collapse",
+          entryKind: "cycle",
           group: row,
-          hidden: Math.max(members.length - 2, 0),
+          entries: visit(open ? row.children : row.pass),
           expanded: open,
         });
-        if (open) visit(members.slice(1, -1));
-        if (last !== undefined && last !== first) visit([last]);
         continue;
       }
       if (!seen.has(row.id)) {
         seen.add(row.id);
         entries.push({ entryKind: "row", row });
       }
-      visit(row.children);
+      entries.push(...visit(row.children));
     }
+    return entries;
   };
-  visit(rows);
-  return entries;
+  return visit(rows);
+}
+
+/** Every row a reading draws, blocks opened into what they hold, in order. */
+export function readingRows(
+  reading: readonly TranscriptEntry[],
+): readonly TimelineRow[] {
+  return reading.flatMap((entry) =>
+    entry.entryKind === "row" ? [entry.row] : readingRows(entry.entries),
+  );
 }
 
 /**
- * What one collapse control says: how many rows it stands for, and what they are.
+ * What one block says: how many rows one pass is and how many times it went round.
  *
- * The same sentence whatever the run is made of — a run of journal records and a
- * run of dispatch spans read identically but for the kind each names — because the
- * reader meets one collapsing behaviour here rather than two.
+ * The same sentence whatever the loop is made of, so a reader meets one collapsing
+ * behaviour rather than one per kind of row.
  */
-export function collapseLabel(hidden: number, kind: string): string {
-  return `${hidden} more ${kind} events`;
+export function cycleLabel(group: Extract<TimelineRow, { rowKind: "group" }>) {
+  const rows = group.pass.length;
+  return `${rows === 1 ? "1 event" : `${rows} events`} repeated ${group.count} times`;
+}
+
+/**
+ * The event list a reader reads: one row per surface, only the types they chose,
+ * and each back-to-back repeat collapsed into one block.
+ *
+ * In that order on purpose. A surface's records are joined before anything is
+ * hidden, so a surface reads as one row whichever of its records the window holds;
+ * and repeats are found after the filter, so hiding the record that broke a loop
+ * up shows the loop for what it is.
+ */
+export function eventList(
+  rows: readonly TimelineRow[],
+  hidden: ReadonlySet<EventType> = new Set(),
+): readonly TimelineRow[] {
+  return collapseCycles(onlyTypes(joinSurfaces(rows), hidden));
+}
+
+/** How many rows a list holds, however deeply nested. */
+export function rowCount(rows: readonly TimelineRow[]): number {
+  return count(rows);
+}
+
+/**
+ * Every type the rows are read under, whatever the filter hides, with how many
+ * rows are of each.
+ */
+export function typeCounts(
+  rows: readonly TimelineRow[],
+): ReadonlyMap<EventType, number> {
+  const counts = new Map<EventType, number>();
+  for (const row of flattenRows(joinSurfaces(rows)))
+    counts.set(row.type, (counts.get(row.type) ?? 0) + 1);
+  return counts;
+}
+
+/**
+ * The rows of the types the reader kept. A row of a hidden type goes, and the rows
+ * it held of a kept type stand where it stood, so hiding a type hides exactly the
+ * rows of that type.
+ */
+function onlyTypes(
+  rows: readonly TimelineRow[],
+  hidden: ReadonlySet<EventType>,
+): TimelineRow[] {
+  if (hidden.size === 0) return [...rows];
+  return rows.flatMap((row) => {
+    const children = onlyTypes(row.children, hidden);
+    return hidden.has(row.type) ? children : [{ ...row, children }];
+  });
+}
+
+/** The channel id of the surface a record belongs to, where it belongs to one. */
+export function surfaceIdOf(event: TimelineEvent): number | undefined {
+  return event.surface_state?.id ?? event.surface_id;
+}
+
+/**
+ * One row per surface: the first record of each surface the list holds stands for
+ * every record of it, read under the state the server folded for the surface, and
+ * the others are dropped from the list.
+ *
+ * A surface is written as several records — queued, read, the record its raiser
+ * wrote beside it, and the reply naming its correlation — and listing each was the
+ * same text twice or more, one of them saying nothing the other had not.
+ */
+function joinSurfaces(rows: readonly TimelineRow[]): TimelineRow[] {
+  const joined = new Map<number, string[]>();
+  const first = new Set<string>();
+  for (const row of flattenRows(rows)) {
+    if (row.rowKind !== "event") continue;
+    const id = surfaceIdOf(row.event);
+    if (id === undefined) continue;
+    const members = joined.get(id);
+    if (members === undefined) {
+      joined.set(id, [row.id]);
+      first.add(row.id);
+    } else members.push(row.id);
+  }
+  if (joined.size === 0) return [...rows];
+  const visit = (nested: readonly TimelineRow[]): TimelineRow[] =>
+    nested.flatMap((row) => {
+      const children = visit(row.children);
+      if (row.rowKind !== "event") return [{ ...row, children }];
+      const id = surfaceIdOf(row.event);
+      if (id === undefined) return [{ ...row, children }];
+      if (!first.has(row.id)) return children;
+      return [
+        {
+          ...surfaceRow(row),
+          children,
+          aliases: (joined.get(id) ?? []).filter((other) => other !== row.id),
+        },
+      ];
+    });
+  return visit(rows);
+}
+
+/** Where one surface stands, in a word, and since when. */
+export function surfaceStatus(
+  state: NonNullable<TimelineEvent["surface_state"]>,
+): { readonly status: string; readonly at?: string } {
+  if (state.replied_at !== undefined || state.reply !== undefined)
+    return {
+      status: "answered",
+      ...(state.replied_at === undefined ? {} : { at: state.replied_at }),
+    };
+  if (state.read_at !== undefined) return { status: "read", at: state.read_at };
+  if (state.blocking === true)
+    return {
+      status: "waiting",
+      ...(state.queued_at === undefined ? {} : { at: state.queued_at }),
+    };
+  return {
+    status: "queued",
+    ...(state.queued_at === undefined ? {} : { at: state.queued_at }),
+  };
+}
+
+/** A surface's first record, read as the whole surface. */
+function surfaceRow(row: Extract<TimelineRow, { rowKind: "event" }>) {
+  const state = row.event.surface_state;
+  if (state === undefined) return row;
+  const named = [state.kind, state.message].filter(
+    (part) => part !== undefined,
+  );
+  const { status, at } = surfaceStatus(state);
+  return {
+    ...row,
+    displayLabel: named.length === 0 ? row.displayLabel : named.join(": "),
+    displayKind: state.blocking === true ? BLOCKING_SURFACE_KIND : SURFACE_KIND,
+    status,
+    ...(at === undefined ? {} : { statusAt: at }),
+    type: "surface" as const,
+  };
+}
+
+/**
+ * Collapse every back-to-back repeat of one or more sibling rows into one block,
+ * longest saving first, in every list of siblings however deeply it is nested.
+ *
+ * Two rows are the same when they are of the same kind and drawn with the same
+ * label — what a reader would call the same thing happening again — whatever
+ * dispatch each belongs to, and however long the loop they make. At each place
+ * the list is read from, the loop that saves the most rows wins, so `queued →
+ * held → unheld` forty times is one block of three rows rather than three
+ * blocks of one.
+ */
+export function collapseCycles(rows: readonly TimelineRow[]): TimelineRow[] {
+  const siblings = rows.map((row) =>
+    row.children.length === 0
+      ? row
+      : { ...row, children: collapseCycles(row.children) },
+  );
+  const keys = sameKeys(siblings);
+  const recurs = nextOccurrences(keys);
+  const collapsed: TimelineRow[] = [];
+  let at = 0;
+  while (at < siblings.length) {
+    const best = longestSaving(keys, recurs, at);
+    if (best === undefined) {
+      const row = siblings[at];
+      if (row !== undefined) collapsed.push(row);
+      at += 1;
+      continue;
+    }
+    const members = siblings.slice(at, at + best.length * best.count);
+    collapsed.push(cycleRow(members, best.length, best.count));
+    at += best.length * best.count;
+  }
+  return collapsed;
+}
+
+/**
+ * The repeat starting at `at` that saves the most rows, if any repeats there.
+ *
+ * Loops shorter than {@link LOOP_WINDOW} rows are tried directly. A longer loop
+ * starts again only where its first {@link LOOP_WINDOW} rows recur, so only
+ * those offsets are tried, nearest first. Two bounds keep a long list cheap without limiting how long a loop may
+ * be: no loop saves more rows than lie beyond its first pass, so the search ends
+ * once the best found saves that many; and a loop whose pass is a multiple of a
+ * period already found, and which starts within that period's repeating stretch,
+ * repeats no further than that stretch does and so saves fewer rows than the
+ * period itself.
+ */
+function longestSaving(
+  keys: readonly number[],
+  recurs: readonly number[],
+  at: number,
+): { readonly length: number; readonly count: number } | undefined {
+  let best: { length: number; count: number } | undefined;
+  let saved = 0;
+  const periods: { readonly length: number; readonly reach: number }[] = [];
+  const room = Math.floor((keys.length - at) / 2);
+  const tryLength = (length: number) => {
+    if (
+      periods.some(
+        (period) => length % period.length === 0 && length <= period.reach,
+      )
+    )
+      return;
+    const matched = commonRun(keys, at, at + length);
+    const count = Math.floor(matched / length) + 1;
+    if (count < 2) return;
+    periods.push({ length, reach: length + matched });
+    if ((count - 1) * length > saved) {
+      best = { length, count };
+      saved = (count - 1) * length;
+    }
+  };
+  for (let length = 1; length < LOOP_WINDOW && length <= room; length += 1)
+    if (keys[at + length] === keys[at]) tryLength(length);
+  for (
+    let next = recurs[at] ?? -1;
+    next !== -1 && next - at <= room;
+    next = recurs[next] ?? -1
+  ) {
+    if (saved >= keys.length - next) break;
+    if (next - at >= LOOP_WINDOW) tryLength(next - at);
+  }
+  return best;
+}
+
+/** How many rows from `at` and from `other` on read the same, pairwise. */
+function commonRun(keys: readonly number[], at: number, other: number): number {
+  let matched = 0;
+  while (
+    other + matched < keys.length &&
+    keys[at + matched] === keys[other + matched]
+  )
+    matched += 1;
+  return matched;
+}
+
+/** Each sibling's sameness as a small number: equal rows share one. */
+function sameKeys(rows: readonly TimelineRow[]): number[] {
+  const ids = new Map<string, number>();
+  return rows.map((row) => {
+    const key = sameness(row);
+    const known = ids.get(key);
+    if (known !== undefined) return known;
+    ids.set(key, ids.size);
+    return ids.size - 1;
+  });
+}
+
+/**
+ * How many leading rows a loop's offset is looked up by. Wide enough that rows
+ * of a handful of kinds which never loop rarely look as if they might, which is
+ * what keeps a long list of them from being compared against itself.
+ */
+const LOOP_WINDOW = 16;
+
+/**
+ * Where the {@link LOOP_WINDOW} rows starting at each row next recur, as far as a
+ * hash of them can tell, or `-1` where they never do. A shared hash is only a
+ * place worth comparing: every offset tried is compared row by row.
+ */
+function nextOccurrences(keys: readonly number[]): number[] {
+  const next = keys.map(() => -1);
+  const seen = new Map<number, number>();
+  for (let index = keys.length - LOOP_WINDOW; index >= 0; index -= 1) {
+    let hash = 0;
+    for (let offset = 0; offset < LOOP_WINDOW; offset += 1)
+      hash = (Math.imul(hash, 0x01000193) ^ (keys[index + offset] ?? 0)) | 0;
+    next[index] = seen.get(hash) ?? -1;
+    seen.set(hash, index);
+  }
+  return next;
+}
+
+/** What makes two sibling rows the same thing happening again. */
+function sameness(row: TimelineRow): string {
+  return JSON.stringify([row.rowKind, row.kind, row.displayLabel]);
+}
+
+/** The block standing for `members`, a loop of `length` rows gone round `count` times. */
+function cycleRow(
+  members: readonly TimelineRow[],
+  length: number,
+  count: number,
+): TimelineRow {
+  const first = members[0];
+  if (first === undefined) throw new Error("a repeat of no rows");
+  const pass = members.slice(0, length);
+  const endedAt = members.reduce<string>((latest, row) => {
+    const end = row.endedAt ?? row.startedAt;
+    return Date.parse(end) > Date.parse(latest) ? end : latest;
+  }, first.startedAt);
+  // A block standing for rows of several dispatches belongs to none of them.
+  const dispatch = members.every(
+    (row) => row.dispatch?.id === first.dispatch?.id,
+  )
+    ? first.dispatch
+    : undefined;
+  return {
+    rowKind: "group",
+    count,
+    pass,
+    id: `cycle-${first.id}`,
+    kind: first.kind,
+    label: `${count} × ${pass.map((row) => row.kind).join(" → ")}`,
+    startedAt: first.startedAt,
+    endedAt,
+    status: undefined,
+    durationMs: elapsed(first.startedAt, endedAt),
+    children: [...members],
+    displayLabel: pass.map((row) => row.displayLabel).join(" → "),
+    displayKind: first.displayKind,
+    type: first.type,
+    ...(dispatch === undefined ? {} : { dispatch }),
+  };
 }
 
 function flattenRows(
@@ -630,7 +1013,7 @@ export function nodeTimeline(
     const orphans = orphanEvents(timeline.spans, new Set(), nodeId);
     return orphans.length === 0
       ? EMPTY
-      : { rows: group(orphans), total: orphans.length };
+      : { rows: orphans, total: orphans.length };
   }
   const ids = new Set(scoped.map(({ id }) => id));
   const children = new Map<string, TimelineSpan[]>();
@@ -666,7 +1049,7 @@ export function nodeTimeline(
   );
   const rows = servedGroups
     ? servedDispatchGroups(top)
-    : group(groupDispatches(labelWorkerRetries(top)));
+    : groupDispatches(labelWorkerRetries(top));
   return { span: own, rows, total: count(rows) };
 }
 
@@ -696,6 +1079,34 @@ export function eventAsRow(event: TimelineEvent): TimelineRow {
   return eventRow(event);
 }
 
+/**
+ * The records the run made at no node, as the run's own event list reads them, in
+ * the order they were recorded.
+ *
+ * Every record naming a node is read on that node's list and nowhere else, and so
+ * is a record of a surface raised about a node — the reply answering a node's
+ * question is journalled at no node, and it is that question's row which says it
+ * was answered.
+ */
+export function runEventRows(
+  timeline: RunTimeline | undefined,
+): readonly TimelineRow[] {
+  const seen = new Set<string>();
+  return (timeline?.spans ?? [])
+    .filter((span) => span.node_id === undefined)
+    .flatMap((span) => span.events)
+    .filter((event) => {
+      if (event.node_id !== undefined) return false;
+      if (event.surface_state?.node !== undefined) return false;
+      const id = event.record_id ?? event.id;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    })
+    .map(eventRow)
+    .sort(byStart);
+}
+
 /** Depth-first lookup of one row by the id the query string carries. */
 export function findRow(
   rows: readonly TimelineRow[],
@@ -715,7 +1126,9 @@ export function pathTo(
   ): readonly TimelineRow[] => {
     for (const row of held) {
       if (
-        legacy ? row.rowKind === "event" && row.event.id === id : row.id === id
+        legacy
+          ? row.rowKind === "event" && row.event.id === id
+          : row.id === id || row.aliases?.includes(id) === true
       )
         return [row];
       const nested = search(row.children, legacy);
@@ -758,7 +1171,8 @@ function spanRow(
     // its own start-to-end interval would describe the contention window instead.
     durationMs:
       span.total_duration_ms ?? elapsed(span.started_at, span.ended_at),
-    children: group(spanRows(span, children)),
+    children: spanRows(span, children),
+    type: eventType({ kind: span.kind, span: true }),
     displayLabel: spanLabel(span, role, transport),
     displayKind: displayKind(span, role, transport),
     ...(span.kind === "dispatch" && span.label
@@ -891,6 +1305,7 @@ function eventRow(event: TimelineEvent): TimelineRow {
         : event.surface.blocking === true
           ? BLOCKING_SURFACE_KIND
           : SURFACE_KIND;
+  const status = eventStatus(event);
   return {
     rowKind: "event",
     event,
@@ -899,7 +1314,7 @@ function eventRow(event: TimelineEvent): TimelineRow {
     label: event.step_id ?? "",
     startedAt: event.at,
     endedAt: null,
-    status: event.status,
+    ...(status === undefined ? {} : { status }),
     durationMs: null,
     children: [],
     displayLabel: byAuthor(
@@ -913,6 +1328,8 @@ function eventRow(event: TimelineEvent): TimelineRow {
         event.description !== ""
           ? event.description
           : undefined) ??
+        commandStarted(event) ??
+        heldLabel(event) ??
         (event.kind === "retry-requested"
           ? "Retry requested"
           : (event.step_id ?? event.kind)),
@@ -920,58 +1337,100 @@ function eventRow(event: TimelineEvent): TimelineRow {
     ),
     displayKind,
     category: eventCategory(event.kind),
+    type: eventType({
+      kind: event.kind,
+      surface: surfaceIdOf(event) !== undefined,
+      note: event.redirection !== undefined,
+    }),
   };
 }
 
+/** The command a `command-started` ran, as one command line, where it names one. */
+export function commandStarted(event: TimelineEvent): string | undefined {
+  if (event.kind !== "command-started") return undefined;
+  const argv = argvOf(event.fields?.command);
+  return argv === undefined ? undefined : commandLine(argv);
+}
+
 /**
- * Collapse each run of consecutive same-kind siblings into one row once it is long
- * enough to stop being scannable. Order is preserved: a group stands exactly where
- * the rows it holds stood.
- *
- * A run of journal records collapses on the same rule a run of spans does, because
- * a reader meets one collapsing behaviour in this timeline rather than two — see
- * {@link GROUP_THRESHOLD}. What the reader is then shown is
- * {@link transcriptEntries}: the first and the last in full, and the middle behind
- * one control that says how many there are and what they are.
+ * The reasons a `node-held` was held for, or a `node-unheld` released, as the
+ * entries the engine recorded. An entry this build cannot read as a hold reason is
+ * left out of the phrase rather than guessed at; the detail lists every field.
  */
-function group(rows: readonly TimelineRow[]): TimelineRow[] {
-  const grouped: TimelineRow[] = [];
-  for (let index = 0; index < rows.length; index += 1) {
-    const first = rows[index];
-    if (first === undefined) continue;
-    let end = index;
-    while (end + 1 < rows.length && sameKind(first, rows[end + 1])) end += 1;
-    const run = rows.slice(index, end + 1);
-    const last = run.at(-1);
-    if (run.length < GROUP_THRESHOLD || last === undefined) {
-      grouped.push(...run);
-    } else {
-      grouped.push({
-        rowKind: "group",
-        count: run.length,
-        id: `group-${first.id}`,
-        kind: first.kind,
-        label: `${run.length} × ${first.kind}`,
-        startedAt: first.startedAt,
-        endedAt: last.endedAt,
-        status: undefined,
-        durationMs: elapsed(first.startedAt, last.endedAt),
-        children: run,
-        displayLabel: `${run.length} grouped ${first.displayKind.toLowerCase()} activities`,
-        displayKind: first.displayKind,
-        ...(first.role === undefined ? {} : { role: first.role }),
-        ...(first.transport === undefined
-          ? {}
-          : { transport: first.transport }),
-        ...(first.dispatch !== undefined &&
-        run.every((row) => row.dispatch?.id === first.dispatch?.id)
-          ? { dispatch: first.dispatch }
-          : {}),
-      });
-    }
-    index = end;
-  }
-  return grouped;
+export function holdReasonsOf(
+  event: TimelineEvent,
+): readonly TimelineHoldReason[] {
+  const listed =
+    event.kind === "node-held"
+      ? event.fields?.reasons
+      : event.kind === "node-unheld"
+        ? event.fields?.released
+        : undefined;
+  if (!Array.isArray(listed)) return [];
+  // Widened to `unknown` so the type guard can narrow: a hold reason's open
+  // index signature is not a JSON value, so `filter` over the JSON list rejects it.
+  const entries: readonly unknown[] = listed;
+  return entries.filter(isHoldReason);
+}
+
+const isName = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+
+const isNames = (value: unknown): boolean =>
+  Array.isArray(value) && value.length > 0 && value.every(isName);
+
+/**
+ * Whether an entry reads as the contract's hold reason — the reading a queued
+ * span's `reasons` are parsed by, so a record and the span it opened name the
+ * same reasons. It is written out rather than parsed with the contract's zod
+ * schema because this module draws the first screen, whose script carries no
+ * zod (`tests/e2e/ui.rs`); `timeline-model.test.ts` holds it to that schema.
+ */
+export function isHoldReason(entry: unknown): entry is TimelineHoldReason {
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry))
+    return false;
+  const { kind, blocking, ahead, limit, reference, awaiting } = entry as Record<
+    string,
+    unknown
+  >;
+  return (
+    isName(kind) &&
+    (blocking === undefined || isNames(blocking)) &&
+    (ahead === undefined || isNames(ahead)) &&
+    (awaiting === undefined || isNames(awaiting)) &&
+    (reference === undefined || isName(reference)) &&
+    (limit === undefined ||
+      (typeof limit === "number" && Number.isInteger(limit) && limit >= 0))
+  );
+}
+
+/** What a hold or its release reads as in a row, where the record says why. */
+function heldLabel(event: TimelineEvent): string | undefined {
+  if (event.kind !== "node-held" && event.kind !== "node-unheld")
+    return undefined;
+  const reasons = holdReasonsOf(event);
+  const word = event.kind === "node-held" ? "Held" : "Released from";
+  if (reasons.length === 0)
+    return event.kind === "node-held" ? "Held" : "Released";
+  return event.kind === "node-held"
+    ? `${word} ${holdLabel(reasons)}`
+    : `${word} ${reasons.map((reason) => reason.kind).join(" and ")}`;
+}
+
+/**
+ * Where a message the run was sent stands, in the record's own terms: an edit
+ * the engine committed is applied, a refused one is not, an accepted command that
+ * changed nothing is accepted, and a note it carried to a later dispatch is held
+ * for it. Every other record keeps the status it was served with.
+ */
+function eventStatus(event: TimelineEvent): string | undefined {
+  if (event.kind === "edit-rejected") return "not applied";
+  if (event.kind === "edit-committed")
+    return event.redirection?.delivered === false ? "held" : "applied";
+  if (event.kind === "command-accepted") return "accepted";
+  if (event.kind === "note-shown") return "shown";
+  if (event.kind === "human-attested") return "attested";
+  return event.status;
 }
 
 /**
@@ -1153,16 +1612,12 @@ function servedDispatchGroups(rows: readonly TimelineRow[]): TimelineRow[] {
     buckets.set(metadata.id, bucket);
   }
   const groupedMembers = (members: readonly TimelineRow[]) => [
-    ...group(
-      members
-        .filter((row) => row.rowKind === "span" && row.kind === "dispatch")
-        .sort(byStart),
-    ),
-    ...group(
-      members
-        .filter((row) => row.rowKind !== "span" || row.kind !== "dispatch")
-        .sort(byStart),
-    ),
+    ...members
+      .filter((row) => row.rowKind === "span" && row.kind === "dispatch")
+      .sort(byStart),
+    ...members
+      .filter((row) => row.rowKind !== "span" || row.kind !== "dispatch")
+      .sort(byStart),
   ];
   return [
     ...outside.map((row) => ({
@@ -1186,25 +1641,6 @@ function servedDispatchGroups(rows: readonly TimelineRow[]): TimelineRow[] {
 /** The parties that run over an agent's work rather than being dispatched alone. */
 function supervises(transport: TransportRole | undefined): boolean {
   return transport === "judge" || transport === LLMLINT_TRANSPORT;
-}
-
-/**
- * Whether two consecutive rows belong to the same run.
- *
- * The **kind** is the whole of it, and both halves of the pair have to be the same
- * sort of row: two `dispatch` spans are a run, two `turn-activity` records are a
- * run, and a span beside a record is not. A group is never a member of another
- * one — the collapse has already happened there.
- */
-function sameKind(first: TimelineRow, next: TimelineRow | undefined): boolean {
-  return (
-    next !== undefined &&
-    first.rowKind !== "group" &&
-    next.rowKind === first.rowKind &&
-    first.kind === next.kind &&
-    first.role === next.role &&
-    first.transport === next.transport
-  );
 }
 
 /**

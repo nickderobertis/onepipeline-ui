@@ -140,3 +140,13 @@ export async function loadRunRecords(page: Page): Promise<void> {
     .getByRole("button", { name: "Load the run's own records" })
     .click();
 }
+
+/**
+ * Open every block of repeats a page's event lists draw, so each row a loop
+ * stands for is drawn: a record repeated back to back reads as one pass until
+ * its block is opened.
+ */
+export async function openRepeatedLoops(page: Page): Promise<void> {
+  const closed = page.getByRole("button", { name: /^Show all \d+$/u });
+  while ((await closed.count()) > 0) await closed.first().click();
+}

@@ -21,8 +21,9 @@ import type {
   RunTimeline,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
+import type { EventType } from "@onepipeline-ui/timeline-categories";
 import { Activity, Clock3, Cpu, Layers3, TriangleAlert, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { LOADING_TEXT, loaded } from "../../lib/loading";
 import { RunStateBadge } from "../../lib/RunStateBadge";
 import {
@@ -35,14 +36,26 @@ import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration, formatDurationSeconds } from "../../lib/time";
 import type { Read } from "../../lib/useRead";
 import { boundedZoom, TIMELINE_TIME_MARKS } from "./axis";
+import { EventListHeader, FilteredEmpty } from "./EventList";
 import {
   type GraphRow,
   type GraphSegment,
   graphTimeline,
 } from "./graph-timeline";
 import { HistoryFailed } from "./history-controls";
+import { TranscriptEntries } from "./NodeTimelineView";
 import { TimelineItemDetail } from "./TimelineItemDetail";
-import { eventAsRow, spanAsRow } from "./timeline-model";
+import {
+  eventAsRow,
+  eventList,
+  findRow,
+  pathTo,
+  runEventRows,
+  spanAsRow,
+  type TimelineRow,
+  transcriptEntries,
+  typeCounts,
+} from "./timeline-model";
 import { type TimelineHistory, useTimelineHistory } from "./useTimelineHistory";
 
 /**
@@ -64,7 +77,8 @@ export function OverallView({
   nodes,
   timeline: served,
   timelineError,
-  filter,
+  hiddenTypes = [],
+  onHiddenTypesChange = () => {},
   onRetry,
   journalSeq,
   onSelectNode,
@@ -79,7 +93,9 @@ export function OverallView({
   readonly state?: RunState;
   /** The run's status read, which the run details card shows. */
   readonly status: Read<RunStatus>;
-  readonly filter?: string;
+  /** The event types the reader hid from the run's event list. */
+  readonly hiddenTypes?: readonly EventType[];
+  readonly onHiddenTypesChange?: (hidden: readonly EventType[]) => void;
   /** Subscribe again, from a failed read. */
   readonly onRetry?: () => void;
   readonly nodes: readonly NodeView[];
@@ -96,7 +112,6 @@ export function OverallView({
     client,
     runId,
     scope: "run",
-    ...(filter === undefined ? {} : { filter }),
     ...(served === undefined ? {} : { timeline: served }),
   });
   const timeline = history.timeline;
@@ -117,6 +132,10 @@ export function OverallView({
   const runLevel = (timeline?.spans ?? []).filter(
     (span) => span.node_id === undefined,
   );
+  const hidden = useMemo(() => new Set(hiddenTypes), [hiddenTypes]);
+  // The run's own records, as its event list reads them.
+  const runRows = useMemo(() => runEventRows(timeline), [timeline]);
+  const listed = useMemo(() => eventList(runRows, hidden), [runRows, hidden]);
   const openedSpan = runLevel.find((span) => span.id === selectedItemId);
   const openedEvent =
     runLevel
@@ -125,11 +144,12 @@ export function OverallView({
     runLevel
       .flatMap((span) => span.events)
       .find((event) => event.id === selectedItemId);
-  const opened =
+  const listedRow =
+    selectedItemId === undefined ? undefined : findRow(listed, selectedItemId);
+  const opened: TimelineRow | undefined =
     openedSpan === undefined
-      ? openedEvent === undefined
-        ? undefined
-        : eventAsRow(openedEvent)
+      ? (listedRow ??
+        (openedEvent === undefined ? undefined : eventAsRow(openedEvent)))
       : spanAsRow(openedSpan);
   const { loadSpan, loadRow: loadRunLevel } = history;
   // An address naming a record this payload does not list is a person asking for it.
@@ -258,6 +278,17 @@ export function OverallView({
               )}
             </CardContent>
           </Card>
+          {timeline !== undefined && timeline.spans.length > 0 && (
+            <RunEvents
+              counts={typeCounts(runRows)}
+              hidden={hidden}
+              listed={listed}
+              onHiddenChange={onHiddenTypesChange}
+              onOpen={onSelectItem}
+              recorded={runRows.length}
+              {...(selectedItemId === undefined ? {} : { selectedItemId })}
+            />
+          )}
         </div>
       </ScrollArea>
       {opened !== undefined && (
@@ -370,29 +401,12 @@ function GraphExecution({
         range={range}
         selectedId={selectedItemId}
       />
-      {graph.line.markers.some((marker) => marker.at > graph.range[1]) && (
-        <section aria-label="Records after execution" className="p-3 border-t">
-          <h3 className="eyebrow">After execution ended</h3>
-          {graph.line.markers
-            .filter((marker) => marker.at > graph.range[1])
-            .map((marker) => (
-              <Button
-                key={marker.id}
-                onClick={() => open(marker.payload)}
-                variant="outline"
-                size="sm"
-              >
-                {marker.payload.label} ·{" "}
-                <Timestamp at={marker.payload.startedAt} />
-              </Button>
-            ))}
-        </section>
-      )}
       {failureShown && history.failure !== undefined && (
         <HistoryFailed failure={history.failure} />
       )}
       {/* Records the run made at no node, those after execution ended among them,
-          are read when asked for: a whole run's records are no part of opening it. */}
+          are read when asked for: a whole run's records are no part of opening it,
+          and the run's event list below reads them as they arrive. */}
       {runRecordsToLoad && !runRecordsAsked && (
         <button
           className="load-earlier"
@@ -432,6 +446,86 @@ function GraphExecution({
         </ol>
       )}
     </div>
+  );
+}
+
+/** A scroll position the run's event list does not keep: it is read top to bottom. */
+const NO_SCROLL_SYNC = () => {};
+
+/**
+ * The run's own event list: every record it made at no node — those after its
+ * graph ended among them — in the order it made them, read exactly as a node's
+ * list is read: one row per surface, the types the reader kept, and each
+ * back-to-back repeat as one block.
+ */
+function RunEvents({
+  counts,
+  hidden,
+  listed,
+  onHiddenChange,
+  onOpen,
+  recorded,
+  selectedItemId,
+}: {
+  readonly counts: ReturnType<typeof typeCounts>;
+  readonly hidden: ReadonlySet<EventType>;
+  readonly listed: readonly TimelineRow[];
+  readonly onHiddenChange: (hidden: readonly EventType[]) => void;
+  readonly onOpen: (id: string) => void;
+  /** How many of the run's own records the list was drawn from. */
+  readonly recorded: number;
+  readonly selectedItemId?: string;
+}) {
+  const [openRuns, setOpenRuns] = useState<ReadonlySet<string>>(new Set());
+  // A row the address names opens every block holding it.
+  const openNow = useMemo(() => {
+    if (selectedItemId === undefined) return openRuns;
+    const holding = pathTo(listed, selectedItemId)
+      .filter((row) => row.rowKind === "group")
+      .map(({ id }) => id);
+    return holding.length === 0 ? openRuns : new Set([...openRuns, ...holding]);
+  }, [listed, openRuns, selectedItemId]);
+  const reading = useMemo(
+    () => transcriptEntries(listed, openNow),
+    [listed, openNow],
+  );
+  const toggle = useCallback(
+    (id: string) =>
+      setOpenRuns((open) => {
+        const next = new Set(open);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      }),
+    [],
+  );
+  return (
+    <Card className="mt-4 gap-0 py-[15px]">
+      <CardContent className="px-[15px]">
+        <section aria-label="Run events" className="run-events">
+          <EventListHeader
+            counts={counts}
+            hidden={hidden}
+            onHiddenChange={onHiddenChange}
+          />
+          {recorded === 0 ? (
+            <p className="m-0 text-[11px] text-muted-foreground">
+              No record of the run's own is held yet.
+            </p>
+          ) : listed.length === 0 ? (
+            <FilteredEmpty onClear={() => onHiddenChange([])} />
+          ) : (
+            <TranscriptEntries
+              entries={reading}
+              onOpen={onOpen}
+              onToggle={toggle}
+              register={NO_SCROLL_SYNC}
+              {...(selectedItemId === undefined ? {} : { selectedItemId })}
+            />
+          )}
+        </section>
+      </CardContent>
+    </Card>
   );
 }
 

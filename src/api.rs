@@ -13,9 +13,8 @@
 use serde_json::Value;
 
 use crate::contract::{
-    ArtifactId, AttestRequest, ConversationId, Correlation, Envelope, EventFrame, EventsQuery,
-    Health, NextQuery, NodeId, ProjectId, RunId, RunQuery, RunsQuery, ShutdownRequest, StopRequest,
-    SurfaceRequest, TimelineQuery, TranscriptQuery,
+    ArtifactId, ConversationId, Envelope, EventFrame, EventsQuery, Health, NodeId, ProjectId,
+    RunId, RunQuery, RunsQuery, ShutdownRequest, StopRequest, TimelineQuery, TranscriptQuery,
 };
 use crate::error::ApiError;
 
@@ -68,31 +67,6 @@ pub trait RunApi {
 
     /// `GET /api/v2/projects/{project}` — one group of that listing.
     fn project(&self, project: &ProjectId) -> Result<Envelope<Value>, ApiError>;
-
-    /// `GET /api/v2/runs/{run}/channel` — the run's channel, consuming nothing.
-    fn channel(&self, run: &RunId) -> Result<Envelope<Value>, ApiError>;
-
-    /// `POST /api/v2/runs/{run}/channel/next` — claim the next surface.
-    fn channel_next(&self, run: &RunId, query: &NextQuery) -> Result<Envelope<Value>, ApiError>;
-
-    /// `POST /api/v2/runs/{run}/channel/reply` — submit `envelope`, the request
-    /// body byte for byte, under `correlation`.
-    fn channel_reply(
-        &self,
-        run: &RunId,
-        correlation: Option<&Correlation>,
-        envelope: &str,
-    ) -> Result<Envelope<Value>, ApiError>;
-
-    /// `POST /api/v2/runs/{run}/channel/surface` — raise a surface.
-    fn channel_surface(
-        &self,
-        run: &RunId,
-        request: &SurfaceRequest,
-    ) -> Result<Envelope<Value>, ApiError>;
-
-    /// `POST /api/v2/runs/{run}/attest` — complete a ready human action.
-    fn attest(&self, run: &RunId, request: &AttestRequest) -> Result<Envelope<Value>, ApiError>;
 
     /// `POST /api/v2/runs/{run}/stop` — end the run as the acting session.
     fn stop(&self, run: &RunId, request: &StopRequest) -> Result<Envelope<Value>, ApiError>;

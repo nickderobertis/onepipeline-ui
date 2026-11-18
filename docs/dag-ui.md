@@ -210,7 +210,11 @@ link and the node's tabs.
   the conversation. Host resources and provider health are on **Host**.
 
 The Channel view, its reply composer and the Decisions/Detailed activity switch are
-gone from the app; every view reads under the `detailed` filter profile.
+gone from the app, and every view reads the run unfiltered: no request the app makes
+carries the read API's `filter`. What the channel carried is in the event lists —
+each surface, reply, edit and command with its outcome, note and human-item
+resolution is a row under a type of its own, with its waiting, read, answered,
+held or applied status — and a `kind: human` step is attested from **Action items**.
 `e2e/dag-ui-controls.spec.ts` drives Stop and the run details against the real API
 over runs the fixture writes for them alone, and `e2e/dag-ui-readability.spec.ts`
 holds the run bar, the node bar, the state words and the graph's cards against a
@@ -471,13 +475,20 @@ Escape key. It is a **timeline over a transcript**, both projected from
   order, each carrying its category, its name and its recorded facts on that line —
   a rich log line rather than a card, because a thirty-node graph's journal is tens
   of thousands of records and at a card each most of the scrolling is whitespace.
-  Where four or more consecutive rows share a kind the middle collapses: the first
-  and the last stay in full, and between them one control names how many are behind
-  it and what they are, `aria-expanded` says which way it goes, and it puts them
-  back. **One rule for every kind of row** — a run of dispatched sessions and a run
-  of journal records collapse at the same count and are presented the same way, so a
-  reader learns the behaviour once (`GROUP_THRESHOLD` in
-  `features/timeline/timeline-model.ts`). Scrolling it moves the
+  Any sequence of rows repeated back to back at least twice — rows of the same kind
+  drawn with the same label — stands as one block: one pass through the loop, its
+  count (`×12`) and the stretch of time it covered, with one control that opens it
+  into every row it stands for, in order, and `aria-expanded` saying which way it
+  goes. The loop saving the most rows wins, so a hold toggling forty times is one
+  block of three rows; a selected row inside a block opens it. Each surface is one
+  row, joined from every record of it, reading as waiting, read or answered and
+  when; its detail holds each step's time and the reply. The list's own header holds
+  the **event-type filter**, a multi-select of the types in
+  `@onepipeline-ui/timeline-categories`'s `EVENT_TYPES` — every row is of exactly
+  one — kept in the address as repeated `hide-event` parameters; a filter hiding
+  every row says so and offers to show every type again. Overall lists the run's
+  own records — those recorded after its graph ended among them — the same way
+  (`eventList` in `features/timeline/timeline-model.ts`). Scrolling it moves the
   timeline's cursor and clicking a segment or a marker scrolls and focuses its
   item; both directions are the package's `useTimelineScrollSync`. The selection
   is in the address, so an item stays bookmarkable.
@@ -536,10 +547,9 @@ Escape key. It is a **timeline over a transcript**, both projected from
   Each recorded check URL opens its destination. The tab strip wraps at intermediate
   widths and scrolls on the phone so the timeline has room to be drawn.
 
-Nothing in either surface grows with the size of the run. A run of eight or more
-consecutive same-kind siblings arrives as one grouped row, and a conversation
-hands out `PAGE_SIZE` turns at a time, so the node whose recorded work is two
-hundred conversations reads as a handful of items rather than two hundred.
+Nothing in either surface grows with the size of the run that it need not. A loop
+however long reads as one block of one pass, and a conversation hands out
+`PAGE_SIZE` turns at a time.
 
 The view reads only what it shows. The run detail is fetched for the selected run
 alone and with `include_conversations=false`; the ordered record comes from the
@@ -639,7 +649,7 @@ being photographed.
 | `17-recorded-gate-run` | the gate's own result and measured duration |
 | `18-recorded-session-closed` | the closed session's recorded fields |
 | `19-recorded-node-dispatched` | the dispatch's attempt and persona |
-| `20-recorded-overall` | execution ending at settlement and the completion marker 41 hours later |
+| `20-recorded-overall` | execution ending at settlement, and the run's own events with the completion 41 hours later among them |
 | `22-node-timeline-crosshair` | the node timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
 | `23-overall-timeline-crosshair` | the overall timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
 | `24-held-graph` | a run holding finished work for releases: a held-unlanded and a draft node, each card naming what it awaits |

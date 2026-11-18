@@ -231,6 +231,9 @@ const NOT_THIS_TIER = [
 const OWN_SERVERS = [
   "**/dag-ui-human-items.spec.ts",
   "**/dag-ui-update-settings.spec.ts",
+  "**/dag-ui-attest.spec.ts",
+  "**/dag-ui-event-list.spec.ts",
+  "**/dag-ui-event-details.spec.ts",
 ];
 
 export default defineConfig({

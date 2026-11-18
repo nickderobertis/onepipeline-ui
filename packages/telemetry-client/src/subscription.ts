@@ -3,7 +3,6 @@ import {
   API_V2_PATHS,
   API_V2_QUERY,
   applyPatch,
-  channelQueueSchema,
   humanItemsVisibleSchema,
   liveRunDetailSchema,
   type ResetFrame,
@@ -481,11 +480,7 @@ function patched(
   frame: Extract<
     SubscriptionFrame,
     {
-      type:
-        | "detail.patch"
-        | "timeline.patch"
-        | "channel.patch"
-        | "human-items.patch";
+      type: "detail.patch" | "timeline.patch" | "human-items.patch";
     }
   >,
   asked: SubscriptionView,
@@ -548,14 +543,6 @@ function patched(
         ),
       };
     }
-    case "channel.patch":
-      if (visible.type !== "channel") throw refused("a channel");
-      return {
-        ...visible,
-        channel: ofRun(
-          patchedAs(channelQueueSchema, visible.channel, frame.ops, "channel"),
-        ),
-      };
   }
 }
 
@@ -629,7 +616,6 @@ function stateDisagreement(
   const runs = [
     visible.detail.run.run_id,
     "timeline" in visible ? visible.timeline.run_id : visible.run_id,
-    "channel" in visible ? visible.channel.run_id : visible.run_id,
   ];
   return runs.every((run) => run === visible.run_id)
     ? undefined

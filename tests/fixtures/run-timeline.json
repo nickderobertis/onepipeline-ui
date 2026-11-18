@@ -2,7 +2,7 @@
   "api_version": 2,
   "telemetry_schema_version": 29,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 15,
+  "timeline_schema_version": 16,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
@@ -32,6 +32,30 @@
           "seq": 2,
           "journal_order": 2,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "node": "contract-interface",
+            "awaiting": [
+              {
+                "dep": "sdk",
+                "identity": "github.com/nickderobertis/onepipeline",
+                "target": "crate",
+                "style": "automated",
+                "since": "2026-08-07T12:00:01.000Z",
+                "waited_seconds": 12,
+                "last_answer": "not-released"
+              },
+              {
+                "dep": "sdk",
+                "identity": "github.com/nickderobertis/onepipeline",
+                "target": "npm",
+                "style": "human-step",
+                "action": "publish the npm wrapper from the tagged release",
+                "since": "2026-08-07T12:00:01.000Z",
+                "waited_seconds": 12,
+                "last_answer": "awaiting-human-step"
+              }
+            ]
+          },
           "kind": "release-wait",
           "at": "2026-08-07T12:00:01.200Z",
           "node_id": "contract-interface",
@@ -66,6 +90,14 @@
           "seq": 5,
           "journal_order": 5,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "node": "contract-interface",
+            "dep": "sdk",
+            "identity": "github.com/nickderobertis/onepipeline",
+            "target": "crate",
+            "style": "automated",
+            "version": "0.7.3"
+          },
           "kind": "release-arrived",
           "at": "2026-08-07T12:00:01.400Z",
           "node_id": "contract-interface",
@@ -84,6 +116,14 @@
           "seq": 8,
           "journal_order": 8,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "node": "contract-interface",
+            "dep": "sdk",
+            "identity": "github.com/nickderobertis/onepipeline",
+            "target": "npm",
+            "style": "human-step",
+            "version": "0.7.3"
+          },
           "kind": "release-arrived",
           "at": "2026-08-07T12:00:01.600Z",
           "node_id": "contract-interface",
@@ -102,6 +142,22 @@
           "seq": 9,
           "journal_order": 9,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "node": "contract-interface",
+            "delivery": "next",
+            "versions": [
+              {
+                "identity": "github.com/nickderobertis/onepipeline",
+                "target": "crate",
+                "version": "0.7.3"
+              },
+              {
+                "identity": "github.com/nickderobertis/onepipeline",
+                "target": "npm",
+                "version": "0.7.3"
+              }
+            ]
+          },
           "kind": "release-adopted",
           "at": "2026-08-07T12:00:01.800Z",
           "node_id": "contract-interface",
@@ -130,8 +186,8 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Attempt": 1,
-            "Persona": "worker"
+            "attempt": 1,
+            "persona": "worker"
           },
           "kind": "node-dispatched",
           "at": "2026-08-07T12:00:02.000Z",
@@ -152,7 +208,7 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Turn": 1
+            "turn": 1
           },
           "description": "",
           "kind": "turn-started",
@@ -178,8 +234,10 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Tool": "Read",
-            "Detail": "src/api.rs"
+            "kind": "tool_call",
+            "name": "Read",
+            "detail": "src/api.rs",
+            "truncated": false
           },
           "description": "Read src/api.rs",
           "kind": "turn-activity",
@@ -205,7 +263,7 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Turn": 2
+            "turn": 2
           },
           "description": "",
           "kind": "turn-started",
@@ -231,8 +289,10 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Tool": "Bash",
-            "Detail": "just gate"
+            "kind": "tool_call",
+            "name": "Bash",
+            "detail": "just gate",
+            "truncated": false
           },
           "description": "just gate",
           "kind": "turn-activity",
@@ -258,7 +318,7 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Usage": {
+            "usage": {
               "input_tokens": 159810,
               "output_tokens": 1728,
               "cache_read_tokens": 231481,
@@ -284,6 +344,10 @@
           "journal_order": 16,
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "completed": true,
+            "report_path": "/a-scratch/report.json"
+          },
           "kind": "member-settled",
           "at": "2026-08-07T12:00:05.500Z",
           "node_id": "contract-interface",
@@ -306,8 +370,11 @@
           "journal_order": 17,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Branch": "feature/contract-interface",
-            "Base": "main"
+            "identity": "github.com/nickderobertis/onepipeline-ui",
+            "branch": "feature/contract-interface",
+            "base": "main",
+            "worktree": "/a/recorded/worktree",
+            "clone": "/a/recorded/clone"
           },
           "kind": "session-opened",
           "at": "2026-08-07T12:00:06.000Z",
@@ -326,6 +393,11 @@
           "seq": 17,
           "journal_order": 18,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "command": "just gate",
+            "comparison_remote": "origin",
+            "comparison_base": "main"
+          },
           "kind": "gate-started",
           "at": "2026-08-07T12:00:07.000Z",
           "node_id": "contract-interface",
@@ -343,6 +415,12 @@
           "seq": 18,
           "journal_order": 19,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "verdict": "pass",
+            "command": "just gate",
+            "output": "the gate ran and passed",
+            "preserved_log": "/a/recorded/clone/gate.log"
+          },
           "kind": "gate-verdict",
           "at": "2026-08-07T12:00:09.000Z",
           "node_id": "contract-interface",
@@ -364,6 +442,11 @@
           "seq": 19,
           "journal_order": 20,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "branch": "feature/contract-interface",
+            "remote": "origin",
+            "accepted": true
+          },
           "kind": "push",
           "at": "2026-08-07T12:00:10.000Z",
           "node_id": "contract-interface",
@@ -381,6 +464,13 @@
           "seq": 20,
           "journal_order": 21,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "url": "https://example.invalid/changes/1",
+            "host": "github",
+            "id": "1",
+            "base": "main",
+            "author": "a-recording-host"
+          },
           "kind": "change-opened",
           "at": "2026-08-07T12:00:11.000Z",
           "node_id": "contract-interface",
@@ -403,6 +493,11 @@
           "seq": 21,
           "journal_order": 22,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "name": "gate",
+            "required": true,
+            "status": "queued"
+          },
           "kind": "change-check",
           "at": "2026-08-07T12:00:12.000Z",
           "node_id": "contract-interface",
@@ -428,6 +523,16 @@
           "seq": 22,
           "journal_order": 23,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "name": "published-smoke",
+            "required": false,
+            "status": "completed",
+            "from_status": "in_progress",
+            "conclusion": "failure",
+            "url": "https://example.test/checks/published-smoke",
+            "started_at": "2026-08-07T12:00:10Z",
+            "completed_at": "2026-08-07T12:00:12Z"
+          },
           "kind": "change-check",
           "at": "2026-08-07T12:00:13.000Z",
           "node_id": "contract-interface",
@@ -457,6 +562,13 @@
           "seq": 23,
           "journal_order": 24,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "name": "gate",
+            "required": true,
+            "status": "completed",
+            "from_status": "queued",
+            "conclusion": "success"
+          },
           "kind": "change-check",
           "at": "2026-08-07T12:00:14.000Z",
           "node_id": "contract-interface",
@@ -486,6 +598,11 @@
           "seq": 24,
           "journal_order": 25,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "identity": "github.com/nickderobertis/onepipeline-ui",
+            "elapsed": 0.75,
+            "queue_position": 1
+          },
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:15.000Z",
           "node_id": "contract-interface",
@@ -503,6 +620,9 @@
           "seq": 25,
           "journal_order": 26,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "identity": "github.com/nickderobertis/onepipeline-ui"
+          },
           "kind": "lock-acquired",
           "at": "2026-08-07T12:00:15.100Z",
           "node_id": "contract-interface",
@@ -520,6 +640,11 @@
           "seq": 26,
           "journal_order": 27,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "identity": "github.com/nickderobertis/onepipeline-ui",
+            "queue_position": 1,
+            "url": "https://example.invalid/changes/1"
+          },
           "kind": "merge-queued",
           "at": "2026-08-07T12:00:16.000Z",
           "node_id": "contract-interface",
@@ -541,6 +666,11 @@
           "seq": 27,
           "journal_order": 28,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "identity": "github.com/nickderobertis/onepipeline-ui",
+            "elapsed": 2.25,
+            "queue_position": 2
+          },
           "kind": "lock-wait",
           "at": "2026-08-07T12:00:17.000Z",
           "node_id": "contract-interface",
@@ -558,6 +688,10 @@
           "seq": 28,
           "journal_order": 29,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "url": "https://example.invalid/changes/1",
+            "sha": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1908"
+          },
           "kind": "change-merged",
           "at": "2026-08-07T12:00:18.000Z",
           "node_id": "contract-interface",
@@ -579,6 +713,11 @@
           "seq": 29,
           "journal_order": 30,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
+          "fields": {
+            "identity": "github.com/nickderobertis/onepipeline-ui",
+            "sha": "9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4c3b2a1908",
+            "base": "main"
+          },
           "kind": "merge-completed",
           "at": "2026-08-07T12:00:19.000Z",
           "node_id": "contract-interface",
@@ -597,8 +736,10 @@
           "journal_order": 32,
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Status": "done",
-            "Outcome": "shipped"
+            "status": "done",
+            "outcome": "shipped",
+            "branch": "feature/contract-interface",
+            "change_url": "https://example.invalid/changes/1"
           },
           "kind": "node-settled",
           "at": "2026-08-07T12:00:20.000Z",
@@ -639,7 +780,7 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Turn": 1
+            "turn": 1
           },
           "description": "",
           "kind": "turn-started",
@@ -665,8 +806,10 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Tool": "Read",
-            "Detail": "src/api.rs"
+            "kind": "tool_call",
+            "name": "Read",
+            "detail": "src/api.rs",
+            "truncated": false
           },
           "description": "Read src/api.rs",
           "kind": "turn-activity",
@@ -692,7 +835,7 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Turn": 2
+            "turn": 2
           },
           "description": "",
           "kind": "turn-started",
@@ -718,8 +861,10 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Tool": "Bash",
-            "Detail": "just gate"
+            "kind": "tool_call",
+            "name": "Bash",
+            "detail": "just gate",
+            "truncated": false
           },
           "description": "just gate",
           "kind": "turn-activity",
@@ -745,7 +890,7 @@
           "persona": "worker",
           "dispatch_id": "run-20260807-a1b2c3.contract-interface",
           "fields": {
-            "Usage": {
+            "usage": {
               "input_tokens": 159810,
               "output_tokens": 1728,
               "cache_read_tokens": 231481,

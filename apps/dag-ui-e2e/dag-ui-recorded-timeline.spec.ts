@@ -9,6 +9,7 @@ import {
   appPlot,
   loadAllEarlierRows,
   loadRunRecords,
+  openRepeatedLoops,
 } from "./observatory-locators";
 import { SERVED_UI_URL } from "./playwright.config";
 
@@ -37,6 +38,29 @@ async function plotEnd(page: Page, timeline: Locator): Promise<number> {
 
 /** How far one pixel of a plot `width` wide spans, over `span` milliseconds. */
 const pixelOf = (span: number, width: number) => Math.ceil(span / width) + 1;
+
+/**
+ * What a detail calls a record's field: its wire key read as words, `exit_code`
+ * as "Exit code".
+ */
+const fieldTerm = (key: string): string => {
+  const words = key.replaceAll(/[_-]+/gu, " ").trim();
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+};
+
+/** A value the read API serves no field for: nothing, or an empty text, list or object. */
+const blank = (value: unknown): boolean =>
+  value === null ||
+  value === "" ||
+  (Array.isArray(value) && value.length === 0) ||
+  (typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length === 0);
+
+/** The terms a record's detail names its own fields by, in the record's order. */
+const fieldTerms = (fields: Readonly<Record<string, unknown>> | undefined) =>
+  Object.keys(fields ?? {}).map(fieldTerm);
 
 /**
  * The name a record's row is opened by: a tool call's one line as the server
@@ -115,12 +139,14 @@ test("recorded worker and drafter retain their records, intervals and kind-speci
     const record = served.spans
       .flatMap((span) => span.events)
       .find((event) => event.kind === kind);
-    const expectedFields: Readonly<Record<string, readonly string[]>> = {
-      "gate-run": ["Gate", "Result", "Duration (seconds)"],
-      "session-closed": ["Branch"],
-      "node-dispatched": ["Attempt", "Persona"],
-    };
-    expect(Object.keys(record?.fields ?? {})).toEqual(expectedFields[kind]);
+    // Every field the recorded payload holds, under its own key, but the
+    // session's token, which is a capability over the session.
+    const written = corpus.records.find((entry) => entry.kind === kind);
+    expect(Object.keys(record?.fields ?? {})).toEqual(
+      Object.entries(written?.payload ?? {})
+        .filter(([key, value]) => key !== "token" && !blank(value))
+        .map(([key]) => key),
+    );
     expect(record?.fields).toBeDefined();
     await worker
       .getByRole("button", { name: `Open ${kind}`, exact: true })
@@ -128,15 +154,12 @@ test("recorded worker and drafter retain their records, intervals and kind-speci
       .click();
     const panel = page.getByRole("region", { name: "Timeline item detail" });
     await expect(panel).not.toContainText(/still running/i);
-    for (const key of Object.keys(record?.fields ?? {}))
-      await expect(
-        panel.getByRole("term").filter({ hasText: key }),
-      ).toBeVisible();
-    const labels = await panel.getByRole("term").allTextContents();
-    expect(labels).toEqual([
-      "Recorded at",
-      ...Object.keys(record?.fields ?? {}),
-    ]);
+    const labels = await panel
+      .getByRole("region", { name: "Recorded fields" })
+      .getByRole("term")
+      .allTextContents();
+    for (const term of fieldTerms(record?.fields))
+      expect(labels).toContain(term);
     await page
       .getByRole("button", { name: "Close detail", exact: true })
       .click();
@@ -243,7 +266,8 @@ test("Overall ends at settlement and keeps the late completion as a marker", asy
     );
   }
   await loadRunRecords(page);
-  const late = page.getByRole("region", { name: "Records after execution" });
+  // Recorded after execution ended, and read as a row of the run's own events.
+  const late = page.getByRole("region", { name: "Run events" });
   await expect(late).toBeVisible();
   await late.getByRole("button", { name: /completion-requested/ }).click();
   await expect(
@@ -273,7 +297,7 @@ for (const terminal of corpus.terminations) {
     expect(served.spans.every((span) => span.ended_at !== null)).toBe(true);
     await page.goto(`/?run=${run}&view=overall`);
     await loadRunRecords(page);
-    const late = page.getByRole("region", { name: "Records after execution" });
+    const late = page.getByRole("region", { name: "Run events" });
     for (const kind of [
       "completion-requested",
       "planner-replied",
@@ -307,12 +331,13 @@ for (const terminal of corpus.terminations) {
     const replyPanel = page.getByRole("region", {
       name: "Timeline item detail",
     });
-    await expect(replyPanel.getByRole("term")).toHaveText([
+    // Every field of the reply, nested beneath when the record nests it.
+    await expect(replyPanel.getByRole("term").first()).toHaveText(
       "Recorded at",
-      "Author",
-      "Completion",
-      "Reason",
-    ]);
+    );
+    expect(await replyPanel.getByRole("term").allTextContents()).toEqual(
+      expect.arrayContaining(["Author", "Completion", "Reason"]),
+    );
     await expect(replyPanel).toContainText("Recorded late closure");
     await expect(replyPanel).not.toContainText(/still running/i);
     await page.keyboard.press("Escape");
@@ -334,10 +359,13 @@ for (const terminal of corpus.terminations) {
     const terminalPanel = page.getByRole("region", {
       name: "Timeline item detail",
     });
-    await expect(terminalPanel.getByRole("term")).toHaveText([
+    // Its own fields among every field it holds.
+    await expect(terminalPanel.getByRole("term").first()).toHaveText(
       "Recorded at",
-      ...(terminalFields[terminal.kind] ?? []),
-    ]);
+    );
+    expect(await terminalPanel.getByRole("term").allTextContents()).toEqual(
+      expect.arrayContaining([...(terminalFields[terminal.kind] ?? [])]),
+    );
     expect(
       await terminalPanel.getByRole("definition").allTextContents(),
     ).not.toContain("");
@@ -605,10 +633,7 @@ test("retries, equal timestamps and repeated relays keep every record under its 
   // A node's first answer holds each span's latest rows, so the ones before them
   // are read through the page's own control before every record is counted.
   await loadAllEarlierRows(page);
-  for (const button of await page
-    .getByRole("button", { name: /more .* events/ })
-    .all())
-    await button.click();
+  await openRepeatedLoops(page);
   const headings = await page
     .getByRole("heading", { level: 3 })
     .filter({
@@ -699,11 +724,12 @@ test("retries, equal timestamps and repeated relays keep every record under its 
   await page
     .getByRole("button", { name: "Open member-died", exact: true })
     .click();
-  await expect(
-    page
-      .getByRole("region", { name: "Timeline item detail" })
-      .getByRole("term"),
-  ).toHaveText(["Recorded at", ...Object.keys(failure?.fields ?? {})]);
+  const died = await page
+    .getByRole("region", { name: "Timeline item detail" })
+    .getByRole("term")
+    .allTextContents();
+  expect(died[0]).toBe("Recorded at");
+  for (const term of fieldTerms(failure?.fields)) expect(died).toContain(term);
   await page.keyboard.press("Escape");
   const outside = own.events.find((event) => event.kind === "node-ready");
   expect(outside).toBeDefined();
@@ -718,7 +744,7 @@ test("retries, equal timestamps and repeated relays keep every record under its 
     ).toHaveCount(0);
 });
 
-test("every served record fact appears in its panel without empty or unrelated rows", async ({
+test("every served record fact appears in its panel without empty rows or the session's token", async ({
   page,
   request,
 }) => {
@@ -741,18 +767,17 @@ test("every served record fact appears in its panel without empty or unrelated r
     );
     const panel = page.getByRole("region", { name: "Timeline item detail" });
     await expect(panel).toContainText("Recorded at");
-    for (const field of Object.keys(event.fields ?? {}))
+    for (const term of fieldTerms(event.fields))
       await expect(
-        panel.getByText(field, { exact: true }).first(),
+        panel.getByRole("term").filter({ hasText: term }).first(),
       ).toBeVisible();
     await expect(panel).not.toContainText(/still running/i);
     expect(await panel.getByRole("definition").allTextContents()).not.toContain(
       "",
     );
-    for (const unrelated of ["Token", "Worktree", "Config"])
-      await expect(
-        panel.getByRole("term").filter({ hasText: unrelated }),
-      ).toHaveCount(0);
+    await expect(
+      panel.getByRole("term").filter({ hasText: /^Token$/u }),
+    ).toHaveCount(0);
   }
   expect(seen.size).toBeGreaterThanOrEqual(13);
 });
@@ -819,31 +844,53 @@ test("late edit panels show populated edit facts without adding work", async ({
   const event = timeline.spans
     .flatMap((span) => span.events)
     .find((event) => event.kind === "edit-committed");
-  expect(event?.fields).toEqual({
-    Author: "planner",
-    Operations: [{ kind: "task-amended", node: corpus.node }],
-    "Operation kinds": ["task-amended"],
-  });
+  // Every field the record holds, under its own key: nothing a list of kept
+  // fields would have dropped.
+  const late = corpus.late_records.find(
+    (record) => record.kind === "edit-committed",
+  );
+  expect(event?.fields).toEqual(late?.payload);
   await page.goto(`/?run=${run}&view=overall`);
   await loadRunRecords(page);
   await page
-    .getByRole("region", { name: "Records after execution" })
+    .getByRole("region", { name: "Run events" })
     .getByRole("button", { name: /edit-committed/ })
     .click();
   const panel = page.getByRole("region", { name: "Timeline item detail" });
-  await expect(panel.getByRole("term")).toHaveText([
-    "Recorded at",
+  const recorded = panel.getByRole("region", { name: "Recorded fields" });
+  // The operations it compiled to, each named by its kind, and then the record
+  // nested as it was written: an object's fields and a list's entries as label
+  // and value pairs, never the JSON that encodes them.
+  await expect(
+    recorded.getByRole("heading", { name: "Operations" }),
+  ).toBeVisible();
+  for (const term of [
     "Author",
+    "Command",
+    "Op",
+    "Id",
+    "Text",
     "Operations",
+    "Kind",
+    "Node",
     "Operation kinds",
-  ]);
-  const values = await panel.getByRole("definition").allTextContents();
-  expect(values).not.toContain("");
-  expect(values.slice(1)).toEqual([
+  ])
+    await expect(
+      recorded
+        .getByRole("term")
+        .filter({ hasText: new RegExp(`^${term}$`, "u") })
+        .first(),
+    ).toBeVisible();
+  const text = await recorded.innerText();
+  for (const said of [
     "planner",
-    JSON.stringify([{ kind: "task-amended", node: corpus.node }]),
-    JSON.stringify(["task-amended"]),
-  ]);
+    "amend",
+    corpus.node,
+    "Recorded post-execution amendment",
+    "task-amended",
+  ])
+    expect(text).toContain(said);
+  expect(text).not.toMatch(/[{[]\s*"/u);
   await expect(panel).not.toContainText(/still running/i);
 });
 

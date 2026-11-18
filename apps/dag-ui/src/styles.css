@@ -718,31 +718,136 @@ p {
   text-overflow: ellipsis;
 }
 
-/* The middle of a collapsed run, standing exactly where the rows it holds stood.
-   Its words are the control's own — the count and the kind — so the ellipsis beside
-   them is decoration rather than the only thing that says anything. */
-.transcript-collapsed {
-  width: min(100%, 1100px);
-  margin: 0 auto;
-}
-.transcript-collapsed button {
+/* An event list's head: its name, and the one filter that narrows it, kept in view
+   above the rows it narrows. */
+.event-list-head {
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
-  width: 100%;
-  align-items: baseline;
-  gap: 8px;
-  padding: 1px 8px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
+  width: min(100%, 1100px);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 auto 4px;
+  padding: 4px 0 6px;
+  border-bottom: 1px solid var(--border);
+  background: var(--background);
+}
+.run-events .event-list-head {
+  background: var(--card);
+}
+.event-list-head > h3 {
+  margin: 6px 0 0;
   color: var(--muted-foreground);
   font-size: 11px;
-  line-height: 18px;
-  text-align: left;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+/* The run-kind dropdown's shape, opening in flow as that one does: laid over the
+   rows, it was clipped by the list's own scroller whenever the list was short,
+   which is exactly when a reader who hid everything needs it. */
+.event-type-filter {
+  margin-top: 0;
+}
+.event-type-filter fieldset {
+  min-width: 240px;
+}
+.event-type-filter label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+}
+.event-type-count {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.event-type-filter-foot {
+  display: flex;
+  justify-content: space-between;
+  margin: 4px 0 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.event-type-filter-foot button {
+  border: 0;
+  background: transparent;
+  color: var(--primary);
   cursor: pointer;
 }
-.transcript-collapsed button:hover {
-  background: color-mix(in srgb, var(--muted) 55%, transparent);
+.event-list-empty {
+  display: grid;
+  width: min(100%, 1100px);
+  justify-items: start;
+  gap: 6px;
+  margin: 8px auto;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.event-list-empty p {
+  margin: 0;
+}
+.run-events {
+  display: grid;
+  gap: 2px;
+}
+
+/* One loop the run went round back to back: one pass through it inside, its
+   count and its stretch of time on top, standing where the rows it holds stood. */
+.transcript-cycle {
+  display: grid;
+  /* One column no wider than the list, however long a row's unbroken word. */
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  width: min(100%, 1100px);
+  margin: 2px auto;
+  gap: 2px;
+  padding: 0 0 4px;
+  border: 1px solid color-mix(in srgb, var(--primary) 45%, var(--border));
+  border-left-width: 3px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+.transcript-cycle-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 10px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.transcript-cycle-span {
+  overflow: hidden;
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.transcript-cycle-count {
+  padding: 0 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--primary) 25%, transparent);
   color: var(--foreground);
+  font-size: 12px;
+}
+.transcript-cycle-head button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.transcript-cycle .transcript-item,
+.transcript-cycle .transcript-cycle {
+  width: auto;
+  margin-inline: 6px;
+}
+
+/* A command line reads as one, and wraps where it must rather than overflowing. */
+.command-line {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 /* The category glyph sits on the eyebrow's own baseline rather than above it: it is
@@ -3573,4 +3678,31 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   margin-right: 6px;
   color: var(--muted-foreground);
   vertical-align: -1px;
+}
+
+/* A record's fields, nested as it recorded them. */
+.record-content {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+.record-fields .record-fields {
+  margin: 2px 0 0;
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+.record-list,
+.record-operations,
+.hold-reasons {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+.record-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.record-none {
+  color: var(--muted-foreground);
 }
