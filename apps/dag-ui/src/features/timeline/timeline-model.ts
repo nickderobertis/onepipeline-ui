@@ -1367,7 +1367,10 @@ export function holdReasonsOf(
         ? event.fields?.released
         : undefined;
   if (!Array.isArray(listed)) return [];
-  return (listed as readonly unknown[]).filter(isHoldReason);
+  // Widened to `unknown` so the type guard can narrow: a hold reason's open
+  // index signature is not a JSON value, so `filter` over the JSON list rejects it.
+  const entries: readonly unknown[] = listed;
+  return entries.filter(isHoldReason);
 }
 
 const isName = (value: unknown): value is string =>
