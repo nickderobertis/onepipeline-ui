@@ -568,7 +568,15 @@ function NodeExecution({
     [reading],
   );
   useNodeLoadProbe(projection, reading);
-  const sync = useTimelineScrollSync(entries);
+  // The reading cursor measures every row it is given each time the rows change and
+  // each time the list scrolls, which a node's read does once per batch it draws:
+  // over a busy node's thousands of rows that measuring was most of the load. So
+  // while the read is in flight the cursor follows the rows the node opened with,
+  // and it takes the whole list once, when the read lands.
+  const nodeLoading = history.nodeLoad?.state === "loading";
+  const openedWith = useRef(entries);
+  if (!nodeLoading) openedWith.current = entries;
+  const sync = useTimelineScrollSync(nodeLoading ? openedWith.current : entries);
   const [expanded, setExpanded] = useState(false);
   // Held here rather than inside the plot so every zoom is bounded: the plot's
   // own zoom would narrow past the last labelled second.
@@ -644,9 +652,6 @@ function NodeExecution({
   );
   const plotArea = useRef<HTMLElement | null>(null);
   const { loadSpan } = history;
-  // Both the chart and the list fill as the node's read arrives, so both say they
-  // are still being filled until it has.
-  const nodeLoading = history.nodeLoad?.state === "loading";
   const openedSpan =
     selected?.rowKind === "span" ? selected.span.id : undefined;
   useEffect(() => {

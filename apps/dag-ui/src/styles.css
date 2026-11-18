@@ -670,6 +670,12 @@ p {
   border: 1px solid transparent;
   border-radius: 4px;
   background: var(--card);
+  /* A busy node lists thousands of rows, nearly all of them off screen; laying
+     each one out was most of what loading the node cost the browser. A row off
+     screen is laid out at the height it last had, one line until it has been
+     drawn, and in full once it scrolls into view. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 22px;
 }
 
 /* The row a reader is on and the row they opened, told apart from the rest by tone
