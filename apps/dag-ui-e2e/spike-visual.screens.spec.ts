@@ -106,16 +106,15 @@ const SURFACES: Surface[] = [
     open: async (page, mode) => {
       await visit(page, `/?run=${runs().live}&node=dashboard`);
       await quiet(page);
-      await page.getByRole("button", { name: /^turn-completed, marker/ }).first().click();
+      // The item itself, from the fixture: the dashboard worker's turn-activity message
+      // reading the usage-limit notice (fixtures/runs.mjs). No page patch in the before.
+      const item = page
+        .getByRole("button", { name: /weekly limit/ })
+        .or(page.getByRole("listitem").filter({ hasText: /weekly limit/ }).getByRole("button"))
+        .first();
+      await item.click();
+      await expect(page.getByRole("region", { name: "Timeline item detail" })).toContainText("You've hit your weekly limit");
       await quiet(page);
-      // Fixture words: the item is a turn-activity message reading the usage-limit notice.
-      await page.evaluate(() => {
-        const detail = document.querySelector('[aria-label="Timeline item detail"]');
-        const turns = Array.from(detail?.querySelectorAll("article") ?? []);
-        const t = turns[Math.min(2, turns.length - 1)];
-        const p = t?.querySelector("p, pre, div:last-child");
-        if (p) p.textContent = "You've hit your weekly limit · resets Mon 9:00 AM";
-      });
       if (mode === "after") {
         await page.evaluate(() => {
           const detail = document.querySelector('[aria-label="Timeline item detail"]');
@@ -123,33 +122,36 @@ const SURFACES: Surface[] = [
           // One view: no field/value block and no Recorded fields heading at all.
           for (const el of Array.from(detail.querySelectorAll('section[aria-label="Recorded fields"], dl.record-fields, [data-fields]')))
             (el as HTMLElement).style.display = "none";
-          const target = Array.from(detail.querySelectorAll("article[data-turn-id]")).find((t) => /weekly limit/.test(t.textContent ?? "")) as HTMLElement | undefined;
-          if (!target) return;
-          // Fixture words: a conversation long enough to scroll, the item among its turns.
+          // Fixture words: a conversation long enough to scroll, with the opened item among
+          // its turns. The base has no transcript turn for this item, so the mock draws the
+          // turns itself inside the base's own conversation card.
+          const content = detail.querySelector('[data-slot="card-content"]');
+          if (!content) return;
+          for (const el of Array.from(content.querySelectorAll(".conversation-timeline-sticky, p.detail-note")))
+            (el as HTMLElement).style.display = "none";
           const say = [
             "Reading apps/dag-ui/src/features/timeline/NodeTimeline.tsx to find where the hover reading is computed.",
             "The crosshair snaps only to bars; markers after the last bar have no reading. I'll add a nearest-marker lookup.",
             "Running the node timeline journeys at 1440x900 and 390x844.",
             "Two journeys pass; the phone one times out waiting for the tooltip. Retrying with the pointer moved inside the plot.",
-            "All node timeline journeys pass. Next: the event detail of a conversation item.",
+            "npx playwright test --grep 'at 390x844'",
           ];
-          const after = ["(no further output: the dispatch stopped here)"];
-          const turn = (text: string, n: number) => {
-            const a = target.cloneNode(true) as HTMLElement;
-            a.dataset.turnId = `engineer-dashboard.s${n}`;
-            a.setAttribute("aria-label", `Turn engineer-dashboard.s${n} from oneagentgraph`);
-            const b = a.querySelector("button");
-            if (b) b.textContent = `Collapse turn engineer-dashboard.s${n}`;
-            const d = a.querySelector("div");
-            if (d) d.textContent = text;
+          const turn = (label: string, text: string) => {
+            const a = document.createElement("article");
+            a.setAttribute("aria-label", `Turn ${label} from oneagentgraph`);
+            a.style.cssText = "padding:10px 12px;margin:6px 0";
+            a.innerHTML = `<p class="eyebrow" style="margin:0 0 4px">${label}</p><div style="font-size:14px;line-height:1.5"></div>`;
+            (a.querySelector("div") as HTMLElement).textContent = text;
+            content.appendChild(a);
             return a;
           };
-          say.forEach((t, i) => target.insertAdjacentElement("beforebegin", turn(t, i)));
-          after.forEach((t, i) => target.insertAdjacentElement("afterend", turn(t, 10 + i)));
+          say.forEach((t, i) => turn(`worker · message ${i + 1}`, t));
+          const target = turn("worker · message 6", "You've hit your weekly limit · resets Mon 9:00 AM");
+          turn("worker · message 7", "(no further output: the dispatch stopped here)");
           // The DAG view's own selection accent: the selected event row's --primary border,
           // with a faint tint of the same accent behind it.
           target.style.cssText +=
-            ";border:1px solid var(--primary);border-radius:8px;padding:10px 12px;background:color-mix(in srgb, var(--primary) 8%, transparent)";
+            ";border:1px solid var(--primary);border-radius:8px;background:color-mix(in srgb, var(--primary) 8%, transparent)";
           target.setAttribute("aria-current", "true");
           target.scrollIntoView({ block: "center" });
         });

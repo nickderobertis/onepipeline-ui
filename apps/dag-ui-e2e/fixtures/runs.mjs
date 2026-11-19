@@ -1969,6 +1969,25 @@ function writeLiveRun(root, checkOrigin) {
       truncated: false,
     },
   );
+  // THROWAWAY spike-visual (dag-ui-panel-cursor-action-items-2026-11-19): a conversation
+  // item reading the usage-limit notice, as oneagentgraph relays a worker's words.
+  journal.advance(1).emit(
+    "agentgraph",
+    "turn-activity",
+    {
+      ...run,
+      node: "dashboard",
+      member: "worker",
+      persona: "worker",
+      session: WORKER_SESSION,
+    },
+    {
+      kind: "message",
+      name: null,
+      detail: "",
+      output: "You've hit your weekly limit · resets Mon 9:00 AM",
+    },
+  );
 
   // What the engine's overlay had every oneharness under this run's launches
   // append to the run's own pointer file: the observer's session, the
