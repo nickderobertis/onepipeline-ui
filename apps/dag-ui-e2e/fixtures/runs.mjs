@@ -1928,6 +1928,30 @@ function writeLiveRun(root, checkOrigin) {
       ],
     },
   );
+  // THROWAWAY spike-visual (dag-ui-panel-cursor-action-items-2026-11-19): two refused
+  // edits, one by the planner and one by the monitor, so the base draws its Refused edits box.
+  journal.advance(1).emit(
+    "pipeline",
+    "edit-rejected",
+    { ...run, node: "dashboard" },
+    {
+      author: "planner",
+      command: { op: "depend", id: "dashboard", on: "foundation" },
+      reason:
+        "depend: node 'dashboard': dashboard is already running; a dependency cannot be added to a node that has started",
+    },
+  );
+  journal.advance(1).emit(
+    "pipeline",
+    "edit-rejected",
+    { ...run, node: "foundation" },
+    {
+      author: "monitor",
+      command: { op: "redirect", id: "foundation", note: "hand the review to the reviewer" },
+      reason:
+        "redirect: node 'foundation': foundation has settled; a settled node cannot be redirected",
+    },
+  );
   journal.advance(2).emit(
     "agentgraph",
     "turn-activity",

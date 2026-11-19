@@ -1,7 +1,7 @@
 // THROWAWAY: spike-visual mock for dag-ui-panel-cursor-action-items-2026-11-19.
 // Nothing here lands. Each surface is shot twice at the same viewport:
-//   "before" — the unchanged base app, with only fixture data the base fixture lacks
-//              injected into the served API responses (page.route);
+//   "before" — the unchanged base app over the fixture runs root, plus the spike's own
+//              fixture records (fixtures/runs.mjs) where the base fixture lacked the state;
 //   "after"  — the same, with the proposed change mocked by patching the page.
 // Run it with `just spike-visual-screens` (scripts/visual-capture.sh filtered to this file).
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -81,69 +81,6 @@ async function openObserverDispatch(page: Page, mode: Mode): Promise<void> {
     await hideNoSuchSpan(page);
     await expect(page.getByText(/no such span/).filter({ visible: true })).toHaveCount(0);
   }
-}
-
-/** Fixture: a turn-activity item in the conversation reads the usage-limit notice. */
-async function weeklyLimit(page: Page): Promise<void> {
-  await page.route(/\/api\/v2\//, async (route) => {
-    const response = await route.fetch();
-    const text = await response.text();
-    const at = text.indexOf('"turn-activity"');
-    const body =
-      at < 0
-        ? text
-        : text.slice(0, at) +
-          text.slice(at).replace(/"(text|message|content|summary)":"([^"\\]*)"/, (_all, key) => `"${key}":"You've hit your weekly limit · resets Mon 9:00 AM"`);
-    await route.fulfill({ response, body });
-  });
-}
-
-/** Fixture: the run's graph carries two refused edits (one by the planner, one by the monitor). */
-async function refusedEdits(page: Page): Promise<void> {
-  await page.route(/\/api\/v2\/runs\//, async (route) => {
-    const response = await route.fetch();
-    if (!(response.headers()["content-type"] ?? "").includes("json")) return route.fulfill({ response });
-    const json = await response.json();
-    const edits = [
-      {
-        at: "2026-11-19T09:12:04Z",
-        author: "planner",
-        command: { op: "add-dependency", node: "dashboard", on: "foundation" },
-        reason: "dashboard is already running; a dependency cannot be added to a node that has started",
-      },
-      {
-        at: "2026-11-19T09:14:40Z",
-        author: "monitor",
-        command: { op: "redirect", node: "foundation", to: "reviewer" },
-        reason: "foundation has settled; a settled node cannot be redirected",
-      },
-    ];
-    const walk = (o: unknown): void => {
-      if (o === null || typeof o !== "object") return;
-      const rec = o as Record<string, unknown>;
-      if ("plan" in rec && typeof rec.plan === "object") rec.rejected_edits = edits;
-      for (const v of Object.values(rec)) walk(v);
-    };
-    walk(json);
-    await route.fulfill({ response, json });
-  });
-}
-
-
-/** Before only: the base's RejectedEdits box (its own markup and class) over the nodes. */
-async function showRefusedEdits(page: Page): Promise<void> {
-  await page.evaluate(() => {
-    const flow = document.querySelector('[aria-label="DAG execution graph"]');
-    const section = document.createElement("section");
-    section.className = "rejected-edits";
-    section.setAttribute("aria-labelledby", "rejected-edits-title");
-    const edits = [
-      ["planner", "edit refused: add-dependency dashboard → foundation: dashboard is already running; a dependency cannot be added to a node that has started"],
-      ["monitor", "edit refused: redirect foundation → reviewer: foundation has settled; a settled node cannot be redirected"],
-    ];
-    section.innerHTML = `<h2 id="rejected-edits-title">Refused edits</h2><ol>${edits.map(([a, r]) => `<li><span class="rejected-edit-what">${a}</span><span class="rejected-edit-reason">${r}</span></li>`).join("")}</ol>`;
-    flow?.insertAdjacentElement("afterend", section);
-  });
 }
 
 const css = (page: Page, content: string) => page.addStyleTag({ content });
@@ -250,7 +187,11 @@ const SURFACES: Surface[] = [
     open: async (page, mode) => {
       await visit(page, `/?run=${runs().live}&view=graph`);
       await quiet(page);
-      if (mode === "before") await showRefusedEdits(page);
+      // The base draws its own Refused edits box from the live run's fixture
+      // edit-rejected records (fixtures/runs.mjs); the after is the graph alone.
+      const box = page.getByRole("region", { name: "Refused edits" });
+      await expect(box).toBeVisible();
+      if (mode === "after") await css(page, ".rejected-edits{display:none!important}");
     },
   },
   {
