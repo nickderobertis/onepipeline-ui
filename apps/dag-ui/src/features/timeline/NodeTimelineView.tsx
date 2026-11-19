@@ -576,7 +576,9 @@ function NodeExecution({
   const nodeLoading = history.nodeLoad?.state === "loading";
   const openedWith = useRef(entries);
   if (!nodeLoading) openedWith.current = entries;
-  const sync = useTimelineScrollSync(nodeLoading ? openedWith.current : entries);
+  const sync = useTimelineScrollSync(
+    nodeLoading ? openedWith.current : entries,
+  );
   const [expanded, setExpanded] = useState(false);
   // Held here rather than inside the plot so every zoom is bounded: the plot's
   // own zoom would narrow past the last labelled second.

@@ -86,14 +86,13 @@ function rowsOfSpan(
   const seen = new Set(span.events.map(rowKey));
   const fresh = extra.filter((row) => !seen.has(rowKey(row)));
   if (fresh.length === 0) return span;
-  return {
-    ...span,
-    events: [...span.events, ...fresh].sort(
-      (left, right) =>
-        Date.parse(left.at) - Date.parse(right.at) ||
-        (left.journal_order ?? 0) - (right.journal_order ?? 0),
-    ),
-  };
+  // Each instant read once rather than in every comparison: a busy node sorts
+  // thousands of rows on every batch its read draws.
+  const keyed = [...span.events, ...fresh].map(
+    (event) => [Date.parse(event.at), event.journal_order ?? 0, event] as const,
+  );
+  keyed.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  return { ...span, events: keyed.map(([, , event]) => event) };
 }
 
 /** The stretches `spans` hold no rows of, merged, in time order. */

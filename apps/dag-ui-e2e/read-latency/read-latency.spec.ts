@@ -1374,11 +1374,18 @@ function nodeLoadObserver(expected: readonly string[]) {
       (list?.querySelector("article") ?? null) !== null
     )
       marks.first_render = now;
-    const said = chart?.textContent ?? "";
-    if (marks.partial === null && said.includes("Partial — loading"))
-      marks.partial = now;
+    // Read narrowly while the node loads: this runs on every change the page makes,
+    // and reading the whole panel's text each time would slow the load it times.
     if (
-      chart?.getAttribute("aria-busy") !== "false" ||
+      marks.partial === null &&
+      (chart?.querySelector('[role="status"]')?.textContent ?? "").includes(
+        "Partial — loading",
+      )
+    )
+      marks.partial = now;
+    if (chart?.getAttribute("aria-busy") !== "false") return;
+    const said = chart.textContent ?? "";
+    if (
       said.includes("Still loading") ||
       said.includes("Partial — loading") ||
       (list?.textContent ?? "").includes("Load earlier rows")
