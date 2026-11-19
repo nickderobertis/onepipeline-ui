@@ -3195,7 +3195,14 @@ fn a_session_with_a_turn_in_flight_serves_its_finished_run_and_the_running_one_l
     let turn = &response.json()["turns"][0];
     assert_eq!(turn["status"], json!("running"), "{turn}");
     assert_eq!(turn["user"], json!("land the wire contract"), "{turn}");
-    assert_eq!(turn["assistant"], json!("now landing the client"), "{turn}");
+    // What it has said so far is its words in order; a turn still in flight has
+    // closed on no reply yet.
+    assert_eq!(
+        turn["agentEvents"],
+        json!([{ "index": 0, "kind": "message", "text": "now landing the client" }]),
+        "{turn}"
+    );
+    assert_eq!(turn["assistant"], Value::Null, "{turn}");
 }
 
 /// Reading one takes no lock and writes nothing under the store.
