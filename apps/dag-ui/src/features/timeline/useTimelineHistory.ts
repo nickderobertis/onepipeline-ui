@@ -346,6 +346,7 @@ function useNodeStream({
     const controller = new AbortController();
     const delivered = new Set<string>();
     let total: number | undefined;
+    const whole = () => total !== undefined && delivered.size >= total;
     let partial = false;
     let waiting: ReturnType<typeof setTimeout> | undefined;
     const show = (state: NodeLoad["state"], failure?: HistoryFailure) =>
@@ -378,13 +379,18 @@ function useNodeStream({
             for (const row of line.rows) delivered.add(rowKey(row));
             bump();
           }
-          show("loading");
+          // Every record the start line counted has arrived: the node is held in
+          // the same update that draws its last rows, rather than in a second
+          // whole redraw once the end line is read.
+          if (whole()) clearTimeout(partialAfter);
+          show(whole() ? "held" : "loading");
         }
         clearTimeout(partialAfter);
         show("held");
         bump();
       } catch (caught) {
-        if (controller.signal.aborted) return;
+        // Nothing is missing once every counted record has arrived.
+        if (controller.signal.aborted || whole()) return;
         if (attempt < NODE_READ_ATTEMPTS) {
           waiting = setTimeout(
             () => void read(attempt + 1),
