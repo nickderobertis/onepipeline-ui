@@ -114,13 +114,18 @@ function panel(page: Page): { chart: Locator; list: Locator } {
   };
 }
 
-/** Every loading, partial or Load earlier mark the node panel could show. */
+/**
+ * Every loading, partial or Load earlier mark the node panel could show, found by
+ * the words each says. Not by the list's buttons' accessible names: that asks the
+ * browser to compute a name for every one of a busy node's thousands of rows, each
+ * time the mark is looked for.
+ */
 function loadingMarks(page: Page): Locator {
   const { chart, list } = panel(page);
   return chart
     .getByText("Still loading")
     .or(chart.getByText("Partial — loading"))
-    .or(list.getByRole("button", { name: /^Load(ing)? earlier rows/ }));
+    .or(list.getByText(/^Load(ing)? earlier rows/));
 }
 
 /** The node panel holds every record, and says nothing is loading. */
