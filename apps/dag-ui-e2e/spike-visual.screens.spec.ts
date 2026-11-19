@@ -114,26 +114,58 @@ async function refusedEdits(page: Page): Promise<void> {
   });
 }
 
+
+/** Before only: the base's HistoryFailed line (its own markup and class), under the timeline and in the open panel. */
+async function showNoSuchSpan(page: Page, inPanel: boolean): Promise<void> {
+  await page.evaluate(([span, panel]) => {
+    const failed = () => {
+      const p = document.createElement("p");
+      p.className = "page-failed";
+      p.setAttribute("role", "alert");
+      p.innerHTML = `<span>Earlier rows did not load: no such span: ${span}</span><button type="button">Try again</button>`;
+      return p;
+    };
+    document.querySelector('[aria-label="Graph timeline"]')?.insertAdjacentElement("afterend", failed());
+    if (panel) document.querySelector('aside[aria-label="Item detail panel"]')?.appendChild(failed());
+  }, [SPAN_ID, inPanel] as const);
+}
+
+/** Before only: the base's RejectedEdits box (its own markup and class) over the nodes. */
+async function showRefusedEdits(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const flow = document.querySelector('[aria-label="DAG execution graph"]');
+    const section = document.createElement("section");
+    section.className = "rejected-edits";
+    section.setAttribute("aria-labelledby", "rejected-edits-title");
+    const edits = [
+      ["planner", "edit refused: add-dependency dashboard → foundation: dashboard is already running; a dependency cannot be added to a node that has started"],
+      ["monitor", "edit refused: redirect foundation → reviewer: foundation has settled; a settled node cannot be redirected"],
+    ];
+    section.innerHTML = `<h2 id="rejected-edits-title">Refused edits</h2><ol>${edits.map(([a, r]) => `<li><span class="rejected-edit-what">${a}</span><span class="rejected-edit-reason">${r}</span></li>`).join("")}</ol>`;
+    flow?.insertAdjacentElement("afterend", section);
+  });
+}
+
 const css = (page: Page, content: string) => page.addStyleTag({ content });
 
 const SURFACES: Surface[] = [
   {
     name: "s1-observer-panel-closed",
     open: async (page, mode) => {
-      if (mode === "before") await failSpanPages(page);
       await openRecordedOverall(page);
       await runEvent(page).click();
       await page.getByRole("button", { name: "Close detail" }).click();
       await quiet(page);
+      if (mode === "before") await showNoSuchSpan(page, false);
     },
   },
   {
     name: "s1-observer-panel-open",
     open: async (page, mode) => {
-      if (mode === "before") await failSpanPages(page);
       await openRecordedOverall(page);
       await runEvent(page).click();
       await quiet(page);
+      if (mode === "before") await showNoSuchSpan(page, true);
     },
   },
   {
@@ -196,9 +228,9 @@ const SURFACES: Surface[] = [
   {
     name: "s4-graph",
     open: async (page, mode) => {
-      if (mode === "before") await refusedEdits(page);
       await visit(page, `/?run=${runs().live}&view=graph`);
       await quiet(page);
+      if (mode === "before") await showRefusedEdits(page);
     },
   },
   {
@@ -327,14 +359,21 @@ async function openActionItems(page: Page, world: string) {
 
 async function mockSortDatesSpacing(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const groupBy = document.querySelector('select[aria-label="Group by"], [aria-label="Group by"]');
-    const host = groupBy?.closest("label") ?? groupBy;
-    if (host?.parentElement) {
-      const label = document.createElement("label");
-      label.style.cssText = "display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#9ca3af;margin-left:12px";
-      label.innerHTML = 'Sort <select aria-label="Sort" style="background:#111827;color:#e5e7eb;border:1px solid #374151;border-radius:6px;padding:3px 6px;font-size:12px"><option>Default</option><option>Newest first</option><option>Oldest first</option></select>';
-      host.parentElement.insertBefore(label, host.nextSibling);
-    }
+    // Sort, cloned from the page's own Group by control so it takes its styling, placed
+    // before the filters so it shows at desktop and phone width alike.
+    const filters = document.querySelector("fieldset.human-items-filters");
+    const groupSelect = document.querySelector<HTMLSelectElement>("fieldset.human-items-filters select");
+    const sort = document.createElement("div");
+    sort.style.cssText = "display:inline-flex;align-items:center;gap:6px;font-size:12px;margin:0 8px 6px 0";
+    const label = document.createElement("label");
+    label.htmlFor = "spike-sort";
+    label.textContent = "Sort";
+    const select = (groupSelect?.cloneNode(false) as HTMLSelectElement | undefined) ?? document.createElement("select");
+    select.id = "spike-sort";
+    select.setAttribute("aria-label", "Sort");
+    select.innerHTML = "<option>Default</option><option>Newest first</option><option>Oldest first</option>";
+    sort.append(label, select);
+    filters?.parentElement?.insertBefore(sort, filters);
     const ages = ["Raised 3 min ago", "Raised 41 min ago", "Raised 2 h ago", "Raised yesterday, 16:20", "Raised Mon 11:05", "Raised Nov 12"];
     document.querySelectorAll('[aria-label="Action item list"] article').forEach((card, i) => {
       const h = card.querySelector("h2, h3, h4");
