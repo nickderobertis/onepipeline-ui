@@ -18,8 +18,6 @@ async function openRecordedOverall(page: Page): Promise<void> {
   await page.getByRole("region", { name: "Run events" }).getByRole("button").first().waitFor();
   await quiet(page);
 }
-const runEvent = (page: Page) =>
-  page.getByRole("region", { name: "Run events" }).getByRole("button").filter({ hasText: /monitor|observer|harness|dispatch/i }).or(page.getByRole("region", { name: "Run events" }).getByRole("button").first()).first();
 import { FIXTURE_WORKSPACE } from "./playwright.config";
 import { VIEWPORTS } from "./viewports";
 
@@ -33,8 +31,6 @@ interface Surface {
   modes?: Mode[];
   open: (page: Page, mode: Mode) => Promise<void>;
 }
-
-const SPAN_ID = "harness.01JD7K3M9QXWV2R4T8YB6N5C0E";
 
 async function visit(page: Page, url: string): Promise<void> {
   await page.goto(url);
@@ -57,15 +53,34 @@ async function settle(page: Page): Promise<void> {
   });
 }
 
-/** Before only: span pages of the observer's oneharness dispatch answer the base server's error. */
-async function failSpanPages(page: Page): Promise<void> {
-  await page.route((url) => /timeline/.test(url.pathname) && /span/.test(url.search), (route) =>
-    route.fulfill({
-      status: 404,
-      contentType: "application/json",
-      json: { error: { code: "not_found", message: `no such span: ${SPAN_ID}` } },
-    }),
-  );
+/**
+ * After only: the fix mocked. The unchanged base server answers this dispatch's span
+ * page (`?span=harness.<id>`) with "no such span", so the base app shows its own
+ * HistoryFailed line; the plan stops asking for that page, so the line is gone.
+ */
+async function hideNoSuchSpan(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    for (const el of Array.from(document.querySelectorAll("[role=alert], p, div")))
+      if (el.children.length < 4 && /^Earlier rows did not load: no such span/.test(el.textContent ?? "")) (el as HTMLElement).style.display = "none";
+  });
+}
+
+/** Overall on the live run, with its observer's oneharness dispatch (span harness.<id>) opened. */
+async function openObserverDispatch(page: Page, mode: Mode): Promise<void> {
+  await visit(page, `/?run=${runs().live}&view=overall`);
+  const graph = page.getByRole("region", { name: "Graph timeline", exact: true });
+  await graph.getByRole("button", { name: "Expand timeline" }).click();
+  const runLevel = page.getByRole("region", { name: "Run-level timeline", exact: true });
+  await runLevel.getByRole("button", { name: "Expand timeline" }).click();
+  await runLevel.getByRole("button", { name: /^Run-level · observer/ }).first().click();
+  await expect(page.getByRole("region", { name: "Timeline item detail" })).toContainText("Oneharness conversation");
+  // The base's own error, unaided: the fixture server knows no such span.
+  await expect(page.getByText(/Earlier rows did not load: no such span: harness\./).first()).toBeVisible();
+  await quiet(page);
+  if (mode === "after") {
+    await hideNoSuchSpan(page);
+    await expect(page.getByText(/no such span/).filter({ visible: true })).toHaveCount(0);
+  }
 }
 
 /** Fixture: a turn-activity item in the conversation reads the usage-limit notice. */
@@ -115,21 +130,6 @@ async function refusedEdits(page: Page): Promise<void> {
 }
 
 
-/** Before only: the base's HistoryFailed line (its own markup and class), under the timeline and in the open panel. */
-async function showNoSuchSpan(page: Page, inPanel: boolean): Promise<void> {
-  await page.evaluate(([span, panel]) => {
-    const failed = () => {
-      const p = document.createElement("p");
-      p.className = "page-failed";
-      p.setAttribute("role", "alert");
-      p.innerHTML = `<span>Earlier rows did not load: no such span: ${span}</span><button type="button">Try again</button>`;
-      return p;
-    };
-    document.querySelector('[aria-label="Graph timeline"]')?.insertAdjacentElement("afterend", failed());
-    if (panel) document.querySelector('aside[aria-label="Item detail panel"]')?.appendChild(failed());
-  }, [SPAN_ID, inPanel] as const);
-}
-
 /** Before only: the base's RejectedEdits box (its own markup and class) over the nodes. */
 async function showRefusedEdits(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -152,20 +152,16 @@ const SURFACES: Surface[] = [
   {
     name: "s1-observer-panel-closed",
     open: async (page, mode) => {
-      await openRecordedOverall(page);
-      await runEvent(page).click();
+      await openObserverDispatch(page, mode);
       await page.getByRole("button", { name: "Close detail" }).click();
       await quiet(page);
-      if (mode === "before") await showNoSuchSpan(page, false);
+      if (mode === "after") await hideNoSuchSpan(page);
     },
   },
   {
     name: "s1-observer-panel-open",
     open: async (page, mode) => {
-      await openRecordedOverall(page);
-      await runEvent(page).click();
-      await quiet(page);
-      if (mode === "before") await showNoSuchSpan(page, true);
+      await openObserverDispatch(page, mode);
     },
   },
   {
