@@ -604,6 +604,11 @@ run *ARGS:
 dag-ui-screens *ARGS:
     @bash scripts/visual-capture.sh {{ARGS}}
 
+# THROWAWAY spike-visual mock (dag-ui-panel-cursor-action-items-2026-11-19): every
+# before and after shot of the spike, through the one capture path, into shots/local/spike-visual.
+spike-visual-screens:
+    SHOTS_OUT=shots/local/spike-visual bash scripts/visual-capture.sh spike-visual.screens.spec.ts
+
 # Reads the floor from Cargo.toml's `rust-version`; that toolchain must be
 # installed (`rustup toolchain install <version>`). Warnings are errors here too.
 # The `onepipeline-ui:msrv` target, which no `check` depends on: the floor needs a
