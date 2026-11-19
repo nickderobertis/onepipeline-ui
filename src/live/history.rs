@@ -86,8 +86,8 @@ pub struct NodeStream {
 
 impl Hub {
     /// Every row of `node`'s own timeline, read apart from any subscription's reading
-    /// and without the run's lock: the run's heads, then the node's records by their
-    /// handles ([`super::first_screen::read_node`]), built whole and unfiltered.
+    /// and without the run's lock: the run's heads, then the node's records fetched
+    /// by their handles, built whole and unfiltered.
     ///
     /// # Errors
     ///
