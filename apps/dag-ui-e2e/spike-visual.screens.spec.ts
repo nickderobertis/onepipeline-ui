@@ -183,14 +183,38 @@ const SURFACES: Surface[] = [
         await page.evaluate(() => {
           const detail = document.querySelector('[aria-label="Timeline item detail"]');
           if (!detail) return;
-          for (const el of Array.from(detail.querySelectorAll("dl, table, [data-fields]"))) (el as HTMLElement).style.display = "none";
-          const turns = Array.from(detail.querySelectorAll("article"));
-          const target = turns.find((t) => /weekly limit/.test(t.textContent ?? "")) ?? turns[Math.min(3, turns.length - 1)];
-          if (target) {
-            (target as HTMLElement).style.outline = "2px solid #f5b942";
-            (target as HTMLElement).style.background = "rgba(245,185,66,0.12)";
-            target.scrollIntoView({ block: "center" });
-          }
+          // One view: no field/value block and no Recorded fields heading at all.
+          for (const el of Array.from(detail.querySelectorAll('section[aria-label="Recorded fields"], dl.record-fields, [data-fields]')))
+            (el as HTMLElement).style.display = "none";
+          const target = Array.from(detail.querySelectorAll("article[data-turn-id]")).find((t) => /weekly limit/.test(t.textContent ?? "")) as HTMLElement | undefined;
+          if (!target) return;
+          // Fixture words: a conversation long enough to scroll, the item among its turns.
+          const say = [
+            "Reading apps/dag-ui/src/features/timeline/NodeTimeline.tsx to find where the hover reading is computed.",
+            "The crosshair snaps only to bars; markers after the last bar have no reading. I'll add a nearest-marker lookup.",
+            "Running the node timeline journeys at 1440x900 and 390x844.",
+            "Two journeys pass; the phone one times out waiting for the tooltip. Retrying with the pointer moved inside the plot.",
+            "All node timeline journeys pass. Next: the event detail of a conversation item.",
+          ];
+          const after = ["(no further output: the dispatch stopped here)"];
+          const turn = (text: string, n: number) => {
+            const a = target.cloneNode(true) as HTMLElement;
+            a.dataset.turnId = `engineer-dashboard.s${n}`;
+            a.setAttribute("aria-label", `Turn engineer-dashboard.s${n} from oneagentgraph`);
+            const b = a.querySelector("button");
+            if (b) b.textContent = `Collapse turn engineer-dashboard.s${n}`;
+            const d = a.querySelector("div");
+            if (d) d.textContent = text;
+            return a;
+          };
+          say.forEach((t, i) => target.insertAdjacentElement("beforebegin", turn(t, i)));
+          after.forEach((t, i) => target.insertAdjacentElement("afterend", turn(t, 10 + i)));
+          // The DAG view's own selection accent: the selected event row's --primary border,
+          // with a faint tint of the same accent behind it.
+          target.style.cssText +=
+            ";border:1px solid var(--primary);border-radius:8px;padding:10px 12px;background:color-mix(in srgb, var(--primary) 8%, transparent)";
+          target.setAttribute("aria-current", "true");
+          target.scrollIntoView({ block: "center" });
         });
       }
     },
@@ -210,11 +234,11 @@ const SURFACES: Surface[] = [
       await page.mouse.move(x, y);
       await quiet(page);
       if (mode === "after") {
-        await css(page, '[aria-label="Timeline crosshair"]{stroke-width:2px!important;opacity:1!important;stroke:#f5b942!important;border-color:#f5b942!important;width:2px!important;background:#f5b942!important}');
+        await css(page, '[aria-label="Timeline crosshair"]{stroke-width:2px!important;opacity:1!important;stroke:var(--primary)!important;border-color:var(--primary)!important;width:2px!important;background:var(--primary)!important}');
         await page.evaluate(([px, py]) => {
           const tip = document.createElement("div");
           tip.setAttribute("role", "tooltip");
-          tip.style.cssText = `position:fixed;left:${px - 250}px;top:${py - 70}px;z-index:9999;background:#111827;border:1px solid #f5b942;color:#e5e7eb;font:12px/1.4 ui-sans-serif,system-ui;padding:6px 9px;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.5);width:236px`;
+          tip.style.cssText = `position:fixed;left:${px - 250}px;top:${py - 70}px;z-index:9999;background:#111827;border:1px solid var(--primary);color:#e5e7eb;font:12px/1.4 ui-sans-serif,system-ui;padding:6px 9px;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.5);width:236px`;
           tip.innerHTML = "<b>verdict-recorded</b> · worker · judge<br>09:41:07 · 2.1 s after the last turn<br><span style='color:#9ca3af'>nearest marker · click to open</span>";
           document.body.appendChild(tip);
         }, [x, y]);
@@ -355,21 +379,35 @@ async function openActionItems(page: Page, world: string) {
 
 async function mockSortDatesSpacing(page: Page): Promise<void> {
   await page.evaluate(() => {
-    // Sort, cloned from the page's own Group by control so it takes its styling, placed
-    // before the filters so it shows at desktop and phone width alike.
+    // Sort sits in the filter row immediately after Group by, as one more label-and-select
+    // pair, so it takes that row's own label and select styling, baseline and spacing.
     const filters = document.querySelector("fieldset.human-items-filters");
-    const groupSelect = document.querySelector<HTMLSelectElement>("fieldset.human-items-filters select");
-    const sort = document.createElement("div");
-    sort.style.cssText = "display:inline-flex;align-items:center;gap:6px;font-size:12px;margin:0 8px 6px 0";
-    const label = document.createElement("label");
-    label.htmlFor = "spike-sort";
-    label.textContent = "Sort";
-    const select = (groupSelect?.cloneNode(false) as HTMLSelectElement | undefined) ?? document.createElement("select");
-    select.id = "spike-sort";
-    select.setAttribute("aria-label", "Sort");
-    select.innerHTML = "<option>Default</option><option>Newest first</option><option>Oldest first</option>";
-    sort.append(label, select);
-    filters?.parentElement?.insertBefore(sort, filters);
+    const groupSelect = filters?.querySelector<HTMLSelectElement>("select");
+    const options = "<option>Default</option><option>Newest first</option><option>Oldest first</option>";
+    if (filters && groupSelect) {
+      const label = document.createElement("label");
+      label.htmlFor = "spike-sort";
+      label.textContent = "Sort";
+      const select = groupSelect.cloneNode(false) as HTMLSelectElement;
+      select.id = "spike-sort";
+      select.innerHTML = options;
+      groupSelect.insertAdjacentElement("afterend", label);
+      label.insertAdjacentElement("afterend", select);
+    }
+    // At phone width the filters fold behind the Filters button; Sort sits beside that
+    // button, as a copy of it (its class, styling and size) that reads the sort order.
+    const toggle = document.querySelector<HTMLButtonElement>("button.human-items-filters-toggle");
+    if (toggle && getComputedStyle(toggle).display !== "none") {
+      const sortButton = toggle.cloneNode(true) as HTMLButtonElement;
+      sortButton.removeAttribute("aria-controls");
+      sortButton.removeAttribute("aria-expanded");
+      sortButton.setAttribute("aria-label", "Sort: Default");
+      sortButton.setAttribute("aria-haspopup", "listbox");
+      sortButton.innerHTML =
+        '<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>Sort: Default';
+      sortButton.style.marginLeft = "0";
+      toggle.insertAdjacentElement("afterend", sortButton);
+    }
     const ages = ["Raised 3 min ago", "Raised 41 min ago", "Raised 2 h ago", "Raised yesterday, 16:20", "Raised Mon 11:05", "Raised Nov 12"];
     document.querySelectorAll('[aria-label="Action item list"] article').forEach((card, i) => {
       const h = card.querySelector("h2, h3, h4");
@@ -377,8 +415,10 @@ async function mockSortDatesSpacing(page: Page): Promise<void> {
       when.style.cssText = "font-size:11px;color:#9ca3af;margin-top:2px";
       when.textContent = ages[i % ages.length];
       h?.insertAdjacentElement("afterend", when);
-      const box = card.querySelector("textarea");
-      if (box) ((box.closest("div") as HTMLElement) ?? box).style.marginTop = "14px";
+      // More room inside a question card, between its source and description and its
+      // "Write an answer" field; spacing between cards and groups stays as on the base.
+      const box = card.querySelector<HTMLElement>("textarea, input[placeholder='Write an answer']");
+      if (box) box.style.marginTop = "14px";
     });
   });
 }
