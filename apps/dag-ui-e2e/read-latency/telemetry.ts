@@ -278,6 +278,50 @@ export const firstViewSchema = z.object({
   slowest_s: figure,
 });
 
+/**
+ * One opening of the busiest node's Timeline tab, read until its chart and event
+ * list each held every record of the node's complete timeline document with no
+ * loading, partial or Load earlier mark in the node panel: the node read's requests
+ * and bytes, the server's time to first byte with the split its start line names,
+ * and how many of the node's records each held at that mark.
+ */
+const nodeTimelineReadingSchema = z
+  .object({
+    /** Navigation start to the complete mark, or `null` where none was reached. */
+    seconds: seconds,
+    first_render_s: seconds,
+    /** Navigation start to the partial mark, `null` where it was never shown. */
+    partial_s: seconds,
+    requests: count,
+    bytes_decoded: count,
+    bytes_on_wire: count,
+    server: z.object({
+      ttfb_s: seconds,
+      heads_s: seconds,
+      fetch_s: seconds,
+      build_s: seconds,
+    }),
+    held: z.object({ expected: count, chart: count, list: count }),
+    host_load: hostLoad,
+  })
+  .superRefine((reading, context) => {
+    if (reading.seconds === null)
+      context.addIssue({
+        code: "custom",
+        path: ["seconds"],
+        message: "the node's timeline never held every record",
+      });
+    if (
+      reading.held.chart < reading.held.expected ||
+      reading.held.list < reading.held.expected
+    )
+      context.addIssue({
+        code: "custom",
+        path: ["held"],
+        message: `the chart held ${reading.held.chart} and the list ${reading.held.list} of the node's ${reading.held.expected} records at the mark`,
+      });
+  });
+
 const largeRunSchema = z.object({
   corpus: corpusSchema,
   // The corpus holds the relayed run, so its Overall is read with the rest.
@@ -290,12 +334,17 @@ const largeRunSchema = z.object({
     server_peak_rss_mb: figure,
     complete: z.literal(true),
   }),
+  /** The paged route's node page as the client requests it (ruling `a11`). */
   history_page: z.object({
     node_before_rest_s: figure,
     node_after_rest_s: figure,
     overall_span_page_s: seconds,
     slowest_s: figure,
-    rows_shown_after: count,
+    rows_read_after: count,
+  }),
+  node_timeline_complete: z.object({
+    readings: z.array(nodeTimelineReadingSchema).length(3),
+    median_s: figure,
   }),
   status: z.object({
     small_s: figure,
@@ -329,9 +378,10 @@ export type Telemetry = z.infer<typeof telemetrySchema>;
 export const largeTelemetrySchema = z.object({
   /**
    * Each reading carries the server's split of its `POST`; the first views hold
-   * `relayed_overall` and the corpus its drivers.
+   * `relayed_overall` and the corpus its drivers; the busiest node's complete load
+   * is read, and the history page is the paged route's own.
    */
-  schema_version: z.literal(3),
+  schema_version: z.literal(4),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),

@@ -3948,30 +3948,60 @@ fn is_words(kind: &str) -> bool {
     kind == graph::MESSAGE || kind == graph::REASONING
 }
 
-/// What the agent said and reasoned inside one turn, each in the order the
-/// producer published it.
+/// What the agent said and reasoned inside one turn, each at the index the
+/// producer published it under.
 ///
 /// A harness streams these under a tool event's kind, so a reader who took every
 /// event as a tool would show the agent's narration as calls with no name. They
-/// are the turn's text instead: its `reasoning`, and its `assistant` alongside the
-/// reply the turn closed with. A turn that published neither is served exactly
-/// as it was before either word existed.
-#[derive(Default)]
+/// are served as the turn's `agentEvents` instead, beside its tools and numbered
+/// on the same index, so a reader interleaves the two in the order they
+/// happened: folded into one string, every word read as if said before or after
+/// every call. A turn that published neither is served as it was before either
+/// word existed.
+#[derive(Default, Clone)]
 struct Words {
-    said: Vec<String>,
-    reasoned: Vec<String>,
+    events: Vec<AgentEvent>,
+}
+
+/// One of the agent's own words: a `message` or a `reasoning`, at the index its
+/// producer numbered it with among the turn's tool events.
+#[derive(Clone)]
+struct AgentEvent {
+    index: u64,
+    kind: &'static str,
+    text: String,
 }
 
 impl Words {
     /// The words among one turn's relayed `turn-activity` summaries, each read
     /// whole through [`transcript::read`] — `reads` is that reading of
-    /// `summaries`, position for position.
+    /// `summaries`, position for position. A summary with no recorded index is
+    /// placed at its position, as a tool call with none is.
     fn of(summaries: &[&Envelope], reads: &[Option<transcript::Read>]) -> Self {
         let mut words = Self::default();
-        for (event, read) in summaries.iter().zip(reads) {
+        for (position, (event, read)) in (0_u64..).zip(summaries.iter().zip(reads)) {
             if let Some(kind) = event.payload.get(graph::KIND).and_then(Value::as_str) {
                 let said = read.as_ref().map(transcript::Read::words);
-                words.took(kind, said.as_deref());
+                let index = event
+                    .payload
+                    .get(graph::INDEX)
+                    .and_then(Value::as_u64)
+                    .unwrap_or(position);
+                words.took(kind, said.as_deref(), index);
+            }
+        }
+        words
+    }
+
+    /// The words one oneharness invocation recorded, read whole out of its
+    /// history file, each at the index the file numbers it with.
+    fn recorded(session: &transcript::Session) -> Self {
+        let mut words = Self::default();
+        for (index, event) in &session.events {
+            if let Some(text) = event.text() {
+                if transcript::tool_kind(text).is_none() {
+                    words.took(transcript::words_kind(text), Some(&event.words()), *index);
+                }
             }
         }
         words
@@ -3980,40 +4010,55 @@ impl Words {
     /// Keeps `text` if `kind` is one of the agent's words, and says whether it
     /// was — so a caller walking tool events drops exactly what this kept. Words
     /// with no text are still words, and are dropped rather than served as a call.
-    fn took(&mut self, kind: &str, text: Option<&str>) -> bool {
-        let into = match kind {
-            graph::MESSAGE => &mut self.said,
-            graph::REASONING => &mut self.reasoned,
+    fn took(&mut self, kind: &str, text: Option<&str>, index: u64) -> bool {
+        let kind = match kind {
+            graph::MESSAGE => graph::MESSAGE,
+            graph::REASONING => graph::REASONING,
             _ => return false,
         };
         if let Some(text) = text.filter(|text| !text.is_empty()) {
-            into.push(text.to_owned());
+            self.events.push(AgentEvent {
+                index,
+                kind,
+                text: text.to_owned(),
+            });
         }
         true
     }
 
-    /// The turn's `assistant`: what it said along the way, then the reply it
-    /// closed with — once, where the reply is the last thing it said, which is how
-    /// a harness streams a final answer it also returns. The reply alone where it
-    /// said nothing along the way.
-    fn assistant(&self, reply: Option<String>) -> Option<String> {
-        if self.said.is_empty() {
-            return reply;
-        }
-        let mut said = self.said.clone();
-        if let Some(reply) = reply.filter(|reply| !reply.is_empty() && said.last() != Some(reply)) {
-            said.push(reply);
-        }
-        Some(said.join("\n\n"))
+    fn is_empty(&self) -> bool {
+        self.events.is_empty()
     }
 
-    /// The turn's `reasoning`, or `null` where it published none.
-    fn reasoning(&self) -> Value {
-        if self.reasoned.is_empty() {
-            Value::Null
-        } else {
-            json!(self.reasoned.join("\n\n"))
+    /// The turn's `agentEvents` in index order, or `None` where it published
+    /// none — which omits the field, so such a turn reads as it always did.
+    ///
+    /// The reply a turn closed with is its `assistant`, read after every event. A
+    /// harness streams a final answer it also returns as its last message, so
+    /// that message is left out here where nothing the turn recorded follows it,
+    /// rather than shown twice.
+    fn agent_events(&self, reply: Option<&str>, tools: &[Value]) -> Option<Value> {
+        let mut events: Vec<&AgentEvent> = self.events.iter().collect();
+        events.sort_by_key(|event| event.index);
+        let last_tool = tools
+            .iter()
+            .filter_map(|tool| tool.get("index").and_then(Value::as_u64))
+            .max();
+        if events.last().is_some_and(|last| {
+            last.kind == graph::MESSAGE
+                && reply == Some(last.text.as_str())
+                && last_tool.is_none_or(|tool| tool < last.index)
+        }) {
+            events.pop();
         }
+        (!events.is_empty()).then(|| {
+            Value::Array(
+                events
+                    .into_iter()
+                    .map(|event| json!({ "index": event.index, "kind": event.kind, "text": event.text }))
+                    .collect(),
+            )
+        })
     }
 }
 
@@ -4176,7 +4221,13 @@ fn reported_tools(message: &judge::Message, words: &mut Words) -> Vec<Value> {
     message
         .events
         .iter()
-        .filter(|event| !words.took(&event.kind, event.output.as_deref()))
+        .filter(|event| {
+            !words.took(
+                &event.kind,
+                event.output.as_deref(),
+                u64::try_from(event.index).unwrap_or(u64::MAX),
+            )
+        })
         .map(|event| {
             json!({
                 "index": event.index,
@@ -4463,6 +4514,39 @@ fn live_transcript<'a>(events: &[&'a Envelope]) -> BTreeMap<(u64, String), LiveT
     turns
 }
 
+/// What a settled member's turn said and reasoned, read out of the oneharness
+/// history file of the invocation that ran it, or `None` where no one file can be
+/// told to be that invocation's or it recorded no words.
+///
+/// The member's report is the source of everything it holds, and it holds only
+/// tool activity: onejudge's settled report deliberately keeps no narration. The
+/// history file oneharness wrote is the record of what the agent said, and it is
+/// read through [`transcript::session`], the reader the harness-session artifact
+/// serves the same invocation through. The invocation is the one the turn's own
+/// `turn-started` names: by its `transcript` reference, which a producer writing
+/// references carries, and otherwise the one whose prompt begins with the
+/// instruction the record copied ([`transcript::TurnSources`]) — where that
+/// names none, or more than one, the turn takes no words from any file rather
+/// than another turn's.
+fn narrated(sources: &transcript::Sources<'_>, turn: &RelayedTurn<'_>) -> Option<Words> {
+    use transcript::Candidates as _;
+    if turn.opened.kind.0 != graph::TURN_STARTED {
+        return None;
+    }
+    let read = match transcript::referenced(turn.opened) {
+        Some(location) => transcript::session(&location),
+        None => {
+            let ran = transcript::TurnSources::of(sources, Some(turn.opened));
+            let [location] = ran.candidates() else {
+                return None;
+            };
+            transcript::session(location)
+        }
+    };
+    let words = Words::recorded(&read);
+    (!words.is_empty()).then_some(words)
+}
+
 /// This party's own words for one turn, in the order it published them.
 ///
 /// Both member kinds publish at most one `turn-message` per turn per party. A
@@ -4670,22 +4754,36 @@ fn conversation_document(
                         .collect()
                 })
                 .unwrap_or_default();
-            let live_words = Words::of(summaries, &reads);
+            // What the turn said and reasoned along the way. A settled member's
+            // report keeps only its tool activity, so its words are read out of
+            // the oneharness history file the journal names for the invocation
+            // that ran the turn — the report's own, where it kept some and no
+            // file is readable; a running turn's are the words it relayed.
+            let words = match recorded {
+                Some(reported) => turn
+                    .and_then(|turn| narrated(&sources, turn))
+                    .unwrap_or_else(|| reported.words.clone()),
+                None => Words::of(summaries, &reads),
+            };
+            let reply = match recorded {
+                // Explicitly absent rather than empty: the report holds this
+                // turn and it recorded no reply.
+                Some(turn) => turn.assistant.clone(),
+                // A turn's reply is what its own party published for it, and
+                // only the agent's words are a transcript's reply — the
+                // supervisor's reach a reader as the next turn's prompt, which
+                // is what it was asked rather than what it said.
+                None => relayed
+                    .filter(|_| event.is_some_and(agent_turn) && !said.is_empty())
+                    .map(|_| said_text(&said)),
+            };
+            let tools = match recorded {
+                Some(turn) => turn.tools.clone(),
+                None => live_tools(summaries, &reads),
+            };
+            let agent_events = words.agent_events(reply.as_deref(), &tools);
             let mut served = json!({
-                "assistant": match recorded {
-                    // Explicitly absent rather than empty: the report holds this
-                    // turn and it recorded no reply.
-                    Some(turn) => json!(turn.words.assistant(turn.assistant.clone())),
-                    // A turn's reply is what its own party published for it, and
-                    // only the agent's words are a transcript's reply — the
-                    // supervisor's reach a reader as the next turn's prompt,
-                    // which is what it was asked rather than what it said.
-                    None => json!(live_words.assistant(
-                        relayed
-                            .filter(|_| event.is_some_and(agent_turn) && !said.is_empty())
-                            .map(|_| said_text(&said)),
-                    )),
-                },
+                "assistant": reply,
                 "durationMs": match ran {
                     Some(candidate) => json!(candidate.duration_ms),
                     None => json!(relayed.and_then(LiveTurn::duration_ms)),
@@ -4710,10 +4808,9 @@ fn conversation_document(
                     Some(model) => json!(model),
                     None => json!(turn.and_then(|turn| turn.field("model"))),
                 },
-                "reasoning": match recorded {
-                    Some(turn) => turn.words.reasoning(),
-                    None => live_words.reasoning(),
-                },
+                // Each reasoning is one of the turn's `agentEvents`, in its
+                // place among the calls, rather than folded into this one field.
+                "reasoning": Value::Null,
                 "startedAt": match bounds {
                     Some(link) => json!(link.started_at),
                     None => json!(relayed.and_then(LiveTurn::started_at)),
@@ -4739,10 +4836,7 @@ fn conversation_document(
                         .or_else(|| stored.map(|stored| stored.settlement.ts.clone()))
                         .unwrap_or_else(|| started_at.clone())),
                 },
-                "tools": match recorded {
-                    Some(turn) => Value::Array(turn.tools.clone()),
-                    None => Value::Array(live_tools(summaries, &reads)),
-                },
+                "tools": tools,
                 "unknown": with_attribution(
                     recorder_cut(instruction.as_ref(), &said),
                     numbered
@@ -4781,6 +4875,9 @@ fn conversation_document(
                         .unwrap_or_default(),
                 },
             });
+            if let Some(events) = agent_events {
+                served["agentEvents"] = events;
+            }
             // The decisions on the turn they judged, and no key at all on a turn
             // nothing decided on — a dispatch judged by a bare provider records
             // none, and is served exactly as it was before panels existed.
@@ -5402,12 +5499,14 @@ fn harness_session(located: Located, id: &ArtifactId, at: &str) -> Option<Value>
         }
         _ => None,
     };
-    let mut words = Words::default();
+    let words = Words::recorded(&read);
     let mut tools = Vec::new();
     for (index, event) in &read.events {
         match event.text() {
-            Some(text) => match transcript::tool_kind(text) {
-                Some(kind) => {
+            // An entry that is not a tool's is one of the agent's words, which
+            // [`Words::recorded`] read above.
+            Some(text) => {
+                if let Some(kind) = transcript::tool_kind(text) {
                     let (input, output) = event.tool().unwrap_or_default();
                     tools.push(json!({
                         "index": index,
@@ -5417,10 +5516,7 @@ fn harness_session(located: Located, id: &ArtifactId, at: &str) -> Option<Value>
                         "output": output,
                     }));
                 }
-                None => {
-                    words.took(transcript::words_kind(text), Some(&event.words()));
-                }
-            },
+            }
             None => tools.push(json!({
                 "index": index,
                 "kind": graph::TOOL_RESULT,
@@ -5439,15 +5535,16 @@ fn harness_session(located: Located, id: &ArtifactId, at: &str) -> Option<Value>
             .and_then(|record| record.get(name).cloned())
             .unwrap_or(Value::Null)
     };
-    let turn = json!({
-        "assistant": words.assistant(said.clone().filter(|said| !said.is_empty())),
+    let agent_events = words.agent_events(said.as_deref().filter(|said| !said.is_empty()), &tools);
+    let mut turn = json!({
+        "assistant": said.clone().filter(|said| !said.is_empty()),
         "durationMs": fact("duration_ms"),
         "failureKind": fact("failure_kind"),
         "finishedAt": fact("finished_at"),
         "harness": record.as_ref().map_or("oneharness", |record| record.harness_id.as_str()),
         "id": id.as_str(),
         "model": fact("model"),
-        "reasoning": words.reasoning(),
+        "reasoning": Value::Null,
         "startedAt": fact("started_at"),
         "status": match &record {
             Some(_) => fact("status"),
@@ -5466,6 +5563,9 @@ fn harness_session(located: Located, id: &ArtifactId, at: &str) -> Option<Value>
         })),
         "user": prompt,
     });
+    if let Some(events) = agent_events {
+        turn["agentEvents"] = events;
+    }
     // The invocation's own record of itself, whole: its facts as oneharness
     // closed it, and its prompt and reply as the resolver reads them — its
     // events are the turn's, structured, rather than a second copy here.
@@ -5582,10 +5682,11 @@ pub(crate) enum ItemsWindow {
 #[derive(Debug, Default)]
 pub(crate) struct Rendered {
     pub(crate) entries: std::collections::HashMap<usize, (Option<String>, Value)>,
-    /// Under [`ItemsWindow::Page`], the id of every row its bounds admit but
-    /// the cursor: what its `total` counts.
+    /// Under [`ItemsWindow::Page`], the record of every row its bounds admit but
+    /// the cursor: what its `total` counts. By record rather than row `id`, which
+    /// a turn's opening and its close share.
     pub(crate) counted: HashSet<String>,
-    /// Under [`ItemsWindow::Page`], the id of every row older than its cursor:
+    /// Under [`ItemsWindow::Page`], the record of every row older than its cursor:
     /// the page and every page after it.
     pub(crate) older: HashSet<String>,
     /// How many entries were rendered rather than reused, since this was made.
@@ -5603,17 +5704,10 @@ impl Lens<'_> {
         Some((millis_of(&event.ts)?, u64::try_from(position).ok()?))
     }
 
-    /// The id a record's row is served under, without rendering it.
-    fn row_id(&self, index: usize) -> String {
-        let position = self
-            .positions
-            .and_then(|positions| positions.get(index).copied())
-            .unwrap_or(index);
-        self.turns
-            .get(index)
-            .and_then(Option::as_ref)
-            .filter(|turn| turn.held == Held::Describes)
-            .map_or_else(|| format!("e{position}"), |turn| turn.id.clone())
+    /// The record a row reads, as its `record_id` names it: what a page counts its
+    /// rows by, so two records served under one row `id` are two rows.
+    fn row_record(event: &Envelope) -> String {
+        format!("{}.{}", event.stream, event.seq)
     }
 
     /// The events of one span, as the reader asked for them, into `span`:
@@ -5654,9 +5748,8 @@ impl Lens<'_> {
             });
             if let Some(rendered) = self.rendered {
                 let mut rendered = rendered.borrow_mut();
-                for (index, _) in &ordered {
-                    let id = self.row_id(*index);
-                    rendered.counted.insert(id);
+                for (_, event) in &ordered {
+                    rendered.counted.insert(Self::row_record(event));
                 }
             }
             ordered.retain(|(index, event)| {
@@ -5665,9 +5758,8 @@ impl Lens<'_> {
             });
             if let Some(rendered) = self.rendered {
                 let mut rendered = rendered.borrow_mut();
-                for (index, _) in &ordered {
-                    let id = self.row_id(*index);
-                    rendered.older.insert(id);
+                for (_, event) in &ordered {
+                    rendered.older.insert(Self::row_record(event));
                 }
             }
             if let Some(since) = self.since {

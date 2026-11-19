@@ -1469,9 +1469,10 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     });
     // Collapsed, the row is one line whatever it holds; the legend already names the
     // categories — the members under the run's own words, in the order the whole
-    // payload first served each, the lint member among them.
+    // payload first served each, the lint member among them. The legend alone: the
+    // axis lists its ticks too.
     expect(
-      within(row)
+      within(within(row).getByRole("list", { name: "Timeline legend" }))
         .getAllByRole("listitem")
         .map((l) => l.textContent),
     ).toEqual([

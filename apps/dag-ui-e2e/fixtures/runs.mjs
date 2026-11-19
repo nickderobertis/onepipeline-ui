@@ -3614,8 +3614,30 @@ export function recordActivity(root, name, detail) {
       persona: "worker",
       session: WORKER_SESSION,
     },
-    { kind: "tool_use", name, detail, truncated: false },
+    {
+      kind: "tool_use",
+      name,
+      detail,
+      truncated: false,
+      index: workerActivityCount(join(root, LIVE_RUN)),
+    },
   );
+}
+
+/**
+ * How many `turn-activity` records the dashboard's worker session has published:
+ * the `index` the next one carries, as `oneagentgraph` numbers a session's activity.
+ */
+function workerActivityCount(dir) {
+  return readFileSync(join(dir, "events.jsonl"), "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line))
+    .filter(
+      (event) =>
+        event.kind === "turn-activity" &&
+        event.labels.session === WORKER_SESSION,
+    ).length;
 }
 
 /** The two kinds `oneharness` streams an agent's own words under. */
@@ -3639,15 +3661,7 @@ export function recordWords(root, kind, text) {
     throw new Error("an agent's words are at least one character");
   }
   const dir = join(root, LIVE_RUN);
-  const index = readFileSync(join(dir, "events.jsonl"), "utf8")
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line))
-    .filter(
-      (event) =>
-        event.kind === "turn-activity" &&
-        event.labels.session === WORKER_SESSION,
-    ).length;
+  const index = workerActivityCount(dir);
   appendEvent(
     dir,
     "agentgraph",
@@ -5151,6 +5165,94 @@ function writeSession(store, { session, historyId, started, closed, prompt }) {
   return path;
 }
 
+/**
+ * What a narrating worker's invocation recorded, in oneharness's own event shape:
+ * the recorded judge turn's three calls, with the agent's own words between them —
+ * a thought before the first, a remark after it, a thought before the third — and
+ * the recorded closing message last. Each carries the run-wide `index` its words
+ * and calls share, which is the order a transcript has to show them in.
+ */
+const NARRATED_WORDS = {
+  0: {
+    kind: "reasoning",
+    output: "Reading the design document before anything else.",
+  },
+  3: {
+    kind: "message",
+    output: "The document is there; checking the branch next.",
+  },
+  6: {
+    kind: "reasoning",
+    output: "Bash is disabled here, so the tasks are listed with Glob.",
+  },
+};
+
+function narratedEvents() {
+  const recorded = recordedLines(RECORDED_JUDGE)
+    .filter((line) => line.type === "event")
+    .map((line) => line.event);
+  const calls = recorded.filter((event) => event.kind !== "message");
+  const closing = recorded.filter((event) => event.kind === "message");
+  const events = [];
+  let call = 0;
+  for (let index = 0; events.length < calls.length + 3; index += 1) {
+    const words = NARRATED_WORDS[index];
+    events.push(
+      words === undefined
+        ? { ...calls[call++], index }
+        : { name: null, input: null, ...words, index },
+    );
+  }
+  for (const message of closing)
+    events.push({ ...message, index: events.length });
+  return events;
+}
+
+/**
+ * The order a narrating turn's words and calls happened in, by kind and name; a
+ * call and the result answering it are one entry. The last is the closing message.
+ */
+export const NARRATED_ORDER = narratedEvents()
+  .filter((event) => event.kind !== "tool_result")
+  .map((event) =>
+    event.kind === "tool_call" ? `tool:${event.name}` : event.kind,
+  );
+
+/** [`writeSession`], for an invocation that narrated as it worked. */
+function writeNarratedSession(
+  store,
+  { session, historyId, started, closed, prompt },
+) {
+  const close = recordedLines(RECORDED_JUDGE).find(
+    (line) => line.type === "run",
+  );
+  const event = recordedLines(RECORDED_JUDGE).find(
+    (line) => line.type === "event",
+  );
+  const lines = [
+    {
+      type: "run-started",
+      schema_version: "1.11",
+      history_id: historyId,
+      harness_id: close.harness_id,
+      prompt,
+      started,
+    },
+    ...narratedEvents().map((recorded) => ({
+      ...event,
+      run_id: historyId,
+      event: recorded,
+    })),
+    ...(closed ? [{ ...close, history_id: historyId, session, prompt }] : []),
+  ];
+  const dir = join(store, RECORDED_JUDGE.project);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${session}.jsonl`),
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+  );
+}
+
 /** A `transcript` reference, as `oneagentgraph` 0.8 writes one. */
 function transcriptAt(store, session, historyId, extra = {}) {
   return {
@@ -5189,6 +5291,14 @@ export const TRANSCRIPT_SESSIONS = {
     session: "node-scope-1792900000002-4400-worker-skill-20261024T000300Z-4404",
     historyId: "01a17000-0000-7000-8000-000000000004",
   },
+  narrated: {
+    session: "node-scope-1792900000003-4400-worker-skill-20261024T000400Z-4405",
+    historyId: "01a17000-0000-7000-8000-000000000005",
+  },
+  narratedLive: {
+    session: "node-scope-1792900000004-4400-worker-skill-20261024T000500Z-4406",
+    historyId: "01a17000-0000-7000-8000-000000000006",
+  },
   legacy: {
     session: "node-scope-1792800000000-4500-worker-skill-20261020T000000Z-4501",
     historyId: "01a16000-0000-7000-8000-000000000001",
@@ -5199,6 +5309,8 @@ export const TRANSCRIPT_SESSIONS = {
 const TRANSCRIPT_STREAM = "node-scope-1792900000000-4400";
 const DRAFTED_STREAM = "pr-author-1792900000001-4400";
 const LIVE_STREAM = "node-scope-1792900000002-4400";
+const NARRATED_STREAM = "node-scope-1792900000003-4400";
+const NARRATED_LIVE_STREAM = "node-scope-1792900000004-4400";
 
 /** The tasks the transcripts run plans: what a reader opens each one for. */
 const TRANSCRIPT_TASKS = [
@@ -5206,6 +5318,8 @@ const TRANSCRIPT_TASKS = [
   ["drafted", "A change request drafter's standalone harness session."],
   ["reported", "A worker whose report is longer than a preview."],
   ["live", "A worker still in its turn."],
+  ["narrated", "A settled worker that talked and reasoned between its calls."],
+  ["narrated-live", "A worker talking and reasoning between its calls."],
 ];
 
 /** The tasks the legacy run plans, one per reading a cut copy can get. */
@@ -5275,6 +5389,18 @@ export function buildTranscriptRuns(root) {
     closed: false,
     prompt: instruction,
   });
+  writeNarratedSession(store, {
+    ...S.narrated,
+    started: stamp(start),
+    closed: true,
+    prompt: instruction,
+  });
+  writeNarratedSession(store, {
+    ...S.narratedLive,
+    started: stamp(start),
+    closed: false,
+    prompt: instruction,
+  });
 
   const { dir, journal } = plannedRun(
     root,
@@ -5286,7 +5412,15 @@ export function buildTranscriptRuns(root) {
   const recorded = recordedLines(RECORDED_JUDGE).filter(
     (line) => line.type === "event",
   );
-  const relayedSession = (stream, node, member, at) => {
+  // A session's records go on the graph run's own stream where one is given,
+  // which is what a settlement has to be on to spell the session it settles.
+  const relayedSession = (
+    stream,
+    node,
+    member,
+    at,
+    { on = journal, events = recorded } = {},
+  ) => {
     const labels = {
       ...run,
       node,
@@ -5297,15 +5431,16 @@ export function buildTranscriptRuns(root) {
     journal
       .advance(1)
       .emit("pipeline", "node-dispatched", { ...run, node, persona: member });
-    journal.advance(1).emit("agentgraph", "member-started", labels, {});
-    journal.advance(1).emit("agentgraph", "turn-started", labels, {
+    on.at = journal.at;
+    on.advance(1).emit("agentgraph", "member-started", labels, {});
+    on.advance(1).emit("agentgraph", "turn-started", labels, {
       transcript: transcriptAt(store, at.session, at.historyId),
       turn: 1,
       role: "assistant",
-      started_at: stamp(journal.at),
+      started_at: stamp(on.at),
     });
-    for (const line of recorded) {
-      journal.advance(1).emit("agentgraph", "turn-activity", labels, {
+    for (const line of events) {
+      on.advance(1).emit("agentgraph", "turn-activity", labels, {
         transcript: transcriptAt(store, at.session, at.historyId, {
           index: line.event.index,
           ...(line.event.tool_call_id
@@ -5437,8 +5572,81 @@ export function buildTranscriptRuns(root) {
 
   // A worker still in its turn, whose history file the journey grows.
   relayedSession(LIVE_STREAM, "live", "worker", S.live);
-  journal.write();
+
+  // Two workers that talked and reasoned between their calls: one settled, whose
+  // report keeps only its tool activity, as onejudge's does, and one still in
+  // its turn.
+  const narrated = narratedEvents().map((event) => ({ event }));
+  const narratedGraph = new Journal(dir, NARRATED_STREAM, journal.at);
+  relayedSession(NARRATED_STREAM, "narrated", "worker", S.narrated, {
+    on: narratedGraph,
+    events: narrated,
+  });
+  const narratedReport = `${JSON.stringify({
+    schema_version: 12,
+    transcript: {
+      messages: [
+        { role: "user", content: instruction },
+        {
+          role: "assistant",
+          content: narrated.at(-1).event.output,
+          events: narrated
+            .map(({ event }) => event)
+            .filter((event) => event.kind.startsWith("tool_"))
+            .map(({ kind, name, input, output, index, tool_call_id }) => ({
+              kind,
+              name,
+              input,
+              output,
+              index,
+              tool_call_id,
+            })),
+        },
+      ],
+    },
+    completion_reason: "it is read whole",
+    control: null,
+    supervisor_control: null,
+  })}\n`;
+  const narratedSettled = narratedGraph.advance(1).lines.length;
+  narratedGraph.emit(
+    "agentgraph",
+    "member-settled",
+    { ...run, node: "narrated", member: "worker", persona: "worker" },
+    { completed: true, verdict: [], completion_reason: "it is read whole" },
+    [
+      {
+        id: `report-${NARRATED_STREAM}`,
+        kind: "report",
+        bytes: narratedReport.length,
+      },
+    ],
+  );
+  journal.at = narratedGraph.at;
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...run, node: "narrated" },
+      { status: "done", outcome: "merged" },
+    );
+  const narratedLiveGraph = new Journal(dir, NARRATED_LIVE_STREAM, journal.at);
+  relayedSession(
+    NARRATED_LIVE_STREAM,
+    "narrated-live",
+    "worker",
+    S.narratedLive,
+    { on: narratedLiveGraph, events: narrated },
+  );
+  journal.at = narratedLiveGraph.at;
+  Journal.writeMerged(journal.path, [
+    journal,
+    narratedGraph,
+    narratedLiveGraph,
+  ]);
   retainReport(dir, journal.stream, settled, report);
+  retainReport(dir, NARRATED_STREAM, narratedSettled, narratedReport);
   // A gate log longer than the end of it a log is served as.
   mkdirSync(join(dir, "artifacts"), { recursive: true });
   writeFileSync(
@@ -5602,7 +5810,10 @@ export function transcriptFacts() {
     conversations: {
       died: `${TRANSCRIPT_STREAM}.worker`,
       live: `${LIVE_STREAM}.worker`,
+      narrated: `${NARRATED_STREAM}.worker`,
+      narratedLive: `${NARRATED_LIVE_STREAM}.worker`,
     },
+    narratedOrder: NARRATED_ORDER,
     drafted: DRAFTED_STREAM,
   };
 }

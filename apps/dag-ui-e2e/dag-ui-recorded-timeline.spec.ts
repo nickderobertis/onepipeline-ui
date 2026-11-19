@@ -4,11 +4,16 @@ import {
   subscribedSchema,
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  crosshairReading,
+  instantOfClock,
+  readoutPrecisionMs,
+} from "./axis-readings";
 import corpus from "./fixtures/timeline-recorded.json" with { type: "json" };
 import {
   appPlot,
-  loadAllEarlierRows,
   loadRunRecords,
+  nodeTimelineHeld,
   openRepeatedLoops,
 } from "./observatory-locators";
 import { SERVED_UI_URL } from "./playwright.config";
@@ -19,7 +24,11 @@ const nodeUrl = `/?run=${corpus.run_id}&node=${corpus.node}`;
  * The instant a timeline's plot ends at, read as a reader reads it: the
  * crosshair's time with the pointer at the plot's right edge.
  */
-async function plotEnd(page: Page, timeline: Locator): Promise<number> {
+async function plotEnd(
+  page: Page,
+  timeline: Locator,
+  near: number,
+): Promise<number> {
   await timeline.scrollIntoViewIfNeeded();
   const plot = timeline.getByLabel(
     "Timeline plot. Scroll to zoom or drag to select a range.",
@@ -27,17 +36,17 @@ async function plotEnd(page: Page, timeline: Locator): Promise<number> {
   const box = await plot.boundingBox();
   if (box === null) throw new Error("a plot drawn nowhere");
   await page.mouse.move(box.x + box.width - 0.5, box.y + box.height / 2);
-  const crosshair = timeline.getByLabel("Timeline crosshair");
-  await expect(crosshair).toBeVisible();
-  const [stamp = ""] = ((await crosshair.textContent()) ?? "")
-    .trim()
-    .split(" ");
+  const { clock } = await crosshairReading(timeline);
   await page.mouse.move(box.x + box.width / 2, box.y - 40);
-  return Date.parse(stamp);
+  return instantOfClock(page, clock, near);
 }
 
-/** How far one pixel of a plot `width` wide spans, over `span` milliseconds. */
-const pixelOf = (span: number, width: number) => Math.ceil(span / width) + 1;
+/**
+ * How far one pixel of a plot `width` wide spans, over `span` milliseconds, and the
+ * step the crosshair rounds its reading to there.
+ */
+const pixelOf = (span: number, width: number) =>
+  Math.ceil(span / width) + 1 + readoutPrecisionMs(span / width);
 
 /**
  * What a detail calls a record's field: its wire key read as words, `exit_code`
@@ -225,7 +234,7 @@ test("Overall ends at settlement and keeps the late completion as a marker", asy
     name: "Graph timeline",
     exact: true,
   });
-  const ended = await plotEnd(page, overall);
+  const ended = await plotEnd(page, overall, Date.parse(executionEnd));
   const started = Date.parse(
     served.spans.find((span) => span.kind === "run")?.started_at ?? "",
   );
@@ -314,7 +323,7 @@ for (const terminal of corpus.terminations) {
     if (end === undefined) throw new Error("execution end");
     // The plot ends at the terminal record: the crosshair at its right edge
     // reads it.
-    const ended = await plotEnd(page, graph);
+    const ended = await plotEnd(page, graph, Date.parse(end));
     const started = Date.parse(
       served.spans.find((span) => span.kind === "run")?.started_at ?? "",
     );
@@ -373,7 +382,7 @@ for (const terminal of corpus.terminations) {
   });
 }
 
-test("a node's unloaded history is hatched over exactly the rows its window left out, and goes once they are read", async ({
+test("a node's unloaded history is hatched over exactly the rows its window left out while its read is in flight, and goes once it lands", async ({
   page,
   request,
 }) => {
@@ -392,6 +401,16 @@ test("a node's unloaded history is hatched over exactly the rows its window left
     if (new URL(response.url()).pathname !== API_V2_PATHS.subscriptions)
       return false;
     return response.request().postDataJSON()?.view?.scope === "node";
+  });
+  // The node's read is held in flight, as a slow host holds it, until the hatch has
+  // been read; it then reaches the real server unchanged.
+  let release = () => {};
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/timeline/node-stream?*", async (route) => {
+    await released;
+    await route.continue();
   });
   await page.goto(`/?run=${fixture.run_id}&node=${fixture.node}`);
   const subscribed = subscribedSchema.parse(await (await answered).json());
@@ -448,52 +467,50 @@ test("a node's unloaded history is hatched over exactly the rows its window left
     expect(box.x).toBeGreaterThanOrEqual(area.x - 1);
     expect(box.x + box.width).toBeLessThanOrEqual(area.x + area.width + 1);
   }
-  // Read back through the page's own control, nothing is left unloaded.
-  await loadAllEarlierRows(page);
+  // Once the read lands nothing is left unloaded, and nothing is hatched.
+  release();
+  await nodeTimelineHeld(page);
   await expect(hatches).toHaveCount(0);
+  await expect(
+    page.getByRole("region", { name: "Node timeline" }),
+  ).not.toContainText("Still loading");
 });
 
-/** Every page of a run's history the page asks for, as it asks. */
+/** Every read of a run's rows the page asks for, as it asks. */
 function historyAsks(page: Page): URL[] {
   const asked: URL[] = [];
   page.on("request", (request) => {
     const url = new URL(request.url());
-    if (url.pathname.endsWith("/timeline/events")) asked.push(url);
+    if (
+      url.pathname.endsWith("/timeline/events") ||
+      url.pathname.endsWith("/timeline/node-stream")
+    )
+      asked.push(url);
   });
   return asked;
 }
 
-/** The retries fixture's node, opened and drawn by the app itself. */
-async function openRetriesNode(page: Page) {
+test("a node's rows are read once as it opens, and neither zooming its plot nor scrolling its list asks again", async ({
+  page,
+}) => {
+  const asked = historyAsks(page);
   const replay = await import("./fixtures/timeline-retries.json", {
     with: { type: "json" },
   });
   const fixture = replay.default;
   await page.goto(`/?run=${fixture.run_id}&node=${fixture.node}`);
-  // The app's plot, so what follows acts on the app rather than on the first screen
-  // it replaces: a transcript focused before then loses its focus with the screen.
   const plot = appPlot(page.getByRole("region", { name: "Node timeline" }));
   await expect(plot).toBeVisible();
-  return { fixture, plot };
-}
-
-test("zooming a node's plot asks for that stretch of its rows, and a failed stretch recovers by Try again", async ({
-  page,
-}) => {
-  const asked = historyAsks(page);
-  let failed = 0;
-  // llmlint: ignore-block[e2e_not_mocked, tests_mirror_real_usage] the network boundary is the only doubled party: the first stretch read is answered 503 as a failing host answers it, and every other read reaches the real server.
-  await page.route("**/timeline/events?*", async (route) => {
-    const url = new URL(route.request().url());
-    if (url.searchParams.has("from") && failed === 0) {
-      failed += 1;
-      return route.fulfill({ status: 503, body: "unavailable" });
-    }
-    return route.continue();
+  await nodeTimelineHeld(page);
+  // One read, of the node's own stream, naming the node and nothing else.
+  expect(asked).toHaveLength(1);
+  const [read] = asked;
+  expect(read?.pathname.endsWith("/timeline/node-stream")).toBe(true);
+  expect(Object.fromEntries(read?.searchParams ?? [])).toStrictEqual({
+    scope: "node",
+    node: fixture.node,
   });
-  // llmlint: ignore-end[e2e_not_mocked, tests_mirror_real_usage]
-  const { fixture, plot } = await openRetriesNode(page);
-  expect(asked.filter((url) => url.searchParams.has("from"))).toHaveLength(0);
+  // Zoomed as a person zooms, over a span the plot draws.
   // llmlint: ignore[e2e_uses_accessible_selectors] the plot's spans are positioned SVG geometry that no role or name carries; the journey only finds where one is drawn and then zooms there with the pointer, as a person does.
   const shape = plot.locator('[data-timeline-shape="span"]').first();
   const bounds = await shape.boundingBox();
@@ -505,102 +522,16 @@ test("zooming a node's plot asks for that stretch of its rows, and a failed stre
   await page.keyboard.down("Control");
   await page.mouse.wheel(0, -240);
   await page.keyboard.up("Control");
-  await expect
-    .poll(() => asked.filter((url) => url.searchParams.has("from")).length)
-    .toBeGreaterThan(0);
-  const stretch = asked.find((url) => url.searchParams.has("from"));
-  expect(stretch?.searchParams.get("scope")).toBe("node");
-  expect(stretch?.searchParams.get("node")).toBe(fixture.node);
-  expect(Date.parse(stretch?.searchParams.get("from") ?? "")).toBeLessThan(
-    Date.parse(stretch?.searchParams.get("to") ?? ""),
-  );
-  // The failed read says so at the transcript's control, and Try again reads it.
-  const alert = page
-    .getByRole("region", { name: "Node transcript" })
-    .getByRole("alert");
-  await expect(alert).toContainText("Earlier rows did not load");
-  const before = asked.length;
-  await alert.getByRole("button", { name: "Try again" }).click();
-  await expect
-    .poll(() =>
-      asked
-        .slice(before)
-        .some(
-          (url) =>
-            url.searchParams.get("from") === stretch?.searchParams.get("from"),
-        ),
-    )
-    .toBe(true);
-  await expect(alert).toHaveCount(0);
-});
-
-test("scrolling a node's transcript up to its top asks for the rows before it and draws them", async ({
-  page,
-}) => {
-  const asked = historyAsks(page);
-  await openRetriesNode(page);
+  // And the list scrolled down and back up to its top, with the wheel and Home.
   const transcript = page.getByRole("region", { name: "Node transcript" });
-  const rows = transcript.getByRole("article");
-  await expect(rows.first()).toBeVisible();
-  const shown = await rows.count();
-  const paged = () =>
-    asked.filter(
-      (url) =>
-        !url.searchParams.has("from") &&
-        !url.searchParams.has("span") &&
-        url.searchParams.get("scope") === "node",
-    ).length;
-  expect(paged()).toBe(0);
-  // Scrolled as a person scrolls, with the wheel over the transcript: down into
-  // the rows it opens on, then back up to its top.
   await transcript.hover();
-  await expect(async () => {
-    await page.mouse.wheel(0, 600);
-    expect(
-      await transcript.evaluate((element) => element.scrollTop),
-    ).toBeGreaterThan(120);
-  }).toPass();
-  expect(paged()).toBe(0);
-  await expect(async () => {
-    await page.mouse.wheel(0, -2000);
-    expect(paged()).toBeGreaterThan(0);
-  }).toPass();
-  await expect.poll(() => rows.count()).toBeGreaterThan(shown);
+  await page.mouse.wheel(0, 600);
+  await page.mouse.wheel(0, -2000);
+  await transcript.focus();
+  await page.keyboard.press("Home");
+  await page.waitForTimeout(1_000);
+  expect(asked).toHaveLength(1);
 });
-
-// A transcript already at its top scrolls no further, so the browser reports no
-// scroll for a reader who wheels or keys up there again: the ask has to come from
-// that gesture itself, or a reader who reached the top while a page could not be
-// asked (CI run 42978308166) is left with no way to the rows before it.
-for (const [how, gesture] of [
-  ["wheels up", (page: Page) => page.mouse.wheel(0, -600)],
-  ["presses Home", (page: Page) => page.keyboard.press("Home")],
-] as const)
-  test(`a reader already at the transcript's top who ${how} is shown the rows before it`, async ({
-    page,
-  }) => {
-    const asked = historyAsks(page);
-    await openRetriesNode(page);
-    const transcript = page.getByRole("region", { name: "Node transcript" });
-    const rows = transcript.getByRole("article");
-    await expect(rows.first()).toBeVisible();
-    const shown = await rows.count();
-    const paged = () =>
-      asked.filter(
-        (url) =>
-          !url.searchParams.has("from") &&
-          !url.searchParams.has("span") &&
-          url.searchParams.get("scope") === "node",
-      ).length;
-    // Opened at its top, with nothing asked yet.
-    expect(await transcript.evaluate((element) => element.scrollTop)).toBe(0);
-    expect(paged()).toBe(0);
-    await transcript.hover();
-    await transcript.focus();
-    await gesture(page);
-    await expect.poll(paged).toBeGreaterThan(0);
-    await expect.poll(() => rows.count()).toBeGreaterThan(shown);
-  });
 
 test("retries, equal timestamps and repeated relays keep every record under its served identity", async ({
   page,
@@ -632,7 +563,7 @@ test("retries, equal timestamps and repeated relays keep every record under its 
   ).toHaveCount(0);
   // A node's first answer holds each span's latest rows, so the ones before them
   // are read through the page's own control before every record is counted.
-  await loadAllEarlierRows(page);
+  await nodeTimelineHeld(page);
   await openRepeatedLoops(page);
   const headings = await page
     .getByRole("heading", { level: 3 })
@@ -1008,9 +939,9 @@ test("keeps the reading cursor when an open event's timeline is expanded", async
   });
   const cursor = timeline.getByLabel("Timeline cursor", { exact: true });
   await expect(cursor).toBeVisible();
-  // Scrolling to the top reads earlier rows, which move the reading: this journey is
-  // about the cursor over a transcript already held, so it holds it first.
-  await loadAllEarlierRows(page);
+  // The node's read lands rows above the reading, which move it: this journey is
+  // about the cursor over a transcript already held, so it waits for that first.
+  await nodeTimelineHeld(page);
   const initialReading = await cursor.getAttribute("style");
   await worker
     .getByRole("button", { name: "Open gate-run", exact: true })

@@ -408,6 +408,19 @@ graph stays one breadcrumb away, reachable by pointer, by Tab, and under the
 Escape key. It is a **timeline over a transcript**, both projected from
 `GET /api/v2/runs/{run_id}/timeline` and locked to one clock:
 
+**The node is read whole as it opens.** The first screen draws the node's latest
+window; the view then reads every row of the node through one streamed read,
+`GET /api/v2/runs/{run}/timeline/node-stream?scope=node&node={node}`, and draws each
+line of rows as it lands, merging rows by record (`record_id ?? id`), since a turn's
+opening and close share a row id. While the read is in flight, the chart and the
+event list are `aria-busy` and the stretch not yet held is hatched "Still loading".
+If the read runs past `NODE_TIMELINE_PARTIAL_DELAY_MS`
+(`@onepipeline-ui/timeline-categories`, the
+`dag-ui-node-timeline-complete-seconds` threshold), the chart is marked "Partial —
+loading" with how many records have arrived. A failed read is tried again after a
+growing wait, three times in all, and then shown with Try again. Nothing is paged
+back by scrolling: there is nothing left to page.
+
 - the **timeline** is pinned across the full width and opens as one compact line
   showing what dominated each moment. Expanding gives every category a row:
   Queued, then **one lane per member word the served payload carries, in the

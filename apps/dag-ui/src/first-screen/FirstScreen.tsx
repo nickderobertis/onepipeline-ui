@@ -353,7 +353,8 @@ function Plot({
           ))}
         </div>
       </div>
-      <Reserved className="relative mt-2 h-4" />
+      {/* The axis row, as tall as the app's: two lines of tick label. */}
+      <Reserved className="relative mt-2 h-6" />
     </div>
   );
 }

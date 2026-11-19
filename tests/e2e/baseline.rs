@@ -273,10 +273,12 @@ fn the_comparison_asks_for_every_route_the_contract_defines() {
         // would perform the operation twice and compare no field.
         //
         // A history page is new with this schema, so a base commit answers it
-        // 404 and there is no field of its to hold. `live::` journeys hold its
+        // 404 and there is no field of its to hold; the node stream is new with
+        // this change and is lines rather than one document, held by its golden. `live::` journeys hold its
         // rows to the complete timeline's, on both sides of the rest arriving.
         if route.path == routes::EVENTS
             || route.path == routes::RUN_TIMELINE_EVENTS
+            || route.path == routes::RUN_TIMELINE_NODE_STREAM
             || route.method != routes::Method::Get
         {
             continue;

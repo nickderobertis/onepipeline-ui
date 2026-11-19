@@ -193,10 +193,11 @@ test("expanding a node's row on Overall reads every page of that node's rows", a
   const node = world.facts.large.busiestNode;
   const run = world.facts.openLiveRun;
   const timeline = await settledTimeline(world, served, run, node);
-  // The node's rows across its spans, each once, as a page lists them.
+  // The node's records across its spans, each once, as a page lists them: by the
+  // record a row reads, since a turn's opening and close share a row id.
   const expected = new Set(
     timeline.spans.flatMap((span) =>
-      (span.events ?? []).map((event) => event.id),
+      (span.events ?? []).map((event) => event.record_id ?? event.id),
     ),
   );
   // More than one of the widest page the client asks for.
@@ -214,7 +215,7 @@ test("expanding a node's row on Overall reads every page of that node's rows", a
     const body = timelineEventsPageSchema.parse(await response.json());
     pages.push({
       cursor: body.next_cursor,
-      ids: body.rows.map((row) => row.id),
+      ids: body.rows.map((row) => row.record_id ?? row.id),
     });
   });
   await open(page, "overall");
@@ -291,7 +292,7 @@ test("a node replanned off the graph is reached by a page of its own history", a
   await open(page, "overall");
   const timeline = await settledTimeline(world, served, run, off);
   const expected = (timeline.spans as Json[]).flatMap((span) =>
-    (span.events ?? []).map((event) => event.id),
+    (span.events ?? []).map((event) => event.record_id ?? event.id),
   );
   expect(expected.length).toBeGreaterThan(0);
   const rows: string[] = [];
@@ -310,7 +311,7 @@ test("a node replanned off the graph is reached by a page of its own history", a
         `/api/v2/runs/${run}/timeline/events?${query}`,
       ),
     );
-    rows.unshift(...answer.rows.map((row) => row.id));
+    rows.unshift(...answer.rows.map((row) => row.record_id ?? row.id));
     cursor = answer.next_cursor;
   } while (cursor !== null);
   expect(new Set(rows)).toEqual(new Set(expected));

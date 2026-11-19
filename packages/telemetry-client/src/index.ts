@@ -19,6 +19,8 @@ import {
   humanItemDetailSchema,
   humanItemListSchema,
   humanItemReceiptSchema,
+  type NodeStreamLine,
+  nodeStreamLineSchema,
   type ProjectAgents,
   type ProjectDetail,
   type ProjectList,
@@ -387,6 +389,106 @@ export class TelemetryClient {
   }
 
   /** `POST /api/v2/subscriptions`: the subscription and its initial state. */
+  /**
+   * Every row of one node's own timeline, through `GET .../timeline/node-stream`:
+   * each line of its newline-delimited body parsed as it arrives and yielded, the
+   * `start` line first and the last `rows` line last. No deadline applies — the
+   * body is read as it streams, which `signal` can end — and a body that ends
+   * without its `end` line, or with an `error` line, throws.
+   */
+  async *streamNodeTimeline(
+    runId: string,
+    nodeId: string,
+    signal?: AbortSignal,
+  ): AsyncGenerator<Exclude<NodeStreamLine, { kind: "end" | "error" }>> {
+    requireOpaqueId(runId, "run ID");
+    requireOpaqueId(nodeId, "node ID");
+    const url = this.#url(API_V2_PATHS.timelineNodeStream(runId));
+    url.searchParams.set(API_V2_QUERY.scope, API_V2_TIMELINE_SCOPES.node);
+    url.searchParams.set(API_V2_QUERY.node, nodeId);
+    let response: Response;
+    try {
+      response = await this.#fetch(url, signal === undefined ? {} : { signal });
+    } catch (error) {
+      throw new TelemetryClientError(
+        "Telemetry request failed",
+        undefined,
+        undefined,
+        { cause: error },
+      );
+    }
+    if (!response.ok || response.body === null) {
+      const value: unknown = await response.json().catch(() => undefined);
+      const parsed = apiErrorSchema.safeParse(value);
+      throw new TelemetryClientError(
+        parsed.success
+          ? parsed.data.error.message
+          : `Telemetry request failed with status ${response.status}`,
+        response.status,
+        parsed.success ? parsed.data.error.code : undefined,
+      );
+    }
+    const reader = response.body
+      .pipeThrough(new TextDecoderStream())
+      .getReader();
+    const lineOf = (text: string): NodeStreamLine => {
+      try {
+        return nodeStreamLineSchema.parse(JSON.parse(text));
+      } catch (error) {
+        throw new TelemetryClientError(
+          "Telemetry response failed contract validation",
+          response.status,
+          undefined,
+          { cause: error },
+        );
+      }
+    };
+    let buffered = "";
+    try {
+      for (;;) {
+        let read: ReadableStreamReadResult<string>;
+        try {
+          read = await reader.read();
+        } catch (error) {
+          throw new TelemetryClientError(
+            "The node's timeline was cut off",
+            response.status,
+            undefined,
+            { cause: error },
+          );
+        }
+        if (read.done) break;
+        buffered += read.value;
+        for (
+          let newline = buffered.indexOf("\n");
+          newline >= 0;
+          newline = buffered.indexOf("\n")
+        ) {
+          const text = buffered.slice(0, newline);
+          buffered = buffered.slice(newline + 1);
+          if (text === "") continue;
+          const line = lineOf(text);
+          if (line.kind === "end") return;
+          if (line.kind === "error")
+            throw new TelemetryClientError(
+              line.message,
+              response.status,
+              "node_stream_failed",
+            );
+          yield line;
+        }
+      }
+    } finally {
+      // A reader that stopped early leaves nothing of the body held open.
+      await reader.cancel().catch(() => undefined);
+    }
+    throw new TelemetryClientError(
+      "The node's timeline ended before its last line",
+      response.status,
+      "node_stream_cut_off",
+    );
+  }
+
   async createSubscription(body: {
     readonly view: SubscriptionView;
     readonly replaces?: string;

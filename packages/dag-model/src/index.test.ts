@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -6,6 +8,7 @@ import {
   API_V2_PATHS,
   agentRoleSchema,
   agentSessionSchema,
+  conversationTurnSchema,
   dagConversationSchema,
   frameCarriesWholeEvents,
   graphPayloadSchema,
@@ -14,6 +17,8 @@ import {
   hostShutdownScopeSchema,
   isLoadingMark,
   liveRunDetailSchema,
+  NODE_STREAM_ROWS_PER_LINE,
+  nodeStreamLineSchema,
   nodeTelemetrySchema,
   parseRunList,
   parseRunTimeline,
@@ -590,6 +595,44 @@ describe("agent roles", () => {
       dagConversationSchema.parse({
         ...attributed,
         attribution: { transportRole: "agent", agentRole: "not a member" },
+      }),
+    ).toThrow();
+  });
+
+  test("a turn's words are read in place, and only as a message or a reasoning", () => {
+    const turn = {
+      assistant: "The gate passed.",
+      failureKind: null,
+      harness: "oneagentgraph",
+      id: "node-scope-1.worker.0",
+      model: null,
+      reasoning: null,
+      status: "turn-completed",
+      timestamp: "2026-07-26T12:00:00Z",
+      tools: [{ index: 2, kind: "tool_call", name: "Bash" }],
+      unknown: {},
+      usage: {},
+      user: "Prove the change.",
+    };
+    const words = [
+      { index: 0, kind: "reasoning", text: "The gate is the quickest proof." },
+      { index: 1, kind: "message", text: "Running the gate first." },
+    ];
+    expect(
+      conversationTurnSchema.parse({ ...turn, agentEvents: words }).agentEvents,
+    ).toEqual(words);
+    // A turn that said nothing carries no words at all, as before schema 30.
+    expect(conversationTurnSchema.parse(turn).agentEvents).toBeUndefined();
+    expect(() =>
+      conversationTurnSchema.parse({
+        ...turn,
+        agentEvents: [{ index: 0, kind: "tool_call", text: "not a word" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      conversationTurnSchema.parse({
+        ...turn,
+        agentEvents: [{ index: -1, kind: "message", text: "no place" }],
       }),
     ).toThrow();
   });
@@ -1519,5 +1562,50 @@ describe("what the subscription contract names", () => {
         "run",
       ),
     ).toBe(false);
+  });
+});
+
+describe("nodeStreamLineSchema", () => {
+  /**
+   * The golden the crate's journey pins from the real node stream, and its
+   * `NodeStreamLine` re-reads: the browser's half of the drift gate between the
+   * two declarations of the stream's lines.
+   */
+  const golden: unknown[] = JSON.parse(
+    readFileSync(
+      join(
+        import.meta.dirname,
+        "../../../tests/fixtures/run-timeline-node-stream.json",
+      ),
+      "utf8",
+    ),
+  );
+
+  test("reads every line the real route served", () => {
+    const lines = golden.map((line) => nodeStreamLineSchema.parse(line));
+    expect(lines[0]?.kind).toBe("start");
+    expect(lines.at(-1)?.kind).toBe("end");
+    const start = lines[0];
+    const rows = lines.flatMap((line) =>
+      line.kind === "rows" ? line.rows : [],
+    );
+    expect(start?.kind === "start" && start.total).toBe(rows.length);
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  test("refuses a line the crate's type does not declare", () => {
+    expect(() =>
+      nodeStreamLineSchema.parse({ kind: "end", extra: true }),
+    ).toThrow();
+    expect(() => nodeStreamLineSchema.parse({ kind: "done" })).toThrow();
+    expect(() =>
+      nodeStreamLineSchema.parse({
+        kind: "rows",
+        rows: Array.from({ length: NODE_STREAM_ROWS_PER_LINE + 1 }, () => ({})),
+      }),
+    ).toThrow();
+    expect(
+      nodeStreamLineSchema.parse({ kind: "error", message: "it failed" }),
+    ).toEqual({ kind: "error", message: "it failed" });
   });
 });

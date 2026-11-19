@@ -1914,14 +1914,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     width: 100vw;
   }
 
-  /* One clock over a dozen stacked rows, and at this width its two readings do not fit
-     one line. They stack instead of holding the row wider than the screen — which is
-     what a `justify-between` pair that cannot shrink does. */
-  .graph-row [data-timeline-axis] {
-    flex-wrap: wrap;
-    gap: 2px 10px;
-  }
-
   .metric-grid,
   .facts {
     grid-template-columns: minmax(0, 1fr);
@@ -3154,6 +3146,29 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   white-space: nowrap;
 }
 
+/* A node's chart drawn from what has arrived, while the rest keeps loading: said
+   above the plot, beside how much has loaded, rather than left for the hatch alone. */
+.partial-mark {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.partial-mark-label {
+  padding: 1px 6px;
+  border: 1px dashed var(--muted-foreground);
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.partial-mark-count {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+
 /* The frame is the app's plot's own classes; a bar sits where the app's span does. */
 .first-plot-bar {
   position: absolute;
@@ -3183,14 +3198,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     margin-bottom: 4px;
     font-size: 12px;
   }
-}
-
-/* Where the pages ran out: said once, quietly, above the node's first row. */
-.history-start {
-  margin: 0 0 12px;
-  color: var(--muted-foreground);
-  font-size: 13px;
-  text-align: center;
 }
 
 .read-failed {

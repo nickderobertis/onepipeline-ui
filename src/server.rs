@@ -37,8 +37,8 @@ use crate::contract::{
     routes, ArtifactId, ConversationId, Envelope, EventId, EventsPageLimit, EventsQuery,
     HumanItemAnswerRequest, HumanItemAnswersRequest, HumanItemCompleteRequest,
     HumanItemDismissRequest, HumanItemId, HumanItemNoteRequest, HumanItemReopenRequest, NodeId,
-    PageCursor, PageLimit, PageOwner, ProjectId, RunId, RunQuery, RunSelection, RunsPage,
-    RunsQuery, ShutdownRequest, SpanId, StopRequest, SubscribeRequest, SubscriptionId,
+    NodeStreamLine, PageCursor, PageLimit, PageOwner, ProjectId, RunId, RunQuery, RunSelection,
+    RunsPage, RunsQuery, ShutdownRequest, SpanId, StopRequest, SubscribeRequest, SubscriptionId,
     TimelineEventsQuery, TimelineQuery, TimelineScope, TranscriptQuery,
 };
 use crate::error::ApiError;
@@ -91,6 +91,7 @@ fn router_stopping_on(store: RunStore, stopping: Arc<AtomicBool>, view: Option<V
         .route(routes::RUN, get(run))
         .route(routes::RUN_TIMELINE, get(timeline))
         .route(routes::RUN_TIMELINE_EVENTS, get(timeline_events))
+        .route(routes::RUN_TIMELINE_NODE_STREAM, get(node_stream))
         .route(routes::RUN_CONVERSATION, get(conversation))
         .route(routes::RUN_ARTIFACT, get(artifact))
         .route(routes::EVENTS, get(events))
@@ -636,6 +637,89 @@ async fn timeline_events(
         Err(error) => return error.into_response(),
     };
     answer(move || serving.hub.timeline_events(&run, &query)).await
+}
+
+/// `GET .../timeline/node-stream?scope=node&node=N`: every row of the node's own
+/// timeline as [`NodeStreamLine`]s, one JSON object per line. The node is read and
+/// built before anything is written, so a run or node the store cannot answer is
+/// refused with the usual error body; once the start line is out, a line that
+/// cannot be written is answered as an `error` line, which ends the body.
+async fn node_stream(
+    State(serving): Store,
+    Path(run): Path<String>,
+    Query(raw): Query<HashMap<String, String>>,
+) -> Response {
+    let run = match RunId::try_from(run.as_str()) {
+        Ok(run) => run,
+        Err(error) => return error.into_response(),
+    };
+    let node = match node_stream_node(&raw) {
+        Ok(node) => node,
+        Err(error) => return error.into_response(),
+    };
+    let built =
+        match tokio::task::spawn_blocking(move || serving.hub.node_stream(&run, &node)).await {
+            Ok(Ok(built)) => built,
+            Ok(Err(error)) => return error.into_response(),
+            Err(_) => return ApiError::Read("unexpected read failure".to_owned()).into_response(),
+        };
+    let (tx, rx) = mpsc::channel::<Result<String, Infallible>>(2);
+    tokio::task::spawn_blocking(move || {
+        let start = NodeStreamLine::Start {
+            total: built.rows.len(),
+            split: built.split,
+        };
+        let lines = std::iter::once(start)
+            .chain(
+                built
+                    .rows
+                    .chunks(crate::contract::NODE_STREAM_ROWS_PER_LINE)
+                    .map(|rows| NodeStreamLine::Rows {
+                        rows: rows.to_vec(),
+                    }),
+            )
+            .chain(std::iter::once(NodeStreamLine::End));
+        for line in lines {
+            // Each line is serialized as the one before it is read, so the reader
+            // draws a batch while the next is written.
+            let written = node_stream_line(&line);
+            let failed = written.is_err();
+            let text = written.unwrap_or_else(|message| {
+                node_stream_line(&NodeStreamLine::Error { message })
+                    .unwrap_or_else(|_| "{\"kind\":\"error\",\"message\":\"\"}\n".to_owned())
+            });
+            if tx.blocking_send(Ok(text)).is_err() || failed {
+                return;
+            }
+        }
+    });
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/x-ndjson")],
+        axum::body::Body::from_stream(ReceiverStream::new(rx)),
+    )
+        .into_response()
+}
+
+/// One node-stream line and its newline, or why it could not be written.
+fn node_stream_line(line: &NodeStreamLine) -> Result<String, String> {
+    serde_json::to_string(line)
+        .map(|text| format!("{text}\n"))
+        .map_err(|error| format!("a line of the node's rows could not be written: {error}"))
+}
+
+/// The node `?scope=node&node=N` names: the stream reads one node's own timeline
+/// and nothing else, so any other scope is refused before the run is opened.
+fn node_stream_node(raw: &HashMap<String, String>) -> Result<NodeId, ApiError> {
+    match (raw.get("scope").map(String::as_str), raw.get("node")) {
+        (Some("node"), Some(node)) => NodeId::try_from(node.as_str()),
+        (Some("node"), None) => Err(ApiError::InvalidNodeId(
+            "scope=node needs the node it scopes to".to_owned(),
+        )),
+        (scope, _) => Err(ApiError::InvalidRequest(format!(
+            "the node stream reads scope=node only, got {:?}",
+            scope.unwrap_or_default()
+        ))),
+    }
 }
 
 /// The query of a page of timeline rows, refused before any run is opened.

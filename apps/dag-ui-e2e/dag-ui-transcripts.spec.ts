@@ -38,7 +38,13 @@ const factsSchema = z.object({
     z.string(),
     z.object({ session: z.string(), historyId: z.string() }),
   ),
-  conversations: z.object({ died: z.string(), live: z.string() }),
+  conversations: z.object({
+    died: z.string(),
+    live: z.string(),
+    narrated: z.string(),
+    narratedLive: z.string(),
+  }),
+  narratedOrder: z.array(z.string()),
 });
 type Facts = z.infer<typeof factsSchema>;
 
@@ -419,3 +425,86 @@ test("what the server serves of a turn is what the client's schemas read", async
   expect(session.unavailable).toBeUndefined();
   expect(session.turns?.[0]?.user).toContain(facts.sentinels.session);
 });
+
+/**
+ * What one opened turn's activity shows, top to bottom: each of the agent's words
+ * by its kind and each call by the tool it named — a call and its result are one
+ * entry, as the turn card draws them.
+ */
+async function activityOrder(page: Page): Promise<string[]> {
+  const activity = detail(page).getByRole("region", { name: "Agent activity" });
+  await expect(activity).toBeVisible();
+  // One locator over the three, so they are read in the order they are drawn.
+  const entries = activity
+    .getByRole("group", { name: "Agent message" })
+    .or(activity.getByRole("button", { name: "Reasoning" }))
+    .or(activity.getByRole("button", { name: / tool details$/ }));
+  const order: string[] = [];
+  for (const entry of await entries.all()) {
+    const label = (await entry.getAttribute("aria-label")) ?? "";
+    order.push(
+      label === "Agent message"
+        ? "message"
+        : label.endsWith(" tool details")
+          ? `tool:${label.slice(0, -" tool details".length)}`
+          : "reasoning",
+    );
+  }
+  return order;
+}
+
+for (const [reading, node, settled] of [
+  ["settled", "narrated", true],
+  ["live", "narrated-live", false],
+] as const) {
+  test(`a ${reading} turn shows what its agent said, reasoned and called in the order its history recorded`, async ({
+    page,
+  }) => {
+    // The history interleaves the agent's words with its calls. Settled, the
+    // member's report keeps only the calls, so the words are read out of that
+    // file; live, they are the activity the producer relayed.
+    const conversation = conversationSchema.parse(
+      (
+        await (
+          await page.request.get(
+            `${server.origin}/api/v2/runs/${facts.run}/conversations/${
+              settled
+                ? facts.conversations.narrated
+                : facts.conversations.narratedLive
+            }`,
+          )
+        ).json()
+      ).conversation,
+    );
+    const served = conversation.turns[0]?.agentEvents ?? [];
+    expect(served.map((event) => event.index)).toEqual(
+      [...served.map((event) => event.index)].sort((a, b) => a - b),
+    );
+
+    await openNode(page, facts.run, node);
+    await page
+      .getByRole("region", { name: "Node transcript" })
+      .getByRole("button", { name: "Open turn-started" })
+      .first()
+      .click();
+    const turn = detail(page).getByRole("article", {
+      name: /^Turn .*\.0 from /,
+    });
+    await expect(turn).toBeVisible();
+    // A settled turn's closing message is its reply, drawn after everything it
+    // did; a live turn has none yet, so its last message is in its activity.
+    const order = settled
+      ? facts.narratedOrder.slice(0, -1)
+      : facts.narratedOrder;
+    expect(await activityOrder(page)).toEqual(order);
+    await expect(
+      turn.getByRole("group", { name: "Agent message" }).first(),
+    ).toContainText("The document is there; checking the branch next.");
+    // The reply is shown once: after the activity settled, inside it live.
+    const reply = "The criterion is met";
+    await expect(turn).toContainText(reply);
+    const activity = turn.getByRole("region", { name: "Agent activity" });
+    if (settled) await expect(activity).not.toContainText(reply);
+    else await expect(activity).toContainText(reply);
+  });
+}

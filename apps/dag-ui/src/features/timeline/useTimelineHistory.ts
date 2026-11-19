@@ -7,10 +7,30 @@ import {
   timelineSpanSchema,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { NODE_TIMELINE_PARTIAL_DELAY_MS } from "@onepipeline-ui/timeline-categories";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 /** Rows a zoom, a span's or a whole row's expansion asks for per request. */
 const WIDE_PAGE = 500;
+
+/** How long a node's timeline loads before the chart is drawn as partial. */
+export const PARTIAL_RENDER_DELAY_MS = NODE_TIMELINE_PARTIAL_DELAY_MS;
+
+/** Reads of a node's stream before a failure is shown, the first included. */
+export const NODE_READ_ATTEMPTS = 3;
+
+/** The wait before retry `attempt` (1-based) of a node's stream. */
+export const nodeReadBackoffMs = (attempt: number): number =>
+  500 * 2 ** (attempt - 1);
+
+/**
+ * The key a held row is merged under: the record it reads. Two records can share
+ * a row `id` — a turn's opening and its close — and merging by that would drop one.
+ */
+export const rowKey = (row: {
+  readonly id: string;
+  readonly record_id?: string | null;
+}): string => row.record_id ?? row.id;
 
 type Interval = readonly [number, number];
 
@@ -23,22 +43,26 @@ export interface HistoryFailure {
   readonly retry: () => void;
 }
 
+/** Where a node's streamed read of its whole timeline stands. */
+export interface NodeLoad {
+  /**
+   * `loading` while a read is in flight or a retry is queued; `held` once every
+   * row of the node has arrived; `failed` once every attempt failed.
+   */
+  readonly state: "loading" | "held" | "failed";
+  /** Records the stream has delivered. */
+  readonly loaded: number;
+  /** Records the node holds, once the stream's start line said. */
+  readonly total?: number;
+  /** Still loading past {@link PARTIAL_RENDER_DELAY_MS}: what is drawn is partial. */
+  readonly partial: boolean;
+}
+
 export interface TimelineHistory {
   /** The timeline with every row and span fields the pages have brought. */
   readonly timeline?: RunTimeline;
   /** Stretches of the plot no held row covers. */
   readonly unheld: readonly Interval[];
-  /** Whether a page earlier than those held exists for `node`. */
-  readonly canLoadEarlier: boolean;
-  /** Whether the pages have been read back to the node's first row. */
-  readonly readToStart: boolean;
-  readonly loadingEarlier: boolean;
-  /**
-   * Read the next page back, by the page's own control or by scrolling. `wide`
-   * asks for a wide page, for a read the view continues on its own because the
-   * page before it showed the reader nothing new.
-   */
-  readonly loadEarlier: (wide?: boolean) => void;
   /** Read one span whole: its fields and its rows, once. */
   readonly loadSpan: (spanId: string) => void;
   /** Read every row of a node's share of Overall; once. */
@@ -50,6 +74,8 @@ export interface TimelineHistory {
     node: string | undefined,
   ) => void;
   readonly failure?: HistoryFailure;
+  /** A node's whole-timeline read; absent for the run scope. */
+  readonly nodeLoad?: NodeLoad;
 }
 
 function rowsOfSpan(
@@ -57,17 +83,16 @@ function rowsOfSpan(
   extra: readonly TimelineEventRow[] | undefined,
 ): TimelineSpan {
   if (extra === undefined) return span;
-  const seen = new Set(span.events.map((event) => event.id));
-  const fresh = extra.filter((row) => !seen.has(row.id));
+  const seen = new Set(span.events.map(rowKey));
+  const fresh = extra.filter((row) => !seen.has(rowKey(row)));
   if (fresh.length === 0) return span;
-  return {
-    ...span,
-    events: [...span.events, ...fresh].sort(
-      (left, right) =>
-        Date.parse(left.at) - Date.parse(right.at) ||
-        (left.journal_order ?? 0) - (right.journal_order ?? 0),
-    ),
-  };
+  // Each instant read once rather than in every comparison: a busy node sorts
+  // thousands of rows on every batch its read draws.
+  const keyed = [...span.events, ...fresh].map(
+    (event) => [Date.parse(event.at), event.journal_order ?? 0, event] as const,
+  );
+  keyed.sort((left, right) => left[0] - right[0] || left[1] - right[1]);
+  return { ...span, events: keyed.map(([, , event]) => event) };
 }
 
 /** The stretches `spans` hold no rows of, merged, in time order. */
@@ -97,9 +122,11 @@ export function unheldStretches(
 }
 
 /**
- * The rows a run's timeline payloads hold beyond what the server sent: pages taken only
- * when the person scrolls, expands or zooms, merged by event id with what the stream
- * keeps sending. A window the stream moves past stays, because a row once held is held.
+ * The rows a run's timeline payloads hold beyond what the server sent, merged by
+ * record with what the stream keeps sending. A node's whole timeline is read as soon
+ * as its view opens, through the node stream, retried with backoff and then shown as
+ * failed; the run's pages are taken only when the person expands or zooms. A window
+ * the stream moves past stays, because a row once held is held.
  */
 export function useTimelineHistory({
   client,
@@ -116,19 +143,14 @@ export function useTimelineHistory({
 }): TimelineHistory {
   const rows = useRef(new Map<string, TimelineEventRow>());
   const spanFields = useRef(new Map<string, SpanFields>());
-  const cursors = useRef(new Map<string, string | null>());
   const asked = useRef(new Set<string>());
-  /** Spans read to their first row, whose count no longer says what is missing. */
-  const wholeSpans = useRef(new Set<string>());
   const [version, setVersion] = useState(0);
   const [failure, setFailure] = useState<HistoryFailure>();
-  const [loadingEarlier, setLoadingEarlier] = useState(false);
-  const earlierFlight = useRef(false);
 
   const bump = useCallback(() => setVersion((value) => value + 1), []);
   const take = useCallback(
     (page: { readonly rows: readonly TimelineEventRow[] }) => {
-      for (const row of page.rows) rows.current.set(row.id, row);
+      for (const row of page.rows) rows.current.set(rowKey(row), row);
     },
     [],
   );
@@ -154,8 +176,8 @@ export function useTimelineHistory({
     if (scope === "node") {
       for (const span of timeline.spans)
         for (const event of span.events)
-          if (!rows.current.has(event.id))
-            rows.current.set(event.id, { ...event, span_id: span.id });
+          if (!rows.current.has(rowKey(event)))
+            rows.current.set(rowKey(event), { ...event, span_id: span.id });
     }
     const bySpan = new Map<string, TimelineEventRow[]>();
     for (const row of rows.current.values()) {
@@ -179,56 +201,23 @@ export function useTimelineHistory({
     };
   }, [timeline, version, scope]);
 
-  const cursor = nodeId ?? "";
-  // A span's count is of journal records, and two records can share one row id,
-  // so a span read to its start can hold fewer rows than it counts. What has been
-  // read to the start is held whole, and only the rest can still be unloaded.
+  const nodeLoad = useNodeStream({
+    client,
+    runId,
+    nodeId: scope === "node" ? nodeId : undefined,
+    opened: timeline !== undefined,
+    take,
+    bump,
+  });
+  // The plot's loading mark is the loader's own state: drawn over what is not held
+  // only while the node's read is in flight or queued, never once it is held or
+  // has failed.
+  const nodeLoading = nodeLoad?.state === "loading";
   const unheld = useMemo(() => {
-    void version;
-    if (scope !== "node" || cursors.current.get(cursor) === null) return [];
-    return unheldStretches(
-      (merged?.spans ?? []).filter((span) => !wholeSpans.current.has(span.id)),
-    );
-  }, [merged, scope, cursor, version]);
-  const canLoadEarlier =
-    scope === "node" && cursors.current.has(cursor)
-      ? cursors.current.get(cursor) !== null
-      : (timeline?.spans ?? []).some(
-          (span) =>
-            span.events_total !== undefined &&
-            span.events_total > span.events.length,
-        );
-
-  const readToStart = scope === "node" && cursors.current.get(cursor) === null;
-
-  const loadEarlier = useCallback(
-    (wide?: boolean) => {
-      if (earlierFlight.current || scope !== "node" || nodeId === undefined)
-        return;
-      if (cursors.current.get(cursor) === null) return;
-      earlierFlight.current = true;
-      setLoadingEarlier(true);
-      const next = cursors.current.get(cursor) ?? undefined;
-      client
-        .getTimelineEvents(runId, {
-          scope,
-          node: nodeId,
-          ...(wide === true ? { limit: WIDE_PAGE } : {}),
-          ...(next === undefined ? {} : { cursor: next }),
-        })
-        .then((page) => {
-          take(page);
-          cursors.current.set(cursor, page.next_cursor);
-          bump();
-        })
-        .catch((caught: unknown) => failed(caught, () => loadEarlier(wide)))
-        .finally(() => {
-          earlierFlight.current = false;
-          setLoadingEarlier(false);
-        });
-    },
-    [bump, client, cursor, failed, nodeId, runId, scope, take],
-  );
+    if (scope !== "node" || !nodeLoading) return [];
+    return unheldStretches(merged?.spans ?? []);
+  }, [merged, scope, nodeLoading]);
+  const shownFailure = nodeLoad?.failure ?? failure;
 
   const readAll = useCallback(
     async (
@@ -253,13 +242,6 @@ export function useTimelineHistory({
           const { span } = answered;
           if (query.span !== undefined && span !== undefined)
             spanFields.current.set(query.span, spanFieldsSchema.parse(span));
-          if (
-            answered.next_cursor === null &&
-            query.span !== undefined &&
-            query.from === undefined &&
-            query.to === undefined
-          )
-            wholeSpans.current.add(query.span);
           bump();
           if (answered.next_cursor === null) return;
           next = answered.next_cursor;
@@ -323,13 +305,123 @@ export function useTimelineHistory({
   return {
     ...(merged === undefined ? {} : { timeline: merged }),
     unheld,
-    canLoadEarlier,
-    readToStart,
-    loadingEarlier,
-    loadEarlier,
     loadSpan,
     loadRow,
     loadStretch,
-    ...(failure === undefined ? {} : { failure }),
+    ...(shownFailure === undefined ? {} : { failure: shownFailure }),
+    ...(nodeLoad === undefined ? {} : { nodeLoad: withoutFailure(nodeLoad) }),
+  };
+}
+
+/**
+ * A node's whole timeline, read through its stream once the view has opened and
+ * taken a line at a time, each line drawn as it arrives. A failed read is tried again
+ * after a growing wait, {@link NODE_READ_ATTEMPTS} times in all, and is then `failed`
+ * until `retry` starts it over.
+ */
+function useNodeStream({
+  client,
+  runId,
+  nodeId,
+  opened,
+  take,
+  bump,
+}: {
+  readonly client: TelemetryClient;
+  readonly runId: string;
+  readonly nodeId: string | undefined;
+  readonly opened: boolean;
+  readonly take: (page: { readonly rows: readonly TimelineEventRow[] }) => void;
+  readonly bump: () => void;
+}): (NodeLoad & { readonly failure?: HistoryFailure }) | undefined {
+  const [load, setLoad] = useState<
+    NodeLoad & { readonly node: string; readonly failure?: HistoryFailure }
+  >();
+  const [restarts, setRestarts] = useState(0);
+  useEffect(() => {
+    // Try again starts the read over by moving this.
+    void restarts;
+    if (nodeId === undefined || !opened) return;
+    const controller = new AbortController();
+    const delivered = new Set<string>();
+    let total: number | undefined;
+    const whole = () => total !== undefined && delivered.size >= total;
+    let partial = false;
+    let waiting: ReturnType<typeof setTimeout> | undefined;
+    const show = (state: NodeLoad["state"], failure?: HistoryFailure) =>
+      setLoad({
+        node: nodeId,
+        state,
+        loaded: delivered.size,
+        ...(total === undefined ? {} : { total }),
+        partial: state === "loading" && partial,
+        ...(failure === undefined ? {} : { failure }),
+      });
+    const partialAfter = setTimeout(() => {
+      partial = true;
+      setLoad((was) =>
+        was?.node === nodeId && was.state === "loading"
+          ? { ...was, partial: true }
+          : was,
+      );
+    }, PARTIAL_RENDER_DELAY_MS);
+    const read = async (attempt: number): Promise<void> => {
+      try {
+        for await (const line of client.streamNodeTimeline(
+          runId,
+          nodeId,
+          controller.signal,
+        )) {
+          if (line.kind === "start") total = line.total;
+          else {
+            take(line);
+            for (const row of line.rows) delivered.add(rowKey(row));
+            bump();
+          }
+          // Every record the start line counted has arrived: the node is held in
+          // the same update that draws its last rows, rather than in a second
+          // whole redraw once the end line is read.
+          if (whole()) clearTimeout(partialAfter);
+          show(whole() ? "held" : "loading");
+        }
+        clearTimeout(partialAfter);
+        show("held");
+        bump();
+      } catch (caught) {
+        // Nothing is missing once every counted record has arrived.
+        if (controller.signal.aborted || whole()) return;
+        if (attempt < NODE_READ_ATTEMPTS) {
+          waiting = setTimeout(
+            () => void read(attempt + 1),
+            nodeReadBackoffMs(attempt),
+          );
+          return;
+        }
+        clearTimeout(partialAfter);
+        show("failed", {
+          message: caught instanceof Error ? caught.message : String(caught),
+          retry: () => setRestarts((count) => count + 1),
+        });
+      }
+    };
+    show("loading");
+    void read(1);
+    return () => {
+      controller.abort();
+      clearTimeout(partialAfter);
+      if (waiting !== undefined) clearTimeout(waiting);
+    };
+  }, [client, runId, nodeId, opened, take, bump, restarts]);
+  if (nodeId === undefined || load?.node !== nodeId) return undefined;
+  return load;
+}
+
+/** A node's load as the view reads it, its failure shown as the history's own. */
+function withoutFailure(load: NodeLoad): NodeLoad {
+  return {
+    state: load.state,
+    loaded: load.loaded,
+    ...(load.total === undefined ? {} : { total: load.total }),
+    partial: load.partial,
   };
 }

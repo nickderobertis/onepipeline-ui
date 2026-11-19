@@ -45,6 +45,12 @@ export const API_V2_PATHS = {
    */
   timelineEvents: (runId: string) =>
     `/api/v2/runs/${encodeURIComponent(runId)}/timeline/events`,
+  /**
+   * Every row of one node's own timeline, as newline-delimited JSON: lines of
+   * {@link nodeStreamLineSchema}, read as they arrive.
+   */
+  timelineNodeStream: (runId: string) =>
+    `/api/v2/runs/${encodeURIComponent(runId)}/timeline/node-stream`,
   events: "/api/v2/events",
   /**
    * The post-launch verbs, wrapped: every route below `events` is a thin call
@@ -272,8 +278,13 @@ export const API_V2_FILTER_PROFILES = {
  * `awaiting`, the releases its settlement still awaits. Every field `26` served is
  * served with the same meaning; the literal moves because a client written against
  * `26` switches on a vocabulary that holds neither word.
+ *
+ * `30` is a turn's words in their place: a turn carries `agentEvents`, its
+ * `message` and `reasoning` events at the index its tools are numbered on, and
+ * `assistant` is the reply alone, `reasoning` `null`. The literal moves because a
+ * client written against `29` shows the reply and loses what was said before it.
  */
-export const TELEMETRY_SCHEMA_VERSION = 29;
+export const TELEMETRY_SCHEMA_VERSION = 30;
 
 /**
  * The timeline payload's own version, which moves independently.
@@ -1209,7 +1220,19 @@ export const conversationJudgeDecisionSchema = openObject({
  * when the history record carried them: a harness that measures no wall interval
  * records `startedAt`/`finishedAt` as null and only a `durationMs`.
  */
+/**
+ * One of the agent's own words in a turn (schema 30): a `message` it said or a
+ * `reasoning` it published, at the index its tool events are numbered on, so a
+ * reader places it among them.
+ */
+export const conversationAgentEventSchema = openObject({
+  index: z.number().int().nonnegative(),
+  kind: z.enum(["message", "reasoning"]),
+  text: z.string(),
+});
 export const conversationTurnSchema = openObject({
+  /** The turn's words in index order; absent on a turn that said nothing. */
+  agentEvents: z.array(conversationAgentEventSchema).optional(),
   assistant: z.string().nullable(),
   durationMs: usageValue.optional(),
   failureKind: z.string().nullable(),
@@ -1962,6 +1985,37 @@ export const timelineEventsPageSchema = openObject({
   observed_at: timestamp,
 });
 export type TimelineEventsPage = z.infer<typeof timelineEventsPageSchema>;
+
+/** The most rows one `rows` line of the node stream holds. */
+export const NODE_STREAM_ROWS_PER_LINE = 1_000;
+
+/**
+ * One line of `GET .../timeline/node-stream`'s `application/x-ndjson` body: a
+ * `start` counting every row and the server's time split, `rows` lines newest
+ * first, then `end` — or, once `start` is out, an `error` that ends the body.
+ *
+ * Mirrors the crate's `NodeStreamLine`, closed as it is (`deny_unknown_fields`);
+ * both read the golden `tests/fixtures/run-timeline-node-stream.json`, which the
+ * crate's journey pins from the real route.
+ */
+export const nodeStreamLineSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("start"),
+    total: counter,
+    split: z.strictObject({
+      heads_s: z.number().nonnegative(),
+      fetch_s: z.number().nonnegative(),
+      build_s: z.number().nonnegative(),
+    }),
+  }),
+  z.strictObject({
+    kind: z.literal("rows"),
+    rows: z.array(timelineEventRowSchema).max(NODE_STREAM_ROWS_PER_LINE),
+  }),
+  z.strictObject({ kind: z.literal("end") }),
+  z.strictObject({ kind: z.literal("error"), message: z.string() }),
+]);
+export type NodeStreamLine = z.infer<typeof nodeStreamLineSchema>;
 
 export const apiErrorSchema = openObject({
   error: openObject({ code: z.string(), message: z.string() }),

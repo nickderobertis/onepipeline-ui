@@ -48,10 +48,15 @@ budgets:
     threshold: 60
   - id: dag-ui-run-history-page-seconds
     description: >-
-      Time to show the next page of a run's history. Seconds from asking for
-      earlier rows on the busiest node's timeline, by the page's own control, to
-      those rows rendered, the slowest of a page before the complete read ends
-      and one after; detail reports each and Overall's span page. 850 warmed run
+      Time to read the next page of a run's history. Seconds from asking for a
+      page of the busiest node's earlier rows on the paged route
+      (timeline/events, limit 100), as the client requests it, to the page
+      read, the slowest of a page before the complete read ends and one after;
+      detail reports each and Overall's span page. Since manager ruling a11 this
+      is the paged route's own page: the view reads a node whole through its
+      stream (dag-ui-node-timeline-complete-seconds), so readings before it,
+      which timed the view's Load earlier control to rows rendered, are not the
+      same quantity. 850 warmed run
       directories, one tab on loopback, the opened run live at 116,000 records,
       100 MB, 2,000 streams, 9,900 spans, a 7 MB checkpoint and a 10,000-record
       node, and 11 other live runs at 50 records per minute. Basis estimate;
@@ -61,6 +66,31 @@ budgets:
     unit: seconds
     direction: max
     threshold: 1
+  - id: dag-ui-node-timeline-complete-seconds
+    description: >-
+      Busiest node's timeline fully loaded. Seconds from navigation start on the
+      busiest node's Timeline tab, with the bundle in the HTTP cache, on a fresh
+      release server, until the node panel's chart and event list each hold
+      every record of that node's complete timeline document and the node panel
+      shows no loading, partial or Load earlier mark; the median of 3 readings.
+      The run-level "rest of this run's history is still loading" banner is not
+      part of it: that is the run's own read, held by
+      dag-ui-run-rest-arrived-seconds. Detail reports each reading, time to
+      first render, time to the partial mark if shown, the node read's requests
+      and bytes decoded and on the wire, the server's time to first byte with
+      its heads, fetch and build split, and the records the chart and the list
+      held. The large-run fixture's busiest node at 10,000 records in the opened
+      live run of 116,000 records and 100 MB, over 850 run directories with 11
+      other live runs at 50 records per minute, one tab on loopback; sized
+      against this host's largest real nodes of 14,219, 10,639 and 9,882
+      records. Basis measured (spike-node-timeline-load: worst of 76 readings
+      6.16 s; 7 s the lowest whole second that held on every reading);
+      telemetry analysis only, approximately 2 seconds.
+    measure: reported
+    command: [node, ../read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency-large.json, --metric, node-timeline-complete]
+    unit: seconds
+    direction: max
+    threshold: 7
   - id: dag-ui-run-status-read-seconds
     description: >-
       Status read of one run through the API. Wall-clock seconds of GET

@@ -48,9 +48,17 @@ function watchFailures(page: Page): {
   const thrown: string[] = [];
   const unanswered: string[] = [];
   page.on("pageerror", (error) => thrown.push(error.message));
-  page.on("requestfailed", (request) =>
-    unanswered.push(`${request.url()}: ${request.failure()?.errorText}`),
-  );
+  page.on("requestfailed", (request) => {
+    const failure = request.failure()?.errorText;
+    // A node's whole-timeline read is cancelled by the view itself when the reader
+    // leaves the node before it lands: a read nobody waits for, not one unanswered.
+    if (
+      failure === "net::ERR_ABORTED" &&
+      new URL(request.url()).pathname.endsWith("/timeline/node-stream")
+    )
+      return;
+    unanswered.push(`${request.url()}: ${failure}`);
+  });
   page.on("response", (response) => {
     if (response.status() >= 400)
       unanswered.push(`${response.url()}: ${response.status()}`);

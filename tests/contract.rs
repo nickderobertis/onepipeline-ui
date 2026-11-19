@@ -45,6 +45,12 @@ const ROUTE_FIXTURES: [(&str, &str); routes::COUNT] = [
     (routes::RUN, "run.json"),
     (routes::RUN_TIMELINE, "run-timeline.json"),
     (routes::RUN_TIMELINE_EVENTS, "run-timeline-events.json"),
+    // Its body is lines rather than one document: the golden is those lines as a
+    // list, which `tests/e2e/live.rs` pins from the real route.
+    (
+        routes::RUN_TIMELINE_NODE_STREAM,
+        "run-timeline-node-stream.json",
+    ),
     (routes::RUN_CONVERSATION, "run-conversation.json"),
     (routes::RUN_ARTIFACT, "run-artifact.json"),
     (routes::EVENTS, "events.json"),
@@ -1081,6 +1087,30 @@ fn the_health_body_round_trips_and_names_the_release_this_crate_links() {
     assert_eq!(Release::linked().as_str(), onepipeline::VERSION);
 }
 
+/// The node stream's golden is a list of [`NodeStreamLine`]s, each re-serialized to
+/// itself: the Rust half of the drift gate whose other half is
+/// `packages/dag-model`'s schema reading the same file.
+#[test]
+fn the_node_stream_golden_is_the_contracts_lines() {
+    let raw = read_fixture("run-timeline-node-stream.json");
+    let lines: Vec<Value> = serde_json::from_str(&raw).expect("a list of lines");
+    let typed: Vec<onepipeline_ui::contract::NodeStreamLine> = lines
+        .iter()
+        .map(|line| serde_json::from_value(line.clone()).expect("a line of the contract's"))
+        .collect();
+    assert!(matches!(
+        typed.first(),
+        Some(onepipeline_ui::contract::NodeStreamLine::Start { .. })
+    ));
+    assert_eq!(
+        typed.last(),
+        Some(&onepipeline_ui::contract::NodeStreamLine::End)
+    );
+    for (line, value) in typed.iter().zip(&lines) {
+        assert_eq!(&serde_json::to_value(line).expect("serialize"), value);
+    }
+}
+
 #[test]
 fn every_enveloped_fixture_round_trips_byte_for_byte() {
     for (route, fixture) in ROUTE_FIXTURES {
@@ -1089,13 +1119,15 @@ fn every_enveloped_fixture_round_trips_byte_for_byte() {
             routes::EVENTS,
             routes::SUBSCRIPTIONS,
             routes::SUBSCRIPTION,
+            routes::RUN_TIMELINE_NODE_STREAM,
         ]
         .contains(&route)
             || route.starts_with(routes::HUMAN_ITEMS)
         {
             // Not enveloped, and enveloped one level down, and a list of frames;
             // the human-item routes serve the engine's own records, which
-            // `every_human_item_fixture_is_the_engines_record` reconciles.
+            // `every_human_item_fixture_is_the_engines_record` reconciles; the
+            // node stream's lines `the_node_stream_golden_is_the_contracts_lines` reads.
             continue;
         }
         let raw = read_fixture(fixture);
@@ -1151,7 +1183,7 @@ fn the_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent()
 #[test]
 fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The contract names the version in prose; the constant is what is served.
-    assert_eq!(TELEMETRY_SCHEMA_VERSION, 29);
+    assert_eq!(TELEMETRY_SCHEMA_VERSION, 30);
     assert!(contract_text().contains(&format!("schema {TELEMETRY_SCHEMA_VERSION}")));
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
@@ -1375,6 +1407,30 @@ fn the_browser_clients_node_window_is_the_servers() {
         source.contains(&declaration),
         "{} does not declare `{declaration}`; the client's node window has drifted from \
          this crate's",
+        path.display()
+    );
+}
+
+/// The node stream's rows-per-line cap is declared here and in the browser client's
+/// model, whose `nodeStreamLineSchema` refuses a longer line; the two are one number.
+#[test]
+fn the_browser_clients_node_stream_line_cap_is_the_servers() {
+    use onepipeline_ui::contract::NODE_STREAM_ROWS_PER_LINE;
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/dag-model/src/index.ts");
+    let source = fs::read_to_string(&path).expect("the client's model");
+    let spelled = NODE_STREAM_ROWS_PER_LINE
+        .to_string()
+        .as_bytes()
+        .rchunks(3)
+        .rev()
+        .map(|digits| std::str::from_utf8(digits).expect("ascii digits"))
+        .collect::<Vec<_>>()
+        .join("_");
+    let declaration = format!("export const NODE_STREAM_ROWS_PER_LINE = {spelled};");
+    assert!(
+        source.contains(&declaration),
+        "{} does not declare `{declaration}`; the client's node stream line cap has \
+         drifted from this crate's",
         path.display()
     );
 }

@@ -37,6 +37,7 @@ import {
   type Request,
   test,
 } from "@playwright/test";
+import { axisTicks, CLOCK, lines, OFFSET, readAxis } from "./axis-readings";
 import { fixture, runs } from "./fixture-facts";
 import { SERVED_FROM_NAME } from "./fixtures/facts-file";
 import {
@@ -781,6 +782,10 @@ test("restores a bookmarked moment inside a session from the address alone", asy
   );
 });
 
+/** A timeline region's legend, whose items name its lanes. */
+const legendOf = (region: Locator): Locator =>
+  region.getByRole("list", { name: "Timeline legend" });
+
 test("keeps timeline, transcript, and nested judge conversation in time sync", async ({
   page,
 }) => {
@@ -788,10 +793,9 @@ test("keeps timeline, transcript, and nested judge conversation in time sync", a
   const transcript = page.getByRole("region", { name: "Node transcript" });
   // A marker at every round step across the plot, each naming the wall clock
   // and the elapsed time the reader tracks lanes against.
-  const axis = timeline(page).getByTestId("timeline-axis");
-  await expect(axis.locator("span").nth(1)).toBeVisible();
-  for (const tick of await axis.locator("span").allTextContents()) {
-    expect(tick).toMatch(/\d{2}:\d{2}:\d{2}.*[+−]\d/u);
+  for (const tick of await readAxis(timeline(page))) {
+    expect(tick.clock).toMatch(CLOCK);
+    expect(tick.offset).toMatch(OFFSET);
   }
 
   // Scrolled the way a reader scrolls it — a wheel over the transcript — because the
@@ -2999,7 +3003,8 @@ test("draws one lane per member word the run's own graphs declared, as served", 
   await expect(page.locator(".graph-row-name").first()).toHaveText("Run-level");
   // The observers' lanes on the engine's row: the two words, in served order,
   // each exactly once, and the row's own silence after them.
-  await expect(runLevel.getByRole("listitem")).toHaveText([
+  // The legend's items alone: the axis lists its ticks as items too.
+  await expect(legendOf(runLevel).getByRole("listitem")).toHaveText([
     ...observers,
     "Idle",
   ]);
@@ -3010,14 +3015,14 @@ test("draws one lane per member word the run's own graphs declared, as served", 
   // match would read both rows as one.
   const [both, again] = fixture().named.nodes;
   await expect(
-    page
-      .getByRole("region", { name: `${both} timeline`, exact: true })
-      .getByRole("listitem"),
+    legendOf(
+      page.getByRole("region", { name: `${both} timeline`, exact: true }),
+    ).getByRole("listitem"),
   ).toHaveText([...members, "Idle"]);
   await expect(
-    page
-      .getByRole("region", { name: `${again} timeline`, exact: true })
-      .getByRole("listitem"),
+    legendOf(
+      page.getByRole("region", { name: `${again} timeline`, exact: true }),
+    ).getByRole("listitem"),
   ).toHaveText([served.at(-1) ?? "", "Idle"]);
   // Opened, every row draws those same lanes, and a segment is named by them.
   await runLevel.getByRole("button", { name: "Expand timeline" }).click();
@@ -3663,12 +3668,12 @@ test("keeps the timeline's clock readable when its lanes outgrow the view", asyn
     // scrolled the region also zoomed the plot, a time is on screen — a marker
     // naming the wall clock and the elapsed time the reader tracks lanes
     // against.
-    const ticks = timeline(page).getByText(
-      /^\d{2}:\d{2}:\d{2}(?: [AP]M)? \+\d+(?:\.\d+)? (?:ms|s|min)$/,
-    );
+    const ticks = axisTicks(timeline(page));
     await expect(ticks.first()).toBeInViewport();
-    for (const tick of await ticks.allTextContents()) {
-      expect(tick).toMatch(/\d{2}:\d{2}:\d{2}.*[+−]\d/u);
+    for (const tick of await ticks.all()) {
+      const [clock, offset] = await lines(tick);
+      expect(clock).toMatch(CLOCK);
+      expect(offset).toMatch(OFFSET);
     }
   }
 });
@@ -4022,24 +4027,41 @@ test("shows what a worker said and reasoned as its words, never as tool calls", 
     .filter({ hasText: said });
   await expect(turn).toHaveCount(1);
 
+  // The thought, the call and the remark — the last three things the turn did —
+  // in the order they happened, each in its place among the turn's activity.
+  const activity = turn.getByRole("region", { name: "Agent activity" });
+  // One locator over the three kinds, so they are read in the order drawn.
+  const entries = activity
+    .getByRole("group", { name: "Agent message" })
+    .or(activity.getByRole("button", { name: "Reasoning" }))
+    .or(activity.getByRole("button", { name: / tool details$/ }));
+  await expect
+    .poll(async () => {
+      const order: string[] = [];
+      for (const entry of await entries.all())
+        order.push(
+          (await entry.getAttribute("aria-label")) ??
+            (await entry.innerText()).trim(),
+        );
+      return order.slice(-3);
+    })
+    .toEqual(["Reasoning", "Bash tool details", "Agent message"]);
+
   // The reasoning is the turn's own, behind the disclosure a reader opens.
-  await turn.getByRole("button", { name: "Reasoning" }).click();
-  await expect(turn.getByText(reasoned)).toBeVisible();
+  await activity.getByRole("button", { name: "Reasoning" }).click();
+  await expect(activity.getByText(reasoned)).toBeVisible();
+  await expect(
+    activity.getByRole("group", { name: "Agent message" }),
+  ).toContainText(said);
 
   // The call is shown as it always was, and the words are none of the calls.
-  const calls = turn.getByRole("region", { name: "Tool calls" });
-  await expect(
-    calls
-      .getByRole("button", { name: "Bash tool details" })
-      .filter({ hasText: "just gate --dashboard" }),
-  ).toHaveCount(1);
-  await expect(
-    calls
-      .getByRole("button", { name: /tool details$/ })
-      .filter({ hasNotText: "Bash" }),
-  ).toHaveCount(0);
-  await expect(calls).not.toContainText(said);
-  await expect(calls).not.toContainText(reasoned);
+  const calls = activity.getByRole("button", { name: /tool details$/ });
+  await expect(calls.filter({ hasText: "just gate --dashboard" })).toHaveCount(
+    1,
+  );
+  await expect(calls.filter({ hasNotText: "Bash" })).toHaveCount(0);
+  await expect(calls.filter({ hasText: said })).toHaveCount(0);
+  await expect(calls.filter({ hasText: reasoned })).toHaveCount(0);
 });
 
 /**
