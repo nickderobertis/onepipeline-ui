@@ -867,3 +867,13 @@ double now names, and whose report `schema_version`, 0.15, the browser tier's
 checked-in held-turn double now carries. The move is announced as a break: the re-exported
 engine types change. Its onemessagebus, onetaskgraph and onevcs requirements are
 the ones 0.113.5 resolved.
+
+0.115.0 is the engine that links onetaskgraph 0.14.17, whose plan-store project
+graph names each node's `location`: the `{"path": …}` or `{"url": …}` its source
+reports, so a host can link a planned task and its dependencies to their issues
+from the store's own output. This crate moves to it, and to that store release,
+so that a host can adopt the engine together with a read API linking the same
+one; it serves no project graph, so nothing it serves changes. The move is
+announced as a break: the re-exported engine types change. Its oneagentgraph,
+onejudge, oneharness-core, onemessagebus and onevcs requirements are the ones
+0.114.0 resolved.
