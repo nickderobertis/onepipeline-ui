@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.84.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.84.0...v0.84.1) - 2026-11-19
+
+### Added
+
+- *(dag-ui)* node timelines that always finish loading, and transcripts in recorded order ([#832](https://github.com/nickderobertis/onepipeline-ui/pull/832))
+
 ## [0.84.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.83.6...v0.84.0) - 2026-11-18
 
 ### Fixed
