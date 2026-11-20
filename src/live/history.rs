@@ -1,5 +1,7 @@
 //! `GET /api/v2/runs/{run}/timeline/events`: the rows a span's list leaves out; and
-//! `GET /api/v2/runs/{run}/timeline/node-stream`: every row of one node's timeline.
+//! `GET /api/v2/runs/{run}/timeline/node-stream`: every row of one node's timeline;
+//! and `GET /api/v2/runs/{run}/artifacts/{id}`, answered from a run's live reading
+//! where the server holds one that names the artifact.
 //!
 //! Before a run's complete read ends this reads one share of its journal alone
 //! and never waits on that read; after, it reads a share's timeline kept inside
@@ -11,14 +13,41 @@ use serde_json::{json, Map, Value};
 
 use super::{agents_of, lock, Held, Hub, LiveRun};
 use crate::contract::{
-    Envelope, NodeId, NodeStreamSplit, PageCursor, PageOwner, RunId, TimelineEventsQuery,
+    ArtifactId, Envelope, NodeId, NodeStreamSplit, PageCursor, PageOwner, RunId,
+    TimelineEventsQuery,
 };
+use crate::api::RunApi as _;
 use crate::error::ApiError;
 use crate::payload::live::{Indexed, LiveTimeline, TimelineScope};
 use crate::payload::{self, ItemsWindow};
 use crate::store::RunStore;
 
 impl Hub {
+    /// One recorded artifact, from the reading a live subscription already holds of
+    /// its run where that reading names it, and otherwise from a reading of the run
+    /// made for this request.
+    ///
+    /// A person opens a refused edit's complete refusal on a run they are watching,
+    /// so the record naming it is already in the server's reading of that run — a
+    /// first screen's included, which holds every record but heartbeats and turn
+    /// activity — and reading a long run's whole journal again for one kept file is
+    /// what that person would wait on. Resolution is the same either way.
+    ///
+    /// # Errors
+    ///
+    /// `404` for a run, or an artifact the run does not hold.
+    pub fn artifact(&self, run: &RunId, id: &ArtifactId) -> Result<Envelope<Value>, ApiError> {
+        let shared = &self.0;
+        let live = lock(&shared.runs).get(run).cloned();
+        if let Some(live) = live {
+            let held = payload::artifact(&lock(&live).view, id);
+            if let Some(held) = held {
+                return Ok(RunStore::envelope(held));
+            }
+        }
+        shared.store.artifact(run, id)
+    }
+
     /// One page of a run's rows.
     ///
     /// # Errors
