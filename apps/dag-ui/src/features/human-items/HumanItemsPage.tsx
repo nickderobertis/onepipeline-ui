@@ -48,7 +48,7 @@ import {
   stateLabel,
 } from "./human-items-model";
 import { SendBar } from "./SendBar";
-import { useGroupBy } from "./useGroupBy";
+import { useListOrder } from "./useListOrder";
 import {
   type HumanItemWrite,
   useHumanItems,
@@ -110,7 +110,7 @@ export function HumanItemsPage({
     choice.state,
     JSON.stringify(choice),
   );
-  const { groupBy, setGroupBy } = useGroupBy();
+  const { groupBy, setGroupBy, sort, setSort } = useListOrder();
   const [room, setRoom] = useState(0);
   const [sendRoom, setSendRoom] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);

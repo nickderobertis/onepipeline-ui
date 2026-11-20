@@ -10,8 +10,26 @@ import type {
   HumanItemsView,
   LiveHumanItems,
 } from "../../lib/live-human-items";
-import { type FilterChoice, NO_FILTER, toFilter } from "./human-items-model";
+import {
+  type FilterChoice,
+  filterChoiceOf,
+  NO_FILTER,
+  toFilter,
+} from "./human-items-model";
 import { useAnswerDrafts } from "./useAnswerDrafts";
+import { useRemembered } from "./useRemembered";
+
+/** Where this browser remembers the filters Action items was last read under. */
+export const FILTERS_KEY = "onepipeline-ui.human-items.filters";
+
+function rememberedFilters(stored: string): FilterChoice | undefined {
+  try {
+    return filterChoiceOf(JSON.parse(stored));
+  } catch {
+    // Text that is not JSON is no choice made.
+    return undefined;
+  }
+}
 
 /** A write a reader can make on an item, as the route names it. */
 export type HumanItemWrite =
@@ -65,9 +83,17 @@ interface Hidden {
   readonly at: number;
 }
 
-/** What the page holds apart from what the server pushes: its own selection. */
+/**
+ * What the page holds apart from what the server pushes: its own selection, and
+ * the filters, which this browser remembers across visits and reloads.
+ */
 export function useHumanItemsSelection(active: boolean) {
-  const [choice, setChoice] = useState<FilterChoice>(NO_FILTER);
+  const [choice, setChoice] = useRemembered<FilterChoice>(
+    FILTERS_KEY,
+    rememberedFilters,
+    NO_FILTER,
+    JSON.stringify,
+  );
   const [selectedId, setSelectedId] = useState<string>();
   const filterKey = JSON.stringify(toFilter(choice));
   // biome-ignore lint/correctness/useExhaustiveDependencies: `filterKey` is the filter's value, so a choice rebuilt with the same selectors is not a new subscription.
@@ -80,11 +106,9 @@ export function useHumanItemsSelection(active: boolean) {
       ...(selectedId === undefined ? {} : { item: selectedId }),
     };
   }, [active, filterKey, selectedId]);
-  // Leaving the page leaves its filters and selection behind with it.
+  // Leaving the page leaves its selection behind; the filters are remembered.
   useEffect(() => {
-    if (active) return;
-    setChoice(NO_FILTER);
-    setSelectedId(undefined);
+    if (!active) setSelectedId(undefined);
   }, [active]);
   return { choice, setChoice, selectedId, setSelectedId, view };
 }

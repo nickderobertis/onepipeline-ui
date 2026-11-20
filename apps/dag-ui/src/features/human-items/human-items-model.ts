@@ -291,6 +291,60 @@ export const GROUP_OPTIONS: readonly {
   { value: "none", label: "None" },
 ];
 
+/** How a heading orders its items: the engine's order, or by when each was raised. */
+export const SORT_CHOICES = ["default", "newest", "oldest"] as const;
+export type SortOrder = (typeof SORT_CHOICES)[number];
+/** What the list is sorted by until a reader chooses otherwise. */
+export const DEFAULT_SORT: SortOrder = "default";
+
+export const SORT_OPTIONS: readonly {
+  readonly value: SortOrder;
+  readonly label: string;
+}[] = [
+  { value: "default", label: "Default" },
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+];
+
+/**
+ * `items` in `order`: the engine's own for Default, else by `created_at`, newest
+ * or oldest first. The sort is stable, so items raised in one instant keep the
+ * engine's order between them.
+ */
+export function sortItems(
+  items: readonly HumanItemView[],
+  order: SortOrder,
+): readonly HumanItemView[] {
+  if (order === "default") return items;
+  const sign = order === "newest" ? -1 : 1;
+  return items
+    .map((view) => ({ view, at: Date.parse(view.item.created_at) }))
+    .sort((a, b) => sign * (a.at - b.at))
+    .map(({ view }) => view);
+}
+
+/**
+ * A filter choice this browser remembered, or `undefined` when what it holds is
+ * not one: every field is held to the vocabulary its control offers.
+ */
+export function filterChoiceOf(remembered: unknown): FilterChoice | undefined {
+  if (typeof remembered !== "object" || remembered === null) return undefined;
+  const field = (key: string): string => {
+    const value: unknown = Reflect.get(remembered, key);
+    return typeof value === "string" ? value : "";
+  };
+  const state = oneOf(STATE_CHOICES, field("state"));
+  if (state === undefined) return undefined;
+  return {
+    kind: oneOf(KIND_CHOICES, field("kind")) ?? "",
+    blocking: oneOf(BLOCKING_CHOICES, field("blocking")) ?? "",
+    priority: oneOf(PRIORITY_CHOICES, field("priority")) ?? "",
+    state,
+    source: oneOf(SOURCE_CHOICES, field("source")) ?? "",
+    sourceId: field("sourceId"),
+  };
+}
+
 /** One heading's items, in the engine's order. */
 export interface ItemGroup {
   readonly key: string;
@@ -332,13 +386,15 @@ function groupOf(
 /**
  * `items` under one heading per value of `by`: priority Critical to Low, tasks
  * before questions, blocking before not, and sources in the order the engine
- * first lists them. Within a heading the engine's own order stands.
+ * first lists them. Within a heading the items stand in `order`; the headings'
+ * own order never depends on it.
  */
 export function groupItems(
   items: readonly HumanItemView[],
   by: GroupBy,
+  order: SortOrder = DEFAULT_SORT,
 ): ItemGroup[] {
-  if (by === "none") return [{ key: "all", items }];
+  if (by === "none") return [{ key: "all", items: sortItems(items, order) }];
   const groups = new Map<
     string,
     { label: string; rank: number; first: number; items: HumanItemView[] }
@@ -354,6 +410,6 @@ export function groupItems(
     .map(([key, { label, items: grouped }]) => ({
       key,
       label,
-      items: grouped,
+      items: sortItems(grouped, order),
     }));
 }
