@@ -217,7 +217,8 @@ fn from_selected(
 ) -> Result<Value, ApiError> {
     check_node(run, &query.owner)?;
     let filter = RunStore::resolve(&run.view, query.filter.as_ref())?;
-    if matches!(query.owner, PageOwner::Node(_)) && run.agents.is_none() {
+    // Every scope lays the run's harness sessions, as the timeline it pages does.
+    if run.agents.is_none() {
         run.agents = agents_of(&run.view.paths);
     }
     let held = match &query.owner {
@@ -295,7 +296,7 @@ fn from_kept(
     let at = match at {
         Some(at) => at,
         None => {
-            if matches!(query.owner, PageOwner::Node(_)) && run.agents.is_none() {
+            if run.agents.is_none() {
                 run.agents = agents_of(&run.view.paths);
             }
             let held = match &query.owner {

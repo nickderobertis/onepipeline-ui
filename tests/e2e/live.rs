@@ -4640,3 +4640,92 @@ fn the_node_stream_refuses_what_it_cannot_answer() {
     assert_eq!(missing.status, 404, "{}", missing.body);
     assert_eq!(missing.json()["error"]["code"], "run_not_found");
 }
+
+/// Every span a drawn timeline carries — the run's and each node's, an observer's
+/// oneharness session at run level and a node's sessions under its dispatch among
+/// them — answers its history page at the scope its view asks with, before the run's
+/// complete read and once it is kept: the run timeline's at `scope=run`, with `node`
+/// where the span is a node's, and a node timeline's at `scope=node`. A harness
+/// session a node timeline draws answers at `scope=run&node=` too, as the run
+/// timeline draws it under that node. A harness session has no rows of its own, so
+/// its page holds none; a page naming a span no drawn timeline carries is still
+/// refused.
+#[test]
+fn every_span_a_drawn_timeline_carries_answers_a_history_page_harness_sessions_among_them() {
+    // The fixture run's sessions as the engine composes their labels: an observer
+    // graph's, with no node label, and two of one node's worker.
+    const RUN: &str = fixture_run::RUN_ID;
+    let live = Live::start(|root| {
+        fixture_run::write(root, RUN);
+        fixture_run::point_sessions(root, RUN);
+    });
+    let address = live.address();
+    let pages = |phase: &str| {
+        let run_document = fresh(address, &format!("/api/v2/runs/{RUN}/timeline?scope=run"));
+        let mut drawn: Vec<(Option<String>, Value)> = vec![(None, run_document)];
+        for node in plan_nodes(&live.serving.runs_root(), RUN) {
+            let document = fresh(
+                address,
+                &format!("/api/v2/runs/{RUN}/timeline?scope=node&node={node}"),
+            );
+            drawn.push((Some(node), document));
+        }
+        let mut harness = 0;
+        let mut observer = 0;
+        for (timeline, document) in &drawn {
+            for span in document["spans"].as_array().expect("spans") {
+                let id = span["id"].as_str().expect("an id");
+                let harnessed = span.get("harness_scope").is_some();
+                let mut queries = Vec::new();
+                match (timeline, span["node_id"].as_str()) {
+                    (Some(node), _) => {
+                        queries.push(format!("scope=node&node={node}&span={id}"));
+                        if harnessed {
+                            queries.push(format!("scope=run&node={node}&span={id}"));
+                        }
+                    }
+                    (None, Some(node)) => queries.push(format!("scope=run&node={node}&span={id}")),
+                    (None, None) => queries.push(format!("scope=run&span={id}")),
+                }
+                for query in queries {
+                    let path = format!("/api/v2/runs/{RUN}/timeline/events?{query}&limit=500");
+                    let answer = http::get(address, &path);
+                    assert_eq!(
+                        answer.status,
+                        200,
+                        "{phase}: the {} timeline draws {id}, and {path} answered {}",
+                        timeline.as_deref().unwrap_or("run"),
+                        answer.body
+                    );
+                    let page = answer.json();
+                    assert_eq!(page["span"]["id"], id, "{phase}: {path}");
+                    if harnessed {
+                        harness += 1;
+                        if span["harness_scope"] == "observer" {
+                            observer += 1;
+                        }
+                        assert_eq!(page["rows"], json!([]), "{phase}: {path}");
+                        assert_eq!(page["total"], 0, "{phase}: {path}");
+                    }
+                }
+            }
+        }
+        assert!(
+            observer > 0,
+            "{phase}: no drawn timeline carried the observer"
+        );
+        assert!(harness > observer, "{phase}: no node's session was drawn");
+    };
+    pages("with no view open");
+    let _tab = Tab::open(
+        &live,
+        &json!({ "type": "timeline", "run_id": RUN, "scope": "run" }),
+    );
+    pages("once the run is kept");
+    let refused = http::get(
+        address,
+        &format!("/api/v2/runs/{RUN}/timeline/events?scope=run&span=harness.no-such-session"),
+    );
+    assert_eq!(refused.status, 404, "{}", refused.body);
+    assert_eq!(refused.json()["error"]["code"], "span_not_found");
+}
