@@ -522,10 +522,12 @@ const FIELD_VIEW = {
       '[aria-label="Timeline item detail"] [aria-label="Recorded fields"]',
   },
   recordedHeading: { text: "Recorded fields" },
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] these are read by `dom-watch`'s in-page MutationObserver, installed before the click so a single painted frame is caught, where only `document.querySelector` exists and no Playwright role query can run; the field/value view's generic reference line and its `dl` of values have no role or accessible name to query by, and the criterion is that exactly these never appear in a conversation item's panel.
   referenceLine: {
     selector: '[aria-label="Timeline item detail"] .detail-reference-kind',
   },
   facts: { selector: '[aria-label="Timeline item detail"] dl.facts' },
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
 } as const;
 
 const CONVERSATIONS = "**/api/v2/runs/*/conversations/**";
