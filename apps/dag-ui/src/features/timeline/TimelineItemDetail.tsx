@@ -116,9 +116,13 @@ export function TimelineItemDetail({
                 row={row}
                 transcript={transcript}
               />
-              {row.rowKind === "event" && (
-                <RecordContent client={client} event={row.event} />
-              )}
+              {/* One view per item, decided from what the row carries: a
+                  conversation item is read in the conversation alone, before,
+                  during and after its transcript loads. */}
+              {row.rowKind === "event" &&
+                !opensConversation(row, reference) && (
+                  <RecordContent client={client} event={row.event} />
+                )}
             </>
           )}
         </div>
@@ -163,15 +167,8 @@ function Body({
   const surface = surfaceOf(row);
   if (surface !== undefined)
     return <SurfaceRecord row={row} surface={surface} />;
-  if (reference?.kind === "conversation")
-    return (
-      <>
-        {row.rowKind === "event" && (
-          <Recorded row={row} reference={reference} />
-        )}
-        <Session row={row} transcript={transcript} />
-      </>
-    );
+  if (opensConversation(row, reference))
+    return <Session row={row} transcript={transcript} />;
   if (isVerification(row))
     return (
       <Verification
@@ -340,7 +337,16 @@ function Session({
         <TriangleAlert />
         <AlertTitle>Transcript unavailable</AlertTitle>
         <AlertDescription>
-          {transcript.error?.message ?? "The server recorded no transcript."}
+          <p>
+            {transcript.error?.message ?? "The server recorded no transcript."}
+          </p>
+          {/* What the record itself holds, so nothing is lost while its
+              conversation cannot be read — inside this state, never as a
+              second view beside it. */}
+          {row.rowKind === "event" &&
+            Object.keys(row.event.fields ?? {}).length > 0 && (
+              <FieldList value={row.event.fields ?? {}} />
+            )}
         </AlertDescription>
       </Alert>
     );
@@ -940,6 +946,23 @@ function releaseOf(row: TimelineRow): TimelineRelease | undefined {
  */
 function surfaceOf(row: TimelineRow): TimelineSurface | undefined {
   return row.rowKind === "event" ? row.event.surface : undefined;
+}
+
+/**
+ * Whether `row` opens in the conversation view alone: its reference is a
+ * conversation, and it is none of the records read as what they say they are
+ * before any reference.
+ */
+function opensConversation(
+  row: TimelineRow,
+  reference: TimelineReference | undefined,
+): boolean {
+  return (
+    reference?.kind === "conversation" &&
+    redirectionOf(row) === undefined &&
+    releaseOf(row) === undefined &&
+    surfaceOf(row) === undefined
+  );
 }
 
 function referenceOf(row: TimelineRow): TimelineReference | undefined {

@@ -7,6 +7,7 @@ import {
 } from "@onepipeline-ui/dag-model";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
+import { seen, watch } from "./dom-watch";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 import { appendRecords } from "./load/journal";
 
@@ -45,6 +46,7 @@ const factsSchema = z.object({
     narratedLive: z.string(),
   }),
   narratedOrder: z.array(z.string()),
+  usageLimit: z.string(),
 });
 type Facts = z.infer<typeof factsSchema>;
 
@@ -508,3 +510,142 @@ for (const [reading, node, settled] of [
     else await expect(activity).toContainText(reply);
   });
 }
+
+/**
+ * What the field/value view draws, any moment of which in a conversation item's
+ * panel is the second view this panel must never paint. Class and attribute
+ * selectors because they name the view's own parts, none of which has a role.
+ */
+const FIELD_VIEW = {
+  recordedRegion: {
+    selector:
+      '[aria-label="Timeline item detail"] [aria-label="Recorded fields"]',
+  },
+  recordedHeading: { text: "Recorded fields" },
+  referenceLine: {
+    selector: '[aria-label="Timeline item detail"] .detail-reference-kind',
+  },
+  facts: { selector: '[aria-label="Timeline item detail"] dl.facts' },
+} as const;
+
+const CONVERSATIONS = "**/api/v2/runs/*/conversations/**";
+
+test("a conversation item opens in the conversation view alone, before, while and after its transcript loads", async ({
+  page,
+}) => {
+  await watch(page, FIELD_VIEW);
+  await openNode(page, facts.run, "narrated");
+  // The transcript's answer held back at the network boundary, then let through
+  // unchanged: the only way to look at the panel while it loads.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await page.route(CONVERSATIONS, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await openRow(page, new RegExp(facts.usageLimit.slice(0, 25)));
+  await expect(detail(page).getByText("Loading transcript…")).toBeVisible();
+  expect(await seen(page), "the field/value view while loading").toEqual({
+    recordedRegion: false,
+    recordedHeading: false,
+    referenceLine: false,
+    facts: false,
+  });
+  release();
+
+  // The package's own conversation view, as an observer's dispatch panel draws it.
+  const turn = detail(page).getByRole("article", { name: /^Turn .* from / });
+  await expect(turn).toBeVisible();
+  await expect(turn).toContainText(facts.usageLimit);
+  await expect(
+    turn.getByRole("button", { name: /^Collapse turn / }),
+  ).toHaveAttribute("aria-expanded", "true");
+  // llmlint: ignore[e2e_uses_accessible_selectors] the package marks who speaks only by this attribute, and the criterion is that its own blocks are drawn: a re-styled list would carry no such marks.
+  const you = turn.locator('[data-message-author="user"]');
+  await expect(you).toContainText("You");
+  // llmlint: ignore[e2e_uses_accessible_selectors] the same attribute, for the agent's block, and the package's own avatar and chip slots, none of which has a role.
+  const agent = turn.locator('[data-message-author="assistant"]');
+  await expect(agent.locator('[data-slot="avatar"]').first()).toBeVisible();
+  await expect(agent.locator('[data-slot="badge"]').first()).toBeVisible();
+  await expect(
+    turn.getByRole("button", { name: / tool details$/ }).first(),
+  ).toBeVisible();
+  await expect(turn.getByLabel("Usage").first()).toBeVisible();
+  expect(await seen(page), "the field/value view at any moment").toEqual({
+    recordedRegion: false,
+    recordedHeading: false,
+    referenceLine: false,
+    facts: false,
+  });
+  await page.unroute(CONVERSATIONS);
+
+  // On a phone, with the turn scrolled under the conversation's pinned header, the
+  // header stacks beneath the panel's own controls: Close is still what a tap hits.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await turn.hover();
+  await page.mouse.wheel(0, 600);
+  await page.getByRole("button", { name: "Close detail" }).click({
+    timeout: 10_000,
+  });
+  await expect(detail(page)).toHaveCount(0);
+});
+
+test("a conversation item whose transcript cannot be served says so with its recorded values, and anything else opens its fields", async ({
+  page,
+}) => {
+  const timeline = runTimelineSchema.parse(
+    await (
+      await page.request.get(
+        `${server.origin}/api/v2/runs/${facts.run}/timeline?scope=node&node=narrated`,
+      )
+    ).json(),
+  );
+  const item = timeline.spans
+    .flatMap((span) => span.events)
+    .find((event) => event.description === facts.usageLimit);
+  if (item?.fields === undefined)
+    throw new Error("the corpus has no such item");
+  const transcript = z
+    .object({ history_id: z.string(), history_session: z.string() })
+    .parse(item.fields.transcript);
+
+  // A transcript the server cannot answer, refused at the network boundary.
+  await page.route(CONVERSATIONS, (route) =>
+    route.fulfill({
+      status: 503,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: { code: "unavailable", message: "the history store is offline" },
+      }),
+    }),
+  );
+  await openNode(page, facts.run, "narrated");
+  await openRow(page, new RegExp(facts.usageLimit.slice(0, 25)));
+  const failed = detail(page)
+    .getByRole("alert")
+    .filter({ hasText: "Transcript unavailable" });
+  await expect(failed).toBeVisible();
+  for (const value of [
+    transcript.history_id,
+    transcript.history_session,
+    "message",
+  ])
+    await expect(failed).toContainText(value);
+  await expect(
+    detail(page).getByRole("region", { name: "Recorded fields" }),
+  ).toHaveCount(0);
+  await expect(detail(page).getByText("Recorded fields")).toHaveCount(0);
+  await page.unroute(CONVERSATIONS);
+
+  // A record that is no conversation opens in the field/value view alone.
+  await page.keyboard.press("Escape");
+  await openRow(page, "node-settled");
+  await expect(
+    detail(page).getByRole("region", { name: "Recorded fields" }),
+  ).toBeVisible();
+  await expect(
+    detail(page).getByRole("article", { name: /^Turn / }),
+  ).toHaveCount(0);
+});

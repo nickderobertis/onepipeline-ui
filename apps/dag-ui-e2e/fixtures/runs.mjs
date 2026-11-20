@@ -5165,6 +5165,9 @@ function writeSession(store, { session, historyId, started, closed, prompt }) {
   return path;
 }
 
+/** A narrating worker's message, at index 8 of its recorded transcript. */
+const USAGE_LIMIT_WORDS = "You've hit your weekly limit · resets Mon 9:00 AM";
+
 /**
  * What a narrating worker's invocation recorded, in oneharness's own event shape:
  * the recorded judge turn's three calls, with the agent's own words between them —
@@ -5185,6 +5188,11 @@ const NARRATED_WORDS = {
     kind: "reasoning",
     output: "Bash is disabled here, so the tasks are listed with Glob.",
   },
+  // A conversation item read off the transcript rather than as a record's fields.
+  8: {
+    kind: "message",
+    output: USAGE_LIMIT_WORDS,
+  },
 };
 
 function narratedEvents() {
@@ -5195,7 +5203,11 @@ function narratedEvents() {
   const closing = recorded.filter((event) => event.kind === "message");
   const events = [];
   let call = 0;
-  for (let index = 0; events.length < calls.length + 3; index += 1) {
+  for (
+    let index = 0;
+    events.length < calls.length + Object.keys(NARRATED_WORDS).length;
+    index += 1
+  ) {
     const words = NARRATED_WORDS[index];
     events.push(
       words === undefined
@@ -5419,7 +5431,7 @@ export function buildTranscriptRuns(root) {
     node,
     member,
     at,
-    { on = journal, events = recorded } = {},
+    { on = journal, events = recorded, model, usage } = {},
   ) => {
     const labels = {
       ...run,
@@ -5433,11 +5445,13 @@ export function buildTranscriptRuns(root) {
       .emit("pipeline", "node-dispatched", { ...run, node, persona: member });
     on.at = journal.at;
     on.advance(1).emit("agentgraph", "member-started", labels, {});
+    const startedAt = stamp(on.at);
     on.advance(1).emit("agentgraph", "turn-started", labels, {
       transcript: transcriptAt(store, at.session, at.historyId),
       turn: 1,
       role: "assistant",
-      started_at: stamp(on.at),
+      started_at: startedAt,
+      ...(model === undefined ? {} : { model }),
     });
     for (const line of events) {
       on.advance(1).emit("agentgraph", "turn-activity", labels, {
@@ -5455,6 +5469,14 @@ export function buildTranscriptRuns(root) {
         index: line.event.index,
       });
     }
+    if (usage !== undefined)
+      on.advance(1).emit("agentgraph", "turn-completed", labels, {
+        turn: 1,
+        role: "assistant",
+        usage,
+        started_at: startedAt,
+        completed_at: stamp(on.at),
+      });
     return labels;
   };
 
@@ -5578,9 +5600,13 @@ export function buildTranscriptRuns(root) {
   // its turn.
   const narrated = narratedEvents().map((event) => ({ event }));
   const narratedGraph = new Journal(dir, NARRATED_STREAM, journal.at);
+  // Its turn names its model and closes with what it used, so the conversation
+  // view draws a turn whole: its model chip and its token chips.
   relayedSession(NARRATED_STREAM, "narrated", "worker", S.narrated, {
     on: narratedGraph,
     events: narrated,
+    model: "a-model",
+    usage: { input_tokens: 1200, output_tokens: 340 },
   });
   const narratedReport = `${JSON.stringify({
     schema_version: 12,
@@ -5814,6 +5840,7 @@ export function transcriptFacts() {
       narratedLive: `${NARRATED_LIVE_STREAM}.worker`,
     },
     narratedOrder: NARRATED_ORDER,
+    usageLimit: USAGE_LIMIT_WORDS,
     drafted: DRAFTED_STREAM,
   };
 }

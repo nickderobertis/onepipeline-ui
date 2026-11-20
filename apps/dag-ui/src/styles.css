@@ -974,12 +974,15 @@ p {
   top: 12px;
   right: 12px;
 }
+/* Pinned within its card, beneath the panel's own controls: the close button
+   (z-index 2) stays above it, and it is painted in the card's own colour so the
+   turns scrolling under it never show through around it. */
 .conversation-timeline-sticky {
   position: sticky;
-  z-index: 2;
+  z-index: 1;
   top: 0;
   padding-bottom: 10px;
-  background: var(--background);
+  background: var(--card);
 }
 .node-timeline-sticky [data-testid="timeline-cursor"] {
   pointer-events: none;

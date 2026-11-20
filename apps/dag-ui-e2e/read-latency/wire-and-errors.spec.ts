@@ -390,15 +390,17 @@ test("a span, a row, the run's records and a stretch each fail at their control 
         await expect(failed, `${what} recovered`).toHaveCount(0);
       });
     const { timeline } = await completeDocuments(served, run);
-    const runSpan = (
+    // A run-level oneharness session where the run has one: its page is the one a
+    // share once left out.
+    const runLevel = (
       timeline.spans as {
         id: string;
         node_id?: string;
         harness_scope?: unknown;
       }[]
-    ).find(
-      (span) => span.node_id === undefined && span.harness_scope === undefined,
-    );
+    ).filter((span) => span.node_id === undefined);
+    const runSpan =
+      runLevel.find((span) => span.harness_scope !== undefined) ?? runLevel[0];
     if (runSpan === undefined) throw new Error("no run-level span");
     await page.goto(`${served.origin}${addressOf(run, "overall")}`);
     await expect(metricText(page, "Turns")).toHaveText(/^\d+$/u, {

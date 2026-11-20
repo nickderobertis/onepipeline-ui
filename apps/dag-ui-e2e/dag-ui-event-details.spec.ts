@@ -1,3 +1,4 @@
+import { runTimelineSchema } from "@onepipeline-ui/dag-model";
 import { expect, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
@@ -42,10 +43,30 @@ const JSON_SPELLED = /[{[]\s*"[^"\n]*"\s*[:,\]]/u;
 
 let server: FixtureServer | undefined;
 let facts: z.infer<typeof factsSchema>;
+/** The records the server serves as conversation items, by record id. */
+let conversations: ReadonlySet<string> = new Set();
 
 test.beforeAll(async () => {
   server = await startFixtureServer("event-details", ["--event-list-corpus"]);
   facts = factsSchema.parse(server.facts);
+  const served = await Promise.all(
+    ["scope=run", `scope=node&node=${every.node}`].map(async (query) =>
+      runTimelineSchema.parse(
+        await (
+          await fetch(
+            `${server?.origin}/api/v2/runs/${every.run_id}/timeline?${query}`,
+          )
+        ).json(),
+      ),
+    ),
+  );
+  conversations = new Set(
+    served
+      .flatMap((timeline) => timeline.spans)
+      .flatMap((span) => span.events)
+      .filter((event) => event.reference?.kind === "conversation")
+      .map((event) => event.record_id ?? event.id),
+  );
 });
 
 test.afterAll(async () => {
@@ -61,7 +82,9 @@ const records = every.records.map((record, seq) => ({
 
 /**
  * Open `record` by the address a link to it is — the run, its node where it
- * names one, and the record — and read the fields its detail recorded.
+ * names one, and the record — and read the fields its detail recorded. A
+ * conversation item is read in the conversation view instead, which shows its
+ * turn or, where the transcript cannot be served, says so with these values.
  */
 async function readDetail(
   page: Page,
@@ -73,9 +96,24 @@ async function readDetail(
   await page.goto(
     `${origin}/?run=${every.run_id}${node}&event=${record.recordId}`,
   );
-  const detail = page
-    .getByRole("complementary", { name: "Item detail panel" })
-    .getByRole("region", { name: "Recorded fields" });
+  const panel = page.getByRole("complementary", { name: "Item detail panel" });
+  if (conversations.has(record.recordId)) {
+    await expect(
+      panel
+        .getByRole("article", { name: /^Turn / })
+        .or(
+          panel
+            .getByRole("alert")
+            .filter({ hasText: "Transcript unavailable" }),
+        ),
+      `${record.kind} opens its conversation`,
+    ).toBeVisible();
+    await expect(
+      panel.getByRole("region", { name: "Recorded fields" }),
+    ).toHaveCount(0);
+    return;
+  }
+  const detail = panel.getByRole("region", { name: "Recorded fields" });
   await expect(detail, `${record.source} ${record.kind} opens`).toBeVisible();
   const text = await detail.innerText();
   for (const leaf of leaves(record.payload))
