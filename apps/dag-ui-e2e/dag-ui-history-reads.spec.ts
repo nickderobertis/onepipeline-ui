@@ -160,3 +160,95 @@ test("a span page that failed is said in its panel alone, read again on Try agai
     failure: false,
   });
 });
+
+test("a node timeline's span page that failed is said in its panel alone, read again on Try again, and gone when another span is opened", async ({
+  page,
+}) => {
+  await watch(page, { failure: { text: FAILED } });
+  const isNodeSpanPage = (url: string) =>
+    url.includes("/timeline/events?") && url.includes("span=");
+  let refusing = true;
+  // A page held is one whose answer the panel waits on: what it shows meanwhile is
+  // what it remembers of the span.
+  let holding = false;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // llmlint: ignore-block[e2e_not_mocked] a span page has to fail for its panel to say so, and a refused connection cannot be earned from the real server; a held page is passed to the real server unchanged once released, as is every other.
+  await page.route(
+    (url) => isNodeSpanPage(url.toString()),
+    async (route) => {
+      if (refusing) return route.abort("connectionrefused");
+      if (holding) await held;
+      await route.continue();
+    },
+  );
+  // llmlint: ignore-end[e2e_not_mocked]
+
+  await page.goto(`/?run=${runs().live}&node=dashboard`);
+  const view = page.getByRole("region", { name: /^Timeline for / });
+  await expect(view).toBeVisible();
+  await view
+    .getByRole("button", { name: /^Open worker · judge/ })
+    .first()
+    .click();
+  const failure = panel(page).getByRole("alert").filter({ hasText: FAILED });
+  await expect(failure).toBeVisible();
+  // The panel's failure is its own: said once, there, and nowhere else.
+  await expect(page.getByText(FAILED)).toHaveCount(1);
+
+  // The network back, the panel still open: Try again reads the page afresh.
+  refusing = false;
+  const read = page.waitForResponse((response) =>
+    isNodeSpanPage(response.url()),
+  );
+  await failure.getByRole("button", { name: "Try again" }).click();
+  expect((await read).status()).toBe(200);
+  await expect(page.getByText(FAILED)).toHaveCount(0);
+
+  // Refused again on a fresh view; another span opened takes the first's failure
+  // with its panel, and its own page, served, says nothing failed.
+  refusing = true;
+  await page.reload();
+  await view
+    .getByRole("button", { name: /^Open worker · judge/ })
+    .first()
+    .click();
+  await expect(
+    panel(page).getByRole("alert").filter({ hasText: FAILED }),
+  ).toBeVisible();
+  refusing = false;
+  const other = page.waitForResponse((response) =>
+    isNodeSpanPage(response.url()),
+  );
+  // The open panel covers the list at this width, so the next row is reached as a
+  // keyboard user reaches it.
+  const checkIn = view.getByRole("button", { name: /^Open check-in/ }).first();
+  await checkIn.focus();
+  await checkIn.press("Enter");
+  expect((await other).status()).toBe(200);
+  await resetSeen(page);
+  await expect(page.getByText(FAILED)).toHaveCount(0);
+
+  // The first span reopened while its page is still on its way: the failure its
+  // closed panel took with it is not shown again.
+  holding = true;
+  const reread = page.waitForResponse((response) =>
+    isNodeSpanPage(response.url()),
+  );
+  const judge = view
+    .getByRole("button", { name: /^Open worker · judge/ })
+    .first();
+  await judge.focus();
+  await judge.press("Enter");
+  await expect(panel(page)).toContainText("worker · judge");
+  await expect(page.getByText(FAILED)).toHaveCount(0);
+  release();
+  expect((await reread).status()).toBe(200);
+  await page.getByRole("button", { name: "Close detail" }).click();
+  await expect(panel(page)).toHaveCount(0);
+  expect(await seen(page), "the first span's failure came back").toEqual({
+    failure: false,
+  });
+});
