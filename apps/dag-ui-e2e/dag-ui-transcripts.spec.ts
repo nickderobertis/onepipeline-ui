@@ -81,8 +81,8 @@ async function openRow(page: Page, label: string | RegExp): Promise<void> {
     .click();
 }
 
-const detail = (page: Page) =>
-  page.getByRole("region", { name: "Timeline item detail" });
+const DETAIL = "Timeline item detail";
+const detail = (page: Page) => page.getByRole("region", { name: DETAIL });
 
 /**
  * An element's text in full, rather than the trimmed match a text assertion
@@ -513,29 +513,54 @@ for (const [reading, node, settled] of [
 
 /**
  * What the field/value view draws, any moment of which in a conversation item's
- * panel is the second view this panel must never paint. Class and attribute
- * selectors because they name the view's own parts, none of which has a role.
+ * panel is the second view this panel must never paint: each by the words it
+ * reads as, held to the item's panel. Its recorded fields open under their own
+ * heading (or say there are none), its facts open on when the item was recorded,
+ * and its reference line reads as the reference's kind beside its value.
  */
-const FIELD_VIEW = {
-  // llmlint: ignore-block[e2e_uses_accessible_selectors] every entry is read by `dom-watch`'s in-page MutationObserver, installed before the click so a single painted frame is caught, where only `document.querySelector` exists and no Playwright role query can run (the recorded-fields region is named by its own aria-label); the field/value view's generic reference line and its `dl` of values have no role or accessible name to query by, and the criterion is that exactly these never appear in a conversation item's panel.
-  recordedRegion: {
-    selector:
-      '[aria-label="Timeline item detail"] [aria-label="Recorded fields"]',
-  },
-  recordedHeading: { text: "Recorded fields" },
-  referenceLine: {
-    selector: '[aria-label="Timeline item detail"] .detail-reference-kind',
-  },
-  facts: { selector: '[aria-label="Timeline item detail"] dl.facts' },
-  // llmlint: ignore-end[e2e_uses_accessible_selectors]
-} as const;
+const fieldView = (reference: { kind: string; value: string }) =>
+  ({
+    recordedHeading: { text: "Recorded fields", within: DETAIL },
+    noFields: { text: "This record holds no fields.", within: DETAIL },
+    facts: { text: "Recorded at", within: DETAIL },
+    referenceLine: {
+      text: `${reference.kind}${reference.value}`,
+      within: DETAIL,
+    },
+  }) as const;
+
+const NONE_SEEN = {
+  recordedHeading: false,
+  noFields: false,
+  facts: false,
+  referenceLine: false,
+};
 
 const CONVERSATIONS = "**/api/v2/runs/*/conversations/**";
+
+/** The usage-limit message, as the narrated node's served timeline lists it. */
+async function usageLimitItem(page: Page) {
+  const timeline = runTimelineSchema.parse(
+    await (
+      await page.request.get(
+        `${server.origin}/api/v2/runs/${facts.run}/timeline?scope=node&node=narrated`,
+      )
+    ).json(),
+  );
+  const item = timeline.spans
+    .flatMap((span) => span.events)
+    .find((event) => event.description === facts.usageLimit);
+  if (item === undefined) throw new Error("the corpus has no such item");
+  return item;
+}
 
 test("a conversation item opens in the conversation view alone, before, while and after its transcript loads", async ({
   page,
 }) => {
-  await watch(page, FIELD_VIEW);
+  const { reference } = await usageLimitItem(page);
+  if (reference?.kind !== "conversation")
+    throw new Error("the usage-limit message names no conversation");
+  await watch(page, fieldView(reference));
   await openNode(page, facts.run, "narrated");
   // The transcript's answer held back at the network boundary, then let through
   // unchanged: the only way to look at the panel while it loads.
@@ -551,12 +576,9 @@ test("a conversation item opens in the conversation view alone, before, while an
   // llmlint: ignore-end[e2e_not_mocked]
   await openRow(page, new RegExp(facts.usageLimit.slice(0, 25)));
   await expect(detail(page).getByText("Loading transcript…")).toBeVisible();
-  expect(await seen(page), "the field/value view while loading").toEqual({
-    recordedRegion: false,
-    recordedHeading: false,
-    referenceLine: false,
-    facts: false,
-  });
+  expect(await seen(page), "the field/value view while loading").toEqual(
+    NONE_SEEN,
+  );
   release();
 
   // The package's own conversation view, as an observer's dispatch panel draws it.
@@ -578,40 +600,91 @@ test("a conversation item opens in the conversation view alone, before, while an
     turn.getByRole("button", { name: / tool details$/ }).first(),
   ).toBeVisible();
   await expect(turn.getByLabel("Usage").first()).toBeVisible();
-  expect(await seen(page), "the field/value view at any moment").toEqual({
-    recordedRegion: false,
-    recordedHeading: false,
-    referenceLine: false,
-    facts: false,
-  });
+  expect(await seen(page), "the field/value view at any moment").toEqual(
+    NONE_SEEN,
+  );
   await page.unroute(CONVERSATIONS);
 
-  // On a phone, with the turn scrolled under the conversation's pinned header, the
-  // header stacks beneath the panel's own controls: Close is still what a tap hits.
-  await page.setViewportSize({ width: 390, height: 844 });
-  await turn.hover();
-  await page.mouse.wheel(0, 600);
-  await page.getByRole("button", { name: "Close detail" }).click({
-    timeout: 10_000,
-  });
+  // Scrolled to the item it opened on, at a desktop's width and a phone's, nothing
+  // pinned in the panel covers that item or the panel's Close control.
+  for (const size of [
+    { width: 1440, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(size);
+    await expectNothingPinnedOver(page);
+  }
+  await page.getByRole("button", { name: "Close detail" }).click();
   await expect(detail(page)).toHaveCount(0);
 });
+
+/**
+ * Scroll the panel to the item it opened on, its top at the top of the panel, and
+ * hold that nothing pinned there — the conversation's own timeline header, the
+ * panel's Close control — is painted over either of them: what is hit at the
+ * item's top edge is the item, and what is hit at Close is Close.
+ */
+async function expectNothingPinnedOver(page: Page): Promise<void> {
+  // llmlint: ignore[e2e_uses_accessible_selectors] `aria-current` is the package's own mark of the item a panel opened on — the turn, or the tool call within it (its plot marks the same turn, hence the article) — and no role query can filter on it; the criterion is about that one item.
+  const focused = detail(page)
+    .locator('article[aria-current="true"], article [aria-current="true"]')
+    .first();
+  await expect(focused).toBeVisible();
+  await focused.evaluate((element) => {
+    element.scrollIntoView({ block: "start" });
+  });
+  const pinned = detail(page).getByRole("region", {
+    name: "Conversation timeline",
+  });
+  await expect(pinned).toBeVisible();
+  const close = page.getByRole("button", { name: "Close detail" });
+  const hits = await focused.evaluate((element, closeLabel) => {
+    const box = element.getBoundingClientRect();
+    const button = document.querySelector(`[aria-label="${closeLabel}"]`);
+    const at = (x: number, y: number) => document.elementFromPoint(x, y);
+    const edge = [0.1, 0.5, 0.9].map((share) => {
+      const hit = at(box.left + box.width * share, box.top + 4);
+      return hit !== null && element.contains(hit);
+    });
+    const closeBox = button?.getBoundingClientRect();
+    const closeHit =
+      closeBox === undefined
+        ? null
+        : at(
+            closeBox.left + closeBox.width / 2,
+            closeBox.top + closeBox.height / 2,
+          );
+    return {
+      edge,
+      close: closeHit !== null && button?.contains(closeHit) === true,
+    };
+  }, "Close detail");
+  expect(hits.edge, "the opened item's top edge is the item").toEqual([
+    true,
+    true,
+    true,
+  ]);
+  expect(hits.close, "Close is what a tap at Close hits").toBe(true);
+  // And the conversation's pinned header leaves Close a place of its own.
+  const [header, button] = await Promise.all([
+    pinned.boundingBox(),
+    close.boundingBox(),
+  ]);
+  if (header === null || button === null)
+    throw new Error("the pinned header or Close is not laid out");
+  const apart =
+    button.x >= header.x + header.width ||
+    button.x + button.width <= header.x ||
+    button.y >= header.y + header.height ||
+    button.y + button.height <= header.y;
+  expect(apart, "the pinned header lies under Close").toBe(true);
+}
 
 test("a conversation item whose transcript cannot be served says so with its recorded values, and anything else opens its fields", async ({
   page,
 }) => {
-  const timeline = runTimelineSchema.parse(
-    await (
-      await page.request.get(
-        `${server.origin}/api/v2/runs/${facts.run}/timeline?scope=node&node=narrated`,
-      )
-    ).json(),
-  );
-  const item = timeline.spans
-    .flatMap((span) => span.events)
-    .find((event) => event.description === facts.usageLimit);
-  if (item?.fields === undefined)
-    throw new Error("the corpus has no such item");
+  const item = await usageLimitItem(page);
+  if (item.fields === undefined) throw new Error("the item holds no fields");
   const transcript = z
     .object({ history_id: z.string(), history_session: z.string() })
     .parse(item.fields.transcript);

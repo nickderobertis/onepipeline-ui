@@ -52,6 +52,7 @@ import {
   type TimelineRow,
 } from "./timeline-model";
 import { useConversation } from "./useConversation";
+import { usePinnedHeight } from "./usePinnedHeight";
 import { useStickyBottom } from "./useStickyBottom";
 
 /** How many turns of a long transcript are handed to the reader at once. */
@@ -317,6 +318,7 @@ function Session({
   const sync = useTimelineScrollSync(
     turns.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
   );
+  const pinned = usePinnedHeight("--conversation-pinned");
   if (transcript.loading)
     return (
       <div aria-live="polite" className="loading-inline">
@@ -371,7 +373,7 @@ function Session({
           <StatusBadge state={conversation.state} />
         </header>
         <Separator className="my-2.5" />
-        <div className="conversation-timeline-sticky">
+        <div className="conversation-timeline-sticky" ref={pinned}>
           <ConversationTimeline
             cursor={sync.cursor}
             {...(focus === undefined ? {} : { focus })}
@@ -388,7 +390,7 @@ function Session({
           </p>
         ) : (
           <>
-            <div ref={sync.containerRef}>
+            <div className="conversation-turns" ref={sync.containerRef}>
               {turns.slice(0, visible).map((turn) => (
                 <div
                   key={turn.id}

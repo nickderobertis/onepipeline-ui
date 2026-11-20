@@ -2,12 +2,14 @@ import type { Page } from "@playwright/test";
 
 /**
  * What a journey asks never to have appeared, at any moment, rather than only at
- * the moments it looked: one CSS selector or one text, each named.
+ * the moments it looked: one CSS selector or one text, each named. A text may be
+ * held to one landmark, named by its accessible name (`within`), so the same words
+ * elsewhere on the page are not mistaken for it.
  */
 export interface Watched {
   readonly [name: string]:
     | { readonly selector: string }
-    | { readonly text: string };
+    | { readonly text: string; readonly within?: string };
 }
 
 declare global {
@@ -32,10 +34,14 @@ export async function watch(page: Page, watched: Watched): Promise<void> {
       for (const [name, what] of Object.entries(wanted)) {
         if (seen[name]) continue;
         // llmlint: ignore-block[e2e_uses_accessible_selectors] this runs inside the page as an init script on every DOM mutation, so a view painted for one frame is caught; Playwright's role and text locators do not exist there, and each selector is the calling journey's, which carries its own reason.
+        const scope =
+          "selector" in what || what.within === undefined
+            ? body
+            : document.querySelector(`[aria-label="${what.within}"]`);
         seen[name] =
           "selector" in what
             ? document.querySelector(what.selector) !== null
-            : (body.textContent ?? "").includes(what.text);
+            : (scope?.textContent ?? "").includes(what.text);
         // llmlint: ignore-end[e2e_uses_accessible_selectors]
       }
     };
