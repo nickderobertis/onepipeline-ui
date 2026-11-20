@@ -15713,7 +15713,7 @@ fn a_node_held_on_an_unanswered_source_renders_and_adopts_with_or_without_its_ca
         );
         eventually("the driver let go and was reaped", || !process_is_live(pid));
         drop(driver);
-        let handed = handed_off(&serving.runs_root(), run);
+        let handed = handed_off(&serving.runs_root(), run, 2);
         let events = events_on(
             &http::get(
                 serving.address,
@@ -15819,15 +15819,19 @@ fn an_adopted_run_reads_and_projects_its_local_md_plan_with_no_onetaskgraph_exec
     });
     drop(driver);
 
-    // Attested, then adopted again: the second driver completes the graph.
+    // Attested: the driver the adoption handed the run to as it returned takes
+    // the attestation up and completes the graph, with no second adoption —
+    // so the run records two, the adoption and that hand-off.
+    let driver = handed_off(&serving.runs_root(), run, 2);
+    driven_past(&serving.runs_root(), run, &[]);
     engine_attest(&serving.runs_root(), run, fixture_run::APPROVAL_NODE_ID)
         .expect("the engine attests the ready action");
-    let second = serving.drive_fixture(run);
-    let driver = RetainedDriver(second);
-    eventually("the second driver completed the graph", || {
-        detail(serving.address)["run"]["state"] == json!("settled")
-    });
-    eventually("the second driver was reaped", || !process_is_live(second));
+    driven_past(&serving.runs_root(), run, &[fixture_run::APPROVAL_NODE_ID]);
+    assert_eq!(
+        detail(serving.address)["run"]["state"],
+        json!("settled"),
+        "the attested run did not complete"
+    );
     drop(driver);
     assert_eq!(
         events(serving.address)
@@ -15975,7 +15979,7 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
     // The adoption handed the run to a driver that waits on its decision; the
     // next adoption is the one that reads the configuration written below, so
     // that driver goes as a lost host's does.
-    lose(handed_off(&serving.runs_root(), run));
+    lose(handed_off(&serving.runs_root(), run, 2));
     let records = projections();
     assert!(!records.is_empty(), "no projection was attempted");
     for record in &records {
@@ -16297,7 +16301,7 @@ fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
         !process_is_live(pid)
     });
     drop(adoption);
-    let driver = handed_off(&serving.runs_root(), run);
+    let driver = handed_off(&serving.runs_root(), run, 2);
     driven_past(&serving.runs_root(), run, &[]);
     // The sign-off in the member's source waits on the home's approval.
     assert_ne!(status(signoff), json!("waiting"), "{}", detail());
@@ -16441,7 +16445,7 @@ fn project_nodes(dir: &Path, project: &str) -> Vec<String> {
 }
 
 /// A run produced through the pinned engine CLI writes back only what
-/// changed: every projection the retained drivers attempt is a member-scoped
+/// changed: every projection its drivers attempt is a member-scoped
 /// record at version 4 of `writeback-projections.jsonl`, naming the store calls
 /// it made, the approval's existing item is written through a targeted update
 /// rather than a copy of the project, and the drivers keep the run's landed
@@ -16482,12 +16486,13 @@ fn an_adopted_run_writes_back_member_scoped_projections_and_keeps_its_landed_bas
         json!("waiting")
     );
 
-    // Attested, then adopted again: the second driver completes the graph.
+    // Attested: the driver the adoption handed the run to as it returned takes
+    // the attestation up and completes the graph, with no second adoption.
+    let driver = handed_off(&serving.runs_root(), run, 2);
+    driven_past(&serving.runs_root(), run, &[]);
     engine_attest(&serving.runs_root(), run, fixture_run::APPROVAL_NODE_ID)
         .expect("the engine attests the ready action");
-    let second = serving.drive_fixture(run);
-    let driver = RetainedDriver(second);
-    eventually("the second driver was reaped", || !process_is_live(second));
+    driven_past(&serving.runs_root(), run, &[fixture_run::APPROVAL_NODE_ID]);
     drop(driver);
     assert_eq!(detail(serving.address)["run"]["state"], json!("settled"));
 
@@ -16848,11 +16853,11 @@ fn started_and_driven(root: &Path, launched: &[u8]) -> (String, RetainedDriver) 
     (run, driver)
 }
 
-/// The driver an attached `adopt` of `run` under `root` handed the run to as it
-/// returned — journalled as the run's next adoption — which waits on the run's
-/// decision; ended when the journey drops it.
+/// The driver an attached `start` or `adopt` of `run` under `root` handed the
+/// run to as it returned — journalled as the run's `adoption`th adoption, counted
+/// from one — which waits on the run's decision; ended when the journey drops it.
 #[cfg(unix)]
-fn handed_off(root: &Path, run: &str) -> RetainedDriver {
+fn handed_off(root: &Path, run: &str, adoption: usize) -> RetainedDriver {
     let adopted = || -> Vec<u32> {
         fs::read_to_string(root.join(run).join("events.jsonl"))
             .unwrap_or_default()
@@ -16863,10 +16868,10 @@ fn handed_off(root: &Path, run: &str) -> RetainedDriver {
             .filter_map(|pid| u32::try_from(pid).ok())
             .collect()
     };
-    eventually("the attached adoption handed the run on", || {
-        adopted().len() >= 2
+    eventually("the attached launch or adoption handed the run on", || {
+        adopted().len() >= adoption
     });
-    RetainedDriver(*adopted().last().expect("the hand-off's driver"))
+    RetainedDriver(adopted()[adoption - 1])
 }
 
 /// Wait until the driver of `run` under `root` has taken up the decisions on
@@ -20201,8 +20206,10 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     let run = "cached-approval";
     // The attached `start` handed the run to a driver that waits on its
     // decision. Taking the run up, that driver projects the run onto the board
-    // again; the reads below are of the run once that projection has finished,
-    // as its record says, and the driver waits.
+    // again, as its record says, and goes on reading the board in its own time;
+    // the reads below compare what the server asks of the board, so once it has
+    // projected it goes, as a lost host's driver goes, and the reply below is
+    // adopted.
     let records = |name: &str| -> Vec<Value> {
         fs::read_to_string(root.join(run).join(name))
             .unwrap_or_default()
@@ -20210,16 +20217,23 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
             .collect()
     };
+    let handed = handed_off(&root, run, 1);
+    // The board refuses that projection as it refused the launch's, and the
+    // driver journals the refusal as a finding after recording the attempt.
     eventually(
         "the driver the launch handed the run to projected it",
         || {
-            let Some(adopted) = records("events.jsonl")
-                .into_iter()
-                .rfind(|record| record["kind"] == "driver-adopted")
+            let journal = records("events.jsonl");
+            let Some(adopted) = journal
+                .iter()
+                .rposition(|record| record["kind"] == "driver-adopted")
             else {
                 return false;
             };
-            let since = adopted["ts"].as_str().expect("a record's time").to_owned();
+            let since = journal[adopted]["ts"]
+                .as_str()
+                .expect("a record's time")
+                .to_owned();
             records(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE)
                 .iter()
                 .any(|projection| {
@@ -20227,9 +20241,13 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
                         .as_str()
                         .is_some_and(|at| at >= since.as_str())
                 })
+                && journal[adopted..]
+                    .iter()
+                    .any(|record| record["kind"] == "planner-surface-queued")
         },
     );
     driven_past(&root, run, &[]);
+    lose(handed);
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
         fixture_run::SESSION,
@@ -20290,13 +20308,13 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
         .as_array()
         .expect("requests")
         .len();
-    // The attached `start` handed the run to the driver it adopted, which waits
-    // on the decision: it applies the reply and drives the run on, and would
-    // refuse an `adopt` here.
+    let pid = serving.drive_fixture(run);
+    let driver = RetainedDriver(pid);
     eventually("the adopted engine settled the remote plan", || {
         http::get(serving.address, &detail_path).json()["run"]["state"] == json!("settled")
     });
-    driven_past(&serving.runs_root(), run, &[]);
+    eventually("the adopted engine let go", || !process_is_live(pid));
+    drop(driver);
     let events = events_on(
         &http::get(
             serving.address,
@@ -20309,7 +20327,8 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
             .iter()
             .filter(|event| event["kind"] == json!("driver-adopted"))
             .count(),
-        1
+        // The launch's hand-off, and the adoption that settled the reply.
+        2
     );
     let state = board.state();
     assert_eq!(
