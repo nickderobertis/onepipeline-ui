@@ -679,6 +679,7 @@ fn a_linear_home_in_the_collapsed_block_is_read_through_the_linked_plugin() {
     let goal = "Deliver the Linear plan";
     // Keys in canonical (sorted) order, as the plugin writes them.
     let settled = |branch: &str| json!({"branch": branch, "outcome": "merged", "status": "done"});
+    // llmlint: ignore[e2e_not_mocked] Linear is the external tracker this journey may double: this repository holds no Linear credential and runs no live journey against it, so the loopback answers only the plugin's own `graphql` documents, refuses any other, and the engine, the linked plugin and the read API under test are all real.
     let linear = crate::linear_workspace::LinearWorkspace::start();
     linear.add_project(
         LINEAR_HOME,

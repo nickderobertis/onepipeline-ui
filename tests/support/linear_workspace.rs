@@ -195,8 +195,20 @@ fn required<'a>(input: &'a Value, field: &str) -> Result<&'a str, String> {
         .ok_or_else(|| format!("`{field}` must be a string, not {}", input[field]))
 }
 
-/// Whether `record` meets `filter`, for the predicates the plugin's listings send; any other
-/// predicate is refused rather than read as a match.
+/// The one operand an `{"eq": <string>}` predicate carries, refusing any other operator or a
+/// non-string operand.
+fn eq_operand<'a>(predicate: &'a Value, what: &str) -> Result<&'a str, String> {
+    match predicate.as_object() {
+        Some(operators) if operators.len() == 1 => operators["eq"]
+            .as_str()
+            .ok_or_else(|| format!("the {what} predicate {predicate}")),
+        _ => Err(format!("the {what} predicate {predicate}")),
+    }
+}
+
+/// Whether `record` meets `filter`, for the predicates the plugin's listings send. The whole
+/// filter is evaluated before it is answered, so any other predicate — in a branch the answer
+/// would not have needed included — is refused rather than read as a match.
 fn meets(record: &Value, filter: &Value) -> Result<bool, String> {
     let Some(predicates) = filter.as_object() else {
         return match filter {
@@ -204,40 +216,37 @@ fn meets(record: &Value, filter: &Value) -> Result<bool, String> {
             other => Err(format!("a filter must be an object, not {other}")),
         };
     };
+    let mut all = true;
     for (field, predicate) in predicates {
         let met = match field.as_str() {
-            "and" => predicate
-                .as_array()
-                .ok_or("`and` must be a list")?
-                .iter()
-                .try_fold(true, |all, part| {
-                    Ok::<_, String>(all && meets(record, part)?)
-                })?,
-            "or" => predicate
-                .as_array()
-                .ok_or("`or` must be a list")?
-                .iter()
-                .try_fold(false, |any, part| {
-                    Ok::<_, String>(any || meets(record, part)?)
-                })?,
+            "and" | "or" => {
+                let parts = predicate
+                    .as_array()
+                    .ok_or_else(|| format!("`{field}` must be a list, not {predicate}"))?
+                    .iter()
+                    .map(|part| meets(record, part))
+                    .collect::<Result<Vec<bool>, String>>()?;
+                if field == "and" {
+                    parts.into_iter().all(|met| met)
+                } else {
+                    parts.into_iter().any(|met| met)
+                }
+            }
             // Every record of this workspace is the one configured team's.
             "team" if predicate == &json!({"key": {"eqIgnoreCase": TEAM}}) => true,
             "project" if predicate == &json!({"null": true}) => record["project"].is_null(),
-            "project" => match predicate.pointer("/id/eq") {
-                Some(id) => record["project"]["id"] == *id,
-                None => return Err(format!("the project predicate {predicate}")),
+            "project" => match predicate.as_object() {
+                Some(fields) if fields.len() == 1 && fields.contains_key("id") => {
+                    record["project"]["id"] == eq_operand(&fields["id"], "project id")?
+                }
+                _ => return Err(format!("the project predicate {predicate}")),
             },
-            "id" => match predicate.pointer("/eq") {
-                Some(id) => record["id"] == *id,
-                None => return Err(format!("the id predicate {predicate}")),
-            },
+            "id" => record["id"] == eq_operand(predicate, "id")?,
             other => return Err(format!("the `{other}` predicate {predicate}")),
         };
-        if !met {
-            return Ok(false);
-        }
+        all &= met;
     }
-    Ok(true)
+    Ok(all)
 }
 
 fn page(rows: &[Value], filter: &Value) -> Result<Value, String> {
@@ -274,6 +283,9 @@ fn update(
     };
     for (field, value) in fields {
         if field == long_form {
+            if !(value.is_string() || value.is_null()) {
+                return Err(format!("`{field}` must be a string or null, not {value}"));
+            }
             record[long_form] = value.clone();
         } else if field == status_field {
             let (_, name, kind) =
