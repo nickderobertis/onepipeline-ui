@@ -20565,13 +20565,13 @@ fn an_adopted_run_moves_the_card_of_its_plans_completed_task_to_done() {
         &[("CACHE_BOARD_TOKEN", board.token.as_str())],
     )
     .expect("the engine applies the settlement");
-    let pid = serving.drive_fixture(run);
-    let driver = RetainedDriver(pid);
+    // The attached `start` handed the run to the driver it adopted, which waits
+    // on the decision: it applies the reply and drives the run on, and would
+    // refuse an `adopt` here.
     eventually("the adopted engine settled the plan", || {
         http::get(serving.address, &detail_path).json()["run"]["state"] == json!("settled")
     });
-    eventually("the adopted engine let go", || !process_is_live(pid));
-    drop(driver);
+    driven_past(&serving.runs_root(), run, &[]);
 
     let state = board.state();
     let held = |name: &str| {
