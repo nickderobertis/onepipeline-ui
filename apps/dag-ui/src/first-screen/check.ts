@@ -376,6 +376,7 @@ export const REFERENCE_KINDS = [
   "worker_report",
   "oneharness_session",
   "pr",
+  "refusal",
 ] as const;
 
 /** The party a dispatch's transport carries. */

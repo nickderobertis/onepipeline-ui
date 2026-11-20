@@ -372,8 +372,12 @@ export const TELEMETRY_SCHEMA_VERSION = 30;
  * surface's records gain `surface_id`, `correlation` and `surface_state`, the
  * surface folded over the whole reading, so a node's queued question reads as
  * answered by the reply the run journalled under no node.
+ *
+ * `17` names a refused edit's complete refusal: the reference vocabulary gains
+ * `refusal`, an artifact the engine kept beside the run is named by its file
+ * name, and the artifact route serves a refusal whole, as its text.
  */
-export const TIMELINE_SCHEMA_VERSION = 16;
+export const TIMELINE_SCHEMA_VERSION = 17;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1491,6 +1495,7 @@ export const timelineReferenceKindSchema = z.enum([
   "worker_report",
   "oneharness_session",
   "pr",
+  "refusal",
 ]);
 export const timelineSpanKindSchema = z.enum([
   "run",

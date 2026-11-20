@@ -366,7 +366,14 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 30;
 /// surface — a `planner-replied` reached through the correlation it echoes —
 /// gains `surface_state`, the surface folded over the whole reading, whatever
 /// the filter.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 16;
+///
+/// **Version 17 names a refused edit's complete refusal.** The reference
+/// vocabulary gains `refusal`, read from the engine's artifact kind
+/// `edit-rejected-full-reason`; an artifact the engine kept under the run's
+/// reports directory is named on the wire by its file name, which the artifact
+/// route resolves against the run's own envelopes and serves a refusal by whole,
+/// as its text. A client written against 16 refuses the new reference word.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 17;
 
 /// The largest run-list page any request can ask for.
 ///
@@ -1628,6 +1635,8 @@ pub enum ReferenceKind {
     OneharnessSession,
     /// A change request on the host.
     Pr,
+    /// A refused edit's complete refusal, which the engine kept beside the run.
+    Refusal,
 }
 
 impl ReferenceKind {
@@ -1636,12 +1645,13 @@ impl ReferenceKind {
     /// The list is what the drift gate reads: a variant added here without being
     /// added to the client's own copy fails that gate rather than reaching a
     /// reader as a word their model rejects.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Conversation,
         Self::GateLog,
         Self::WorkerReport,
         Self::OneharnessSession,
         Self::Pr,
+        Self::Refusal,
     ];
 
     /// The producing library's own word for an artifact, read onto this
@@ -1654,6 +1664,7 @@ impl ReferenceKind {
             "worker_report" | "report" => Self::WorkerReport,
             "oneharness_session" | "session" => Self::OneharnessSession,
             "pr" => Self::Pr,
+            "edit-rejected-full-reason" => Self::Refusal,
             _ => Self::GateLog,
         }
     }
@@ -1667,6 +1678,7 @@ impl ReferenceKind {
             Self::WorkerReport => "worker_report",
             Self::OneharnessSession => "oneharness_session",
             Self::Pr => "pr",
+            Self::Refusal => "refusal",
         }
     }
 }

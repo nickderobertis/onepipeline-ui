@@ -234,9 +234,40 @@ impl Indexed {
                     .held_shares
                     .insert(node.to_owned(), (events, positions));
             }
-            None => indexed.held_run = Some((events, positions)),
+            None => {
+                indexed.held_run = Some(self.with_refused_edits(view, events, positions));
+            }
         }
         indexed
+    }
+
+    /// The run's own share with every refused edit naming a node that `view` holds,
+    /// in canonical order: the SDK's run-level selection holds no record naming a
+    /// node, and the run's own span lists a refusal whatever node it names.
+    fn with_refused_edits(
+        &self,
+        view: &RunView,
+        events: Vec<Envelope>,
+        positions: Vec<usize>,
+    ) -> (Vec<Envelope>, Vec<usize>) {
+        let held: HashSet<usize> = positions.iter().copied().collect();
+        let refused: Vec<(usize, Envelope)> = view
+            .events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| event.labels.node.is_some() && super::is_refused_edit(event))
+            .filter_map(|(index, event)| {
+                let place = self.canonical.get(index).copied().flatten()?;
+                (!held.contains(&place)).then(|| (place, event.clone()))
+            })
+            .collect();
+        if refused.is_empty() {
+            return (events, positions);
+        }
+        let mut merged: Vec<(usize, Envelope)> = positions.into_iter().zip(events).collect();
+        merged.extend(refused);
+        merged.sort_by_key(|(place, _)| *place);
+        merged.into_iter().map(|(place, event)| (event, place)).unzip()
     }
 
     /// Whether every record of `node` is read: the view's, or a held share.
@@ -345,6 +376,12 @@ impl Indexed {
                 touched.every_node |= event.kind.0 == super::vcs::RELEASE_OBSERVED;
             }
             Some(node) => {
+                // A refused edit is the run's as well as its node's: the run's own
+                // span lists it whatever node it names.
+                if super::is_refused_edit(event) {
+                    self.run.push(index);
+                    touched.run = true;
+                }
                 // Looked up before it is keyed, so a node already met costs no
                 // allocation: a long run's records are nearly all of a few nodes.
                 let at = match self.node_at.get(node) {
@@ -484,7 +521,9 @@ pub(crate) fn canonical_of(
     let mut events = Vec::new();
     let mut positions = Vec::new();
     for (event, place) in selected.events.iter().zip(&selected.places) {
-        if event.labels.node.as_deref() == node {
+        let owned = event.labels.node.as_deref() == node
+            || (node.is_none() && super::is_refused_edit(event));
+        if owned {
             if let Some(place) = place {
                 events.push(event.clone());
                 positions.push(*place);

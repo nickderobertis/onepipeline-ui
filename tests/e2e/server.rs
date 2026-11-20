@@ -23146,6 +23146,177 @@ fn a_command_log_outside_the_run_or_gone_is_served_as_its_name_alone() {
     assert!(integration.ends_with(corpus["logs"]["integration"].as_str().expect("the log")));
 }
 
+/// The refusals run the browser tier serves, written by the browser fixture's own
+/// generator (`apps/dag-ui-e2e/fixtures/runs.mjs`, `buildRefusalsRuns`) under
+/// `root`, so the run these journeys read and the run the view renders are one set
+/// of records. Every pipeline record it writes is then held to the linked engine's
+/// schema for its kind when the server stops ([`Serving`]), and each refused
+/// command to the engine's own `Command` here.
+fn write_refusals_run(root: &Path) -> String {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let script = format!(
+        "import {{buildRefusalsRuns, REFUSALS_RUN}} from './apps/dag-ui-e2e/fixtures/runs.mjs'; \
+         buildRefusalsRuns({}); process.stdout.write(REFUSALS_RUN);",
+        serde_json::to_string(&root.display().to_string()).expect("a path")
+    );
+    let written = std::process::Command::new("node")
+        .args(["--input-type=module", "--eval", &script])
+        .current_dir(repo)
+        .output()
+        .expect("Node runs the browser fixture's refusals generator");
+    assert!(
+        written.status.success(),
+        "{}",
+        String::from_utf8_lossy(&written.stderr)
+    );
+    let run = String::from_utf8(written.stdout).expect("the run id");
+    let journal = fs::read_to_string(root.join(&run).join("events.jsonl")).expect("the journal");
+    for line in journal.lines() {
+        let record: Value = serde_json::from_str(line).expect("a record");
+        if record["kind"] == "edit-rejected" {
+            let _: onepipeline::channel::Command =
+                serde_json::from_value(record["payload"]["command"].clone())
+                    .expect("the refused command is the engine's");
+        }
+    }
+    run
+}
+
+/// A refused edit as onepipeline 0.116.1 records it, served under timeline schema
+/// 17: its complete refusal opens through the artifact route by the kept file's
+/// name, decoded and whole, every line kept; the record is listed on the run's own
+/// span whatever node it names, and on that node's timeline by its label; and a
+/// name the run never recorded, a kept file gone, or one that is not a JSON string
+/// is `404`, never a body.
+#[test]
+fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
+    let run = std::sync::Mutex::new(String::new());
+    let serving = Serving::start(|root| {
+        *run.lock().expect("the run") = write_refusals_run(root);
+    });
+    let run = run.lock().expect("the run").clone();
+    let timeline = http::get(serving.address, &format!("/api/v2/runs/{run}/timeline?scope=run"));
+    assert_eq!(timeline.status, 200, "{}", timeline.body);
+    let timeline = timeline.json();
+    assert_eq!(
+        timeline["timeline_schema_version"],
+        json!(onepipeline_ui::contract::TIMELINE_SCHEMA_VERSION)
+    );
+    let own = timeline["spans"]
+        .as_array()
+        .expect("the spans")
+        .iter()
+        .find(|span| span["id"] == json!(format!("run.{run}")))
+        .expect("the run's own span");
+    let refused: Vec<&Value> = own["events"]
+        .as_array()
+        .expect("the run's events")
+        .iter()
+        .filter(|event| event["kind"] == "edit-rejected")
+        .collect();
+    // Every refusal the run made, the three naming a node among them.
+    assert_eq!(refused.len(), 4, "{refused:#?}");
+    let named: Vec<&str> = refused
+        .iter()
+        .filter_map(|event| event["node_id"].as_str())
+        .collect();
+    assert_eq!(named, vec!["review", "build", "ship"], "{refused:#?}");
+
+    let hook = refused[1];
+    let reference = &hook["reference"];
+    assert_eq!(reference["kind"], json!("refusal"), "{hook:#}");
+    let name = reference["value"].as_str().expect("the kept file's name");
+    assert!(!name.contains('/'), "{name}");
+    let kept = hook["fields"]["full_reason"]
+        .as_str()
+        .expect("the record's own full_reason");
+    assert!(kept.ends_with(&format!("/{name}")), "{kept} is not {name}");
+    let artifact = http::get(serving.address, &format!("/api/v2/runs/{run}/artifacts/{name}"));
+    assert_eq!(artifact.status, 200, "{}", artifact.body);
+    let artifact = artifact.json();
+    let expected: String =
+        serde_json::from_slice(&fs::read(kept).expect("the kept refusal")).expect("a JSON string");
+    assert!(expected.lines().count() > 3, "{expected}");
+    let served = json!({
+        "id": artifact["id"],
+        "kind": artifact["kind"],
+        "content": artifact["content"],
+        "truncated": artifact["truncated"],
+    });
+    assert_eq!(
+        served,
+        json!({ "id": name, "kind": "refusal", "content": expected, "truncated": false }),
+        "the complete refusal, decoded and whole"
+    );
+    // Past the 64 KiB a log is cut to, and still whole: the engine's own bound.
+    let cut = refused[3];
+    assert_eq!(cut["fields"]["full_reason_truncated"], json!(true));
+    let cut_name = cut["reference"]["value"].as_str().expect("a name");
+    let whole = http::get(serving.address, &format!("/api/v2/runs/{run}/artifacts/{cut_name}"));
+    assert_eq!(whole.status, 200, "{}", whole.body);
+    let whole = whole.json();
+    assert_eq!(whole["truncated"], json!(false));
+    assert_eq!(
+        whole["content"].as_str().map(str::len),
+        Some(64 * 1024),
+        "the whole kept refusal"
+    );
+    // An older-shaped refusal names nothing to open.
+    assert!(refused[0].get("reference").is_none(), "{:#}", refused[0]);
+    assert!(refused[0]["fields"].get("summary").is_none());
+
+    // The node's own timeline lists the refusal naming it.
+    let node = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node=review"),
+    )
+    .json();
+    let on_node: Vec<&Value> = node["spans"]
+        .as_array()
+        .expect("the node's spans")
+        .iter()
+        .flat_map(|span| span["events"].as_array().into_iter().flatten())
+        .filter(|event| event["kind"] == "edit-rejected")
+        .collect();
+    assert_eq!(on_node.len(), 1, "{on_node:#?}");
+    assert_eq!(on_node[0]["record_id"], hook["record_id"]);
+
+    // The run's own pages list them too, once the complete read has ended.
+    let page = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline/events?scope=run&limit=500"),
+    );
+    assert_eq!(page.status, 200, "{}", page.body);
+    let paged = page.json()["rows"]
+        .as_array()
+        .expect("the rows")
+        .iter()
+        .filter(|row| row["kind"] == "edit-rejected")
+        .count();
+    assert_eq!(paged, 4);
+
+    // Nothing else opens: a name no record kept, a traversal, a kept file gone, and
+    // one that is not a JSON string.
+    for absent in ["edit-rejected-full-reason-nobody-1.json", "..%2Fevents.jsonl"] {
+        let refused = http::get(
+            serving.address,
+            &format!("/api/v2/runs/{run}/artifacts/{absent}"),
+        );
+        assert!(
+            refused.status == 404 || refused.status == 422,
+            "{absent}: {} {}",
+            refused.status,
+            refused.body
+        );
+    }
+    fs::write(kept, "not a JSON string").expect("spoil the kept refusal");
+    let spoiled = http::get(serving.address, &format!("/api/v2/runs/{run}/artifacts/{name}"));
+    assert_eq!(spoiled.status, 404, "{}", spoiled.body);
+    fs::remove_file(kept).expect("remove the kept refusal");
+    let gone = http::get(serving.address, &format!("/api/v2/runs/{run}/artifacts/{name}"));
+    assert_eq!(gone.status, 404, "{}", gone.body);
+}
+
 /// Every record of a surface carries what that surface came to over the whole
 /// run: a question a node asked through the real `onepipeline ask`, a finding
 /// raised through the engine's `surface`, and the driver's quiet worker, failed

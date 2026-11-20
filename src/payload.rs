@@ -5224,7 +5224,7 @@ pub(crate) fn artifact_over(view: &Run<'_>, id: &ArtifactId) -> Option<Value> {
         event
             .artifacts
             .iter()
-            .find(|artifact| artifact.id == id.as_str())
+            .find(|artifact| wire_artifact_id(view.paths, &artifact.id) == id.as_str())
             .map(|artifact| (event, artifact))
     });
     let (kind, bytes) = match recorded {
@@ -5235,6 +5235,18 @@ pub(crate) fn artifact_over(view: &Run<'_>, id: &ArtifactId) -> Option<Value> {
             if ReferenceKind::of(&recorded.kind) == ReferenceKind::OneharnessSession =>
         {
             return harness_session(relayed_location(event)?, id, &event.ts);
+        }
+        // A refused edit's complete refusal, which the engine kept as a JSON
+        // string in the run's reports directory: served whole, as the text it is.
+        Some((_, recorded)) if ReferenceKind::of(&recorded.kind) == ReferenceKind::Refusal => {
+            return refusal_text(view.paths, &recorded.id).map(|content| {
+                json!({
+                    "id": id.as_str(),
+                    "kind": ReferenceKind::Refusal.as_str(),
+                    "content": content,
+                    "truncated": false,
+                })
+            });
         }
         Some((event, recorded)) => {
             let kind = ReferenceKind::of(&recorded.kind);
@@ -5268,6 +5280,48 @@ pub(crate) fn artifact_over(view: &Run<'_>, id: &ArtifactId) -> Option<Value> {
         "content": String::from_utf8_lossy(tail),
         "truncated": truncated,
     }))
+}
+
+/// The id an envelope's artifact is served under.
+///
+/// A producing library's own id is opaque and served as recorded — except one the
+/// engine kept itself: `Journal::artifact` records the absolute path of the file it
+/// wrote in the run's reports directory, which no route can be asked for and which
+/// is a location on the producing host. That one is named by its file name, unique
+/// within the directory, and [`artifact_over`] resolves it back only against the
+/// run's own envelopes, so a name the run never recorded reads nothing.
+fn wire_artifact_id<'a>(paths: &RunPaths, recorded: &'a str) -> &'a str {
+    kept_report(paths, recorded).unwrap_or(recorded)
+}
+
+/// The file name of a recorded artifact id that is a file the engine kept in a run's
+/// reports directory: an absolute path whose parent is a directory of the name the
+/// SDK gives that directory. Read only through [`refusal_text`], which looks for it
+/// in this run's own reports directory and never at the path the record spelled, so
+/// a run directory moved since it was written still serves what it kept.
+fn kept_report<'a>(paths: &RunPaths, recorded: &'a str) -> Option<&'a str> {
+    let path = Path::new(recorded);
+    let reports = paths.reports_dir();
+    let parent = path.parent()?;
+    (path.is_absolute() && parent.file_name().is_some() && parent.file_name() == reports.file_name())
+        .then(|| path.file_name()?.to_str())
+        .flatten()
+        .filter(|name| ArtifactId::try_from(*name).is_ok())
+}
+
+/// A refused edit's complete refusal: the JSON string the engine kept for it, read
+/// from this run's reports directory under the name it was kept by, only where the
+/// file resolves inside that directory, and `None` where it is missing or is not a
+/// JSON string.
+fn refusal_text(paths: &RunPaths, recorded: &str) -> Option<String> {
+    let name = kept_report(paths, recorded)?;
+    let reports = fs::canonicalize(paths.reports_dir()).ok()?;
+    let resolved = fs::canonicalize(reports.join(name)).ok()?;
+    if resolved.parent() != Some(reports.as_path()) {
+        return None;
+    }
+    let bytes = fs::read(resolved).ok()?;
+    serde_json::from_slice::<String>(&bytes).ok()
 }
 
 /// `artifact`, over everything `view` read: the whole merged store.
@@ -5308,7 +5362,7 @@ fn artifact_bytes(
     let path = match kind {
         ReferenceKind::WorkerReport => report_path(view, event),
         // Read whole by `artifact_over` before it asks for bytes.
-        ReferenceKind::OneharnessSession => return None,
+        ReferenceKind::OneharnessSession | ReferenceKind::Refusal => return None,
         ReferenceKind::Conversation | ReferenceKind::GateLog | ReferenceKind::Pr => {
             view.paths.dir.join("artifacts").join(id.as_str())
         }
@@ -5623,6 +5677,9 @@ pub enum Scope<'a> {
 /// hand a client an id that names a different turn than the one the transcript
 /// route serves under it.
 struct Lens<'a> {
+    /// The run's paths: an artifact the engine kept under the run's reports
+    /// directory is named on the wire by its file name ([`wire_artifact_id`]).
+    paths: &'a RunPaths,
     turns: &'a [Option<Turn>],
     /// What the run's surfaces came to, over the whole reading rather than the
     /// records this lens lists.
@@ -5787,12 +5844,12 @@ impl Lens<'_> {
                     .and_then(|positions| positions.get(*index).copied())
                     .unwrap_or(*index);
                 let Some(rendered) = self.rendered else {
-                    return timeline_event(*index, position, event, self.turns, self.surfaces);
+                    return timeline_event(*index, position, event, self);
                 };
                 // A surface's entry changes when a later record of it arrives, so
                 // it is rendered afresh rather than read back.
                 if may_belong_to_surface(event) {
-                    return timeline_event(*index, position, event, self.turns, self.surfaces);
+                    return timeline_event(*index, position, event, self);
                 }
                 let turn = self
                     .turns
@@ -5805,7 +5862,7 @@ impl Lens<'_> {
                         return entry.clone();
                     }
                 }
-                let entry = timeline_event(*index, position, event, self.turns, self.surfaces);
+                let entry = timeline_event(*index, position, event, self);
                 rendered.fresh += 1;
                 rendered.entries.insert(position, (turn, entry.clone()));
                 entry
@@ -5871,6 +5928,7 @@ fn timeline_spans(
     let turns = turn_ids(view, &transcripts);
     let surfaces = SurfaceStates::of(&view.whole.events);
     let lens = Lens {
+        paths: view.paths,
         turns: &turns,
         surfaces: &surfaces,
         filter,
@@ -5975,6 +6033,7 @@ pub(crate) fn share_spans(
         _ => None,
     };
     let lens = Lens {
+        paths: view.paths,
         turns: &turns,
         surfaces,
         filter,
@@ -7264,13 +7323,13 @@ impl SurfaceStates {
 // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 
 /// One journal envelope as a timeline event.
-fn timeline_event(
-    index: usize,
-    position: usize,
-    event: &Envelope,
-    turns: &[Option<Turn>],
-    surfaces: &SurfaceStates,
-) -> Value {
+fn timeline_event(index: usize, position: usize, event: &Envelope, lens: &Lens<'_>) -> Value {
+    let Lens {
+        paths,
+        turns,
+        surfaces,
+        ..
+    } = lens;
     let turn = turns.get(index).and_then(Option::as_ref);
     let mut item = Map::new();
     item.insert(
@@ -7404,7 +7463,10 @@ fn timeline_event(
     } else if let Some(artifact) = event.artifacts.first() {
         item.insert(
             "reference".into(),
-            json!({ "kind": ReferenceKind::of(&artifact.kind).as_str(), "value": artifact.id }),
+            json!({
+                "kind": ReferenceKind::of(&artifact.kind).as_str(),
+                "value": wire_artifact_id(paths, &artifact.id),
+            }),
         );
     }
     Value::Object(item)
@@ -7477,6 +7539,13 @@ fn run_spans(view: &Run<'_>, lens: &Lens<'_>, ends: &Ends) -> Vec<Value> {
     spans
 }
 
+/// Whether `event` is a refused live edit, which the run's own span lists whatever
+/// node it names: it changed nothing at that node and is the run's edit as every
+/// edit record is, while the node's own timeline lists it by its label.
+pub(crate) fn is_refused_edit(event: &Envelope) -> bool {
+    event.source == Source::Pipeline && event.kind.0 == PipelineKind::EditRejected.as_str()
+}
+
 /// The run's own span and the sessions it relayed at no node: everything a run
 /// timeline draws above the nodes.
 ///
@@ -7506,7 +7575,10 @@ fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &End
     }));
     let own: Vec<(usize, &Envelope)> = events
         .iter()
-        .filter(|(_, event)| event.labels.node.is_none() && event.source != Source::Agentgraph)
+        .filter(|(_, event)| {
+            (event.labels.node.is_none() || is_refused_edit(event))
+                && event.source != Source::Agentgraph
+        })
         .copied()
         .collect();
     if let Some(Value::Object(run_span)) = spans.first_mut() {

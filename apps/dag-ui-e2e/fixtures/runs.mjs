@@ -4430,6 +4430,276 @@ export function buildCommandStepsRuns(root) {
 }
 
 /**
+ * One refused live edit as the engine (onepipeline 0.116.1) records it, appended
+ * to `journal`: the complete refusal kept as a JSON string in the run's reports
+ * directory, named as `Journal::artifact` names it — the artifact kind, the stream
+ * and the seq the record takes — and recorded as the record's own artifact, which
+ * `full_reason` names by its absolute path; the `edit-rejected` itself, labelled
+ * with the node its command names; and the reconciler's non-blocking
+ * `edit-rejected` surface, whose `rejection` names that record by stream and seq.
+ * `read`, where given, is the seconds after which the planner read the surface.
+ *
+ * Shared by the refusals corpus and the large-run world, so a journey and a
+ * measurement read one shape; `tests/e2e/server.rs` holds what it writes to the
+ * linked engine's schema for each kind and its command to the engine's `Command`.
+ */
+export function emitRefusal(journal, dir, refusal) {
+  const {
+    author,
+    command,
+    node,
+    reason,
+    summary,
+    full,
+    truncated = false,
+    refused,
+    envelope,
+    index,
+    surface,
+    read,
+  } = refusal;
+  const run = { run_id: journal.runId };
+  const seq = journal.lines.length;
+  const reports = join(dir, "reports");
+  mkdirSync(reports, { recursive: true });
+  const kept = join(
+    reports,
+    `${REFUSAL_ARTIFACT_KIND}-${journal.stream}-${seq}.json`,
+  );
+  const body = JSON.stringify(full);
+  writeFileSync(kept, body);
+  journal.emit(
+    "pipeline",
+    "edit-rejected",
+    node === undefined ? run : { ...run, node },
+    {
+      author,
+      command,
+      reason,
+      ...(envelope === undefined ? {} : { envelope }),
+      ...(index === undefined ? {} : { index }),
+      ...(refused === undefined ? {} : { refusal: refused }),
+      ...(node === undefined ? {} : { node }),
+      summary,
+      full_reason: kept,
+      full_reason_truncated: truncated,
+    },
+    [
+      {
+        id: kept,
+        kind: REFUSAL_ARTIFACT_KIND,
+        bytes: Buffer.byteLength(body),
+      },
+    ],
+  );
+  const raised = {
+    surface,
+    kind: "edit-rejected",
+    message: `reconciler: rejected — ${reason}`,
+    source: "reconciler",
+    blocking: false,
+  };
+  journal.emit("pipeline", "planner-surface-queued", run, {
+    ...raised,
+    rejection: { stream: journal.stream, seq },
+  });
+  if (read !== undefined)
+    journal.advance(read).emit("pipeline", "planner-surfaced", run, {
+      ...raised,
+      queued_at: journal.at,
+    });
+  return journal;
+}
+
+/** The artifact kind the engine keeps a refused edit's complete refusal under. */
+const REFUSAL_ARTIFACT_KIND = "edit-rejected-full-reason";
+
+/** The refusals corpus's run. */
+export const REFUSALS_RUN = "dag-ui-refusals";
+
+/** The plan-edit hook the refusals run launched with. */
+const REFUSAL_HOOK = "scripts/plan-edit-hook.sh";
+
+/**
+ * What the reviewer the plan-edit hook ran wrote on stderr refusing `review`'s
+ * amendment: several lines, each a finding, every one of which the detail shows.
+ */
+export const REFUSAL_FINDINGS = [
+  "The amended task no longer states what review must prove.",
+  "  - Acceptance criteria: none survive the amendment.",
+  "  - The task names no journey a reviewer could run.",
+  "  - It drops the budget the original task held review to.",
+  "Restore at least one criterion a reviewer can check, then send it again.",
+].join("\n");
+
+/** The first stdout line the hook wrote, which is the refusal's summary line. */
+const REFUSAL_HOOK_LINE =
+  "the amendment leaves review with no acceptance criteria";
+
+/**
+ * The refusals run: a three-node plan that settled, and three edits it refused,
+ * written in the engine's own record shapes — a plan-edit hook's refusal of the
+ * planner's amendment, whose complete refusal runs to several lines; an edit the
+ * engine itself refused the monitor, naming the node it concerned; and a second
+ * hook refusal of the planner whose stderr ran past the engine's read bound — each
+ * beside the reconciler surface it raised, the first two read by the planner. A
+ * fourth refusal is the shape the engine wrote before it summarised refusals, with
+ * no `summary`, `node` or `full_reason`, at no node and with no surface.
+ */
+export function buildRefusalsRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const runId = REFUSALS_RUN;
+  const dir = runDir(root, runId);
+  const plan = {
+    schema_version: 2,
+    goal: { text: "Ship the widget release" },
+    name: "refusals",
+    concurrency: 1,
+    tasks: [
+      {
+        id: "build",
+        persona: "worker",
+        task: "## What\nBuild the widgets.\n\n## Acceptance criteria\nThe build passes",
+      },
+      {
+        id: "review",
+        persona: "worker",
+        deps: ["build"],
+        task: "## What\nReview the build.\n\n## Acceptance criteria\nA reviewer approves",
+      },
+      {
+        id: "ship",
+        persona: "worker",
+        deps: ["review"],
+        task: "## What\nShip it.\n\n## Acceptance criteria\nThe release is served",
+      },
+    ],
+  };
+  writeJson(join(dir, "plan.json"), plan);
+  writeJson(join(dir, "launch.json"), {
+    ...launch(runId, "claude-code", CLAUDE_SESSION, stamp(HISTORIC), 4245),
+    plan_edit_hook: { command: [REFUSAL_HOOK], timeout_seconds: 600 },
+  });
+  const journal = new Journal(dir, streamOf(runId), HISTORIC);
+  journal.runId = runId;
+  declareGraph(root, journal.stream, HOST_MEMBERS);
+  const run = { run_id: runId };
+  journal.emit("pipeline", "run-started", run, {
+    plan,
+    graph: null,
+    dir: "/a-recording-host/workspace",
+    heartbeat_interval: 1800,
+  });
+  for (const node of ["build", "review", "ship"]) {
+    journal
+      .advance(2)
+      .emit(
+        "pipeline",
+        "node-dispatched",
+        { ...run, node, persona: "worker" },
+        { attempt: 1, persona: "worker" },
+      );
+    journal
+      .advance(30)
+      .emit(
+        "pipeline",
+        "node-settled",
+        { ...run, node },
+        { status: "done", outcome: "merged" },
+      );
+    if (node === "build") {
+      // Before the engine summarised a refusal: the record alone, at no node.
+      journal.advance(1).emit("pipeline", "edit-rejected", run, {
+        author: "planner",
+        command: {
+          op: "decline",
+          id: "build",
+          comments: [
+            { id: "c-21", url: "https://example.invalid/changes/21#c-21" },
+          ],
+          reason: "",
+        },
+        reason: "refused: decline: node 'build': the reason cannot be blank",
+        envelope: 1,
+        index: 0,
+        refusal: { kind: "blank-reason", node: "build" },
+      });
+      journal.advance(2);
+      emitRefusal(journal, dir, {
+        author: "planner",
+        command: {
+          op: "amend",
+          id: "review",
+          text: "Review the build by reading it.",
+        },
+        node: "review",
+        reason: `refused: amend: the plan-edit hook \`${REFUSAL_HOOK}\` refused node 'review', so none of this reply's edits were applied: ${REFUSAL_FINDINGS}`,
+        summary: `amend of node 'review': ${REFUSAL_HOOK_LINE}`,
+        full: REFUSAL_FINDINGS,
+        envelope: 2,
+        index: 0,
+        surface: 0,
+        read: 3,
+      });
+      journal.advance(2);
+      emitRefusal(journal, dir, {
+        author: "monitor",
+        command: { op: "cancel", id: "build" },
+        node: "build",
+        reason:
+          "refused: cancel: node 'build' has settled and cannot be cancelled",
+        summary: "cancel: node 'build' has settled and cannot be cancelled",
+        full: "refused: cancel: node 'build' has settled and cannot be cancelled",
+        envelope: 3,
+        index: 0,
+        surface: 1,
+        read: 4,
+      });
+    }
+    if (node === "review") {
+      const cut = `${"x".repeat(80)}\n`.repeat(64 * 13);
+      journal.advance(2);
+      emitRefusal(journal, dir, {
+        author: "planner",
+        command: {
+          op: "amend",
+          id: "ship",
+          text: "Ship it now.",
+        },
+        node: "ship",
+        reason: `refused: amend: the plan-edit hook \`${REFUSAL_HOOK}\` refused node 'ship', so none of this reply's edits were applied: ${cut.slice(0, 3600)}`,
+        summary:
+          "amend of node 'ship': the reviewer's log ran past what the engine reads",
+        full: cut.slice(0, 64 * 1024),
+        truncated: true,
+        envelope: 4,
+        index: 0,
+        surface: 2,
+      });
+    }
+  }
+  journal.write();
+  writeJson(join(dir, "result.json"), {
+    run_id: runId,
+    state: "complete",
+    ok: true,
+    nodes: ["build", "review", "ship"].map((id) => ({
+      id,
+      status: "done",
+      outcome: "merged",
+    })),
+  });
+}
+
+export function refusalsFacts() {
+  return {
+    run: REFUSALS_RUN,
+    findings: REFUSAL_FINDINGS.split("\n"),
+    hook_line: REFUSAL_HOOK_LINE,
+  };
+}
+
+/**
  * The engine's records of one recorded corpus — the event-list corpus of loops,
  * surfaces, edits and commands, or the corpus holding one record of every kind —
  * as one run under `root`: its launch, its plan, the logs its command steps
