@@ -5228,6 +5228,12 @@ const NARRATED_WORDS = {
     kind: "reasoning",
     output: "Bash is disabled here, so the tasks are listed with Glob.",
   },
+  // THROWAWAY spike-visual (dag-ui-panel-cursor-action-items-2026-11-19): the
+  // usage-limit notice as a conversation item of a real transcript, for change 2.
+  8: {
+    kind: "message",
+    output: "You've hit your weekly limit · resets Mon 9:00 AM",
+  },
 };
 
 function narratedEvents() {
@@ -5238,7 +5244,11 @@ function narratedEvents() {
   const closing = recorded.filter((event) => event.kind === "message");
   const events = [];
   let call = 0;
-  for (let index = 0; events.length < calls.length + 3; index += 1) {
+  for (
+    let index = 0;
+    events.length < calls.length + Object.keys(NARRATED_WORDS).length;
+    index += 1
+  ) {
     const words = NARRATED_WORDS[index];
     events.push(
       words === undefined

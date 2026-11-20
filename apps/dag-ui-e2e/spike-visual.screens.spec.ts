@@ -104,54 +104,55 @@ const SURFACES: Surface[] = [
   {
     name: "s2-conversation-item",
     open: async (page, mode) => {
-      await visit(page, `/?run=${runs().live}&node=dashboard`);
+      // The transcripts corpus: a narrating worker read whole off a real recorded
+      // history file, whose turn carries the usage-limit message (fixtures/runs.mjs).
+      server = await startFixtureServer("spike-transcripts", ["--transcripts-corpus"]);
+      await visit(page, `${server.origin}/?run=dag-ui-transcripts&node=narrated`);
+      await expect(page.getByRole("region", { name: "Timeline for narrated" })).toBeVisible();
       await quiet(page);
-      // The item itself, from the fixture: the dashboard worker's turn-activity message
-      // reading the usage-limit notice (fixtures/runs.mjs). No page patch in the before.
-      const item = page
+      await page
+        .getByRole("region", { name: "Node transcript" })
         .getByRole("button", { name: /weekly limit/ })
-        .or(page.getByRole("listitem").filter({ hasText: /weekly limit/ }).getByRole("button"))
-        .first();
-      await item.click();
-      await expect(page.getByRole("region", { name: "Timeline item detail" })).toContainText("You've hit your weekly limit");
+        .first()
+        .click();
+      const detail = page.getByRole("region", { name: "Timeline item detail" });
+      await expect(detail.getByRole("article", { name: /^Turn .* from / })).toBeVisible();
       await quiet(page);
+      if (mode === "before") {
+        // The base's two stacked views in one frame: the conversation's end above the
+        // field/value block it draws under it.
+        await page.evaluate(() =>
+          document.querySelector('section[aria-label="Recorded fields"]')?.scrollIntoView({ block: "end" }),
+        );
+      }
       if (mode === "after") {
         await page.evaluate(() => {
           const detail = document.querySelector('[aria-label="Timeline item detail"]');
           if (!detail) return;
           // One view: no field/value block and no Recorded fields heading at all.
+          for (const el of Array.from(detail.querySelectorAll("h3, h4, dl, section"))) {
+            if (/^Recorded fields$/i.test(el.textContent?.trim() ?? "")) {
+              (el as HTMLElement).style.display = "none";
+              const next = el.nextElementSibling as HTMLElement | null;
+              if (next && next.tagName === "DL") next.style.display = "none";
+            }
+          }
           for (const el of Array.from(detail.querySelectorAll('section[aria-label="Recorded fields"], dl.record-fields, [data-fields]')))
             (el as HTMLElement).style.display = "none";
-          // Fixture words: a conversation long enough to scroll, with the opened item among
-          // its turns. The base has no transcript turn for this item, so the mock draws the
-          // turns itself inside the base's own conversation card.
-          const content = detail.querySelector('[data-slot="card-content"]');
-          if (!content) return;
-          for (const el of Array.from(content.querySelectorAll(".conversation-timeline-sticky, p.detail-note")))
-            (el as HTMLElement).style.display = "none";
-          const say = [
-            "Reading apps/dag-ui/src/features/timeline/NodeTimeline.tsx to find where the hover reading is computed.",
-            "The crosshair snaps only to bars; markers after the last bar have no reading. I'll add a nearest-marker lookup.",
-            "Running the node timeline journeys at 1440x900 and 390x844.",
-            "Two journeys pass; the phone one times out waiting for the tooltip. Retrying with the pointer moved inside the plot.",
-            "npx playwright test --grep 'at 390x844'",
-          ];
-          const turn = (label: string, text: string) => {
-            const a = document.createElement("article");
-            a.setAttribute("aria-label", `Turn ${label} from oneagentgraph`);
-            a.style.cssText = "padding:10px 12px;margin:6px 0";
-            a.innerHTML = `<p class="eyebrow" style="margin:0 0 4px">${label}</p><div style="font-size:14px;line-height:1.5"></div>`;
-            (a.querySelector("div") as HTMLElement).textContent = text;
-            content.appendChild(a);
-            return a;
-          };
-          say.forEach((t, i) => turn(`worker · message ${i + 1}`, t));
-          const target = turn("worker · message 6", "You've hit your weekly limit · resets Mon 9:00 AM");
-          turn("worker · message 7", "(no further output: the dispatch stopped here)");
-          // The DAG view's own selection accent: the selected event row's --primary border,
-          // with a faint tint of the same accent behind it.
-          target.style.cssText +=
-            ";border:1px solid var(--primary);border-radius:8px;background:color-mix(in srgb, var(--primary) 8%, transparent)";
+          // The opened item, in the real conversation view: the smallest element
+          // holding its words, widened to its message group.
+          const holders = Array.from(detail.querySelectorAll("article *")).filter(
+            (el) => /weekly limit/.test(el.textContent ?? "") && !Array.from(el.children).some((c) => /weekly limit/.test(c.textContent ?? "")),
+          );
+          const leaf = holders[0] as HTMLElement | undefined;
+          const target = (leaf?.closest('[role="group"]') as HTMLElement | null) ?? leaf;
+          if (!target) return;
+          // The DAG view's own selection accent: the selected event row's --primary
+          // border, with a faint tint of the same accent behind it.
+          target.style.outline = "1px solid var(--primary)";
+          target.style.outlineOffset = "3px";
+          target.style.borderRadius = "8px";
+          target.style.background = "color-mix(in srgb, var(--primary) 8%, transparent)";
           target.setAttribute("aria-current", "true");
           target.scrollIntoView({ block: "center" });
         });
@@ -358,10 +359,26 @@ async function mockSortDatesSpacing(page: Page): Promise<void> {
       when.style.cssText = "font-size:11px;color:#9ca3af;margin-top:2px";
       when.textContent = ages[i % ages.length];
       h?.insertAdjacentElement("afterend", when);
-      // More room inside a question card, between its source and description and its
-      // "Write an answer" field; spacing between cards and groups stays as on the base.
-      const box = card.querySelector<HTMLElement>("textarea, input[placeholder='Write an answer']");
-      if (box) box.style.marginTop = "14px";
+      // More room inside a question card above its "Write an answer" field, exactly
+      // enough that the gap above the field equals the card's own internal spacing;
+      // spacing between cards and groups stays as on the base.
+      const box = card.querySelector<HTMLElement>("textarea.human-item-answer");
+      const meta = card.querySelector<HTMLElement>(".otg-card__meta");
+      const description = meta?.nextElementSibling as HTMLElement | null | undefined;
+      const above = box?.previousElementSibling as HTMLElement | null | undefined;
+      if (box && meta && description && above) {
+        // The Source line sits almost flush on its description (about 1px), so the
+        // gap matched is the card's own padding, the larger of the two.
+        const surface = card.querySelector<HTMLElement>(".otg-card__surface") ?? card;
+        const inner = Math.max(
+          description.getBoundingClientRect().top - meta.getBoundingClientRect().bottom,
+          Number.parseFloat(getComputedStyle(surface).paddingTop) || 0,
+        );
+        const now = box.getBoundingClientRect().top - above.getBoundingClientRect().bottom;
+        const base = Number.parseFloat(getComputedStyle(box).marginTop) || 0;
+        box.style.marginTop = `${Math.max(0, base + inner - now)}px`;
+        box.dataset.spikeGap = `${inner.toFixed(1)}`;
+      }
     });
   });
 }
