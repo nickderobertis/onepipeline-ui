@@ -71,6 +71,7 @@ import { EventCategoryIcon } from "./event-category";
 import { HistoryFailed, PartialMark, PlotHatches } from "./history-controls";
 import { NodeRelease } from "./release";
 import { TimelineItemDetail } from "./TimelineItemDetail";
+import { useTimelineHoverReport } from "./TimelinePopover";
 import {
   compactTimelineItems,
   compactTimelineMarkers,
@@ -653,6 +654,7 @@ function NodeExecution({
     [containerRef],
   );
   const plotArea = useRef<HTMLElement | null>(null);
+  const reportHover = useTimelineHoverReport();
   const { loadSpan, forgetSpan } = history;
   const openedSpan =
     selected?.rowKind === "span" ? selected.span.id : undefined;
@@ -706,6 +708,7 @@ function NodeExecution({
           lanes={projection.lanes}
           markers={compactMarkers}
           onExpandedChange={setExpanded}
+          onHover={reportHover}
           onRangeChange={(next) =>
             // A reset asks for the whole window back; a live run's window keeps
             // growing, so it is followed rather than pinned.

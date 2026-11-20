@@ -45,6 +45,7 @@ import {
 import { HistoryFailed } from "./history-controls";
 import { TranscriptEntries } from "./NodeTimelineView";
 import { TimelineItemDetail } from "./TimelineItemDetail";
+import { useTimelineHoverReport } from "./TimelinePopover";
 import {
   eventAsRow,
   eventList,
@@ -383,6 +384,7 @@ function GraphExecution({
     else if (segment.nodeId !== undefined) onOpenNode(segment.nodeId);
     else onOpenItem(segment.id);
   };
+  const reportHover = useTimelineHoverReport();
   const lineLanes = graph.line.lanes.filter(({ id }) =>
     graph.line.items.some((item) => item.laneId === id),
   );
@@ -398,6 +400,7 @@ function GraphExecution({
         lanes={lineLanes}
         markers={graph.line.markers}
         onExpandedChange={setRowsOpen}
+        onHover={reportHover}
         onRangeChange={(next) => setZoom(boundedZoom(next))}
         onSelect={(entry) => open(entry.payload)}
         range={range}
@@ -555,6 +558,7 @@ function GraphRowView({
   readonly selectedItemId?: string;
 }) {
   const nodeId = row.nodeId;
+  const reportHover = useTimelineHoverReport();
   return (
     <li className="graph-row" data-row-kind={row.kind}>
       <header className="graph-row-head">
@@ -586,6 +590,7 @@ function GraphRowView({
         lanes={row.lanes}
         markers={row.markers}
         onExpandedChange={onExpandedChange}
+        onHover={reportHover}
         onRangeChange={onRangeChange}
         onSelect={(entry) => onOpen(entry.payload)}
         range={range}

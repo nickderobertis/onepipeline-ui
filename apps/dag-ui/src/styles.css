@@ -1001,6 +1001,10 @@ p {
 .timeline-detail {
   min-width: 0;
   min-height: 0;
+  /* The conversation item a panel opened on is marked in this view's own selection
+     accent — the border a selected event-list row carries — rather than the package's
+     default, so one colour says "this is the one you opened" across the screen. */
+  --conversation-focus-highlight: var(--primary);
 }
 
 /* A turn's tool call is opened by its own row, which is `flex-1` and so carries the

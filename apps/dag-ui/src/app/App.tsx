@@ -361,195 +361,198 @@ export function App({
   );
   return (
     <TooltipProvider>
-      <TimelinePopoverLayer />
-      <div className="app-shell">
-        <RunNavigation
-          rows={telemetry.navigationRows}
-          failed={telemetry.rows === undefined && telemetry.error !== undefined}
-          selectedRunId={selectedRunId}
-          onSelect={(run) => {
-            selection.selectRun(run);
-            drawer.close();
-          }}
-          onOpenProject={selection.selectRun}
-          onHost={() => {
-            selection.selectHost();
-            drawer.close();
-          }}
-          hostCurrent={selection.host && !humanItems.active}
-          onActionItems={() => {
-            humanItems.open();
-            drawer.close();
-          }}
-          actionItemsCurrent={humanItems.active}
-          hiddenKinds={selection.hiddenKinds}
-          onKindsChange={selection.selectKinds}
-          drawerOpen={drawer.open}
-          drawerRef={drawer.drawer}
-          updates={
-            <UpdateSetting
-              caption="Navigation"
-              name="Navigation updates"
-              onChange={updates.setNavigation}
-              setting={updates.navigation}
-              waiting={telemetry.navigationWaiting}
-            />
-          }
-        />
-        {drawer.open && (
-          <button
-            aria-label="Close navigation"
-            className="nav-scrim"
-            onClick={drawer.close}
-            type="button"
+      <TimelinePopoverLayer>
+        <div className="app-shell">
+          <RunNavigation
+            rows={telemetry.navigationRows}
+            failed={
+              telemetry.rows === undefined && telemetry.error !== undefined
+            }
+            selectedRunId={selectedRunId}
+            onSelect={(run) => {
+              selection.selectRun(run);
+              drawer.close();
+            }}
+            onOpenProject={selection.selectRun}
+            onHost={() => {
+              selection.selectHost();
+              drawer.close();
+            }}
+            hostCurrent={selection.host && !humanItems.active}
+            onActionItems={() => {
+              humanItems.open();
+              drawer.close();
+            }}
+            actionItemsCurrent={humanItems.active}
+            hiddenKinds={selection.hiddenKinds}
+            onKindsChange={selection.selectKinds}
+            drawerOpen={drawer.open}
+            drawerRef={drawer.drawer}
+            updates={
+              <UpdateSetting
+                caption="Navigation"
+                name="Navigation updates"
+                onChange={updates.setNavigation}
+                setting={updates.navigation}
+                waiting={telemetry.navigationWaiting}
+              />
+            }
           />
-        )}
-        <main className="workspace" inert={drawer.open}>
-          {runless ? (
-            <>
-              {header(undefined)}
-              {notices}
-              {humanItems.active ? (
-                <HumanItemsPage
-                  client={client}
-                  live={telemetry.humanItems}
-                  choice={humanItemsSelection.choice}
-                  setChoice={humanItemsSelection.setChoice}
-                  selectedId={humanItemsSelection.selectedId}
-                  setSelectedId={humanItemsSelection.setSelectedId}
-                />
-              ) : (
-                <HostPage
-                  client={client}
-                  listError={hostListError}
-                  onRefresh={() => setHostRefresh((value) => value + 1)}
-                  list={hostList}
-                  rows={telemetry.hostRows}
-                >
-                  <HostShutdownButtons
-                    list={hostList}
-                    loadMore={noMorePages}
-                    loadingMore={false}
-                    shutdowns={hostShutdowns}
+          {drawer.open && (
+            <button
+              aria-label="Close navigation"
+              className="nav-scrim"
+              onClick={drawer.close}
+              type="button"
+            />
+          )}
+          <main className="workspace" inert={drawer.open}>
+            {runless ? (
+              <>
+                {header(undefined)}
+                {notices}
+                {humanItems.active ? (
+                  <HumanItemsPage
+                    client={client}
+                    live={telemetry.humanItems}
+                    choice={humanItemsSelection.choice}
+                    setChoice={humanItemsSelection.setChoice}
+                    selectedId={humanItemsSelection.selectedId}
+                    setSelectedId={humanItemsSelection.setSelectedId}
                   />
-                </HostPage>
-              )}
-            </>
-          ) : (
-            // The tab set holds the run bar too, because the run's views are
-            // selected in that bar: one band above the view rather than a strip of
-            // tabs under the header.
-            <Tabs
-              className="min-h-0 flex-1 gap-0"
-              onValueChange={(value) =>
-                value === "overall"
-                  ? selection.showOverall()
-                  : selection.selectNode(undefined)
-              }
-              value={selection.view}
-            >
-              {header(
-                <div className="view-tabs">
-                  <TabsList aria-label="DAG views" variant="line">
-                    <TabsTrigger value="graph">
-                      <Workflow size={15} /> Graph
-                    </TabsTrigger>
-                    <TabsTrigger value="overall">
-                      <Route size={15} /> Overall
-                    </TabsTrigger>
-                  </TabsList>
-                </div>,
-              )}
-              {notices}
-              {/* One content region for whichever view is selected: the other tab's
+                ) : (
+                  <HostPage
+                    client={client}
+                    listError={hostListError}
+                    onRefresh={() => setHostRefresh((value) => value + 1)}
+                    list={hostList}
+                    rows={telemetry.hostRows}
+                  >
+                    <HostShutdownButtons
+                      list={hostList}
+                      loadMore={noMorePages}
+                      loadingMore={false}
+                      shutdowns={hostShutdowns}
+                    />
+                  </HostPage>
+                )}
+              </>
+            ) : (
+              // The tab set holds the run bar too, because the run's views are
+              // selected in that bar: one band above the view rather than a strip of
+              // tabs under the header.
+              <Tabs
+                className="min-h-0 flex-1 gap-0"
+                onValueChange={(value) =>
+                  value === "overall"
+                    ? selection.showOverall()
+                    : selection.selectNode(undefined)
+                }
+                value={selection.view}
+              >
+                {header(
+                  <div className="view-tabs">
+                    <TabsList aria-label="DAG views" variant="line">
+                      <TabsTrigger value="graph">
+                        <Workflow size={15} /> Graph
+                      </TabsTrigger>
+                      <TabsTrigger value="overall">
+                        <Route size={15} /> Overall
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>,
+                )}
+                {notices}
+                {/* One content region for whichever view is selected: the other tab's
                 panel is unmounted by the primitive, exactly as it is for any tab set. */}
-              <TabsContent className="min-h-0" value={selection.view}>
-                {/* A run is selected but its detail has not arrived yet — still loading. The
+                <TabsContent className="min-h-0" value={selection.view}>
+                  {/* A run is selected but its detail has not arrived yet — still loading. The
                   empty state means the server serves no run at all, so it is reached only
                   once the list is known and holds none. */}
-                {readFailed && telemetry.error ? (
-                  <div className="loading-state">
-                    <div className="read-failed" role="alert">
-                      <strong>This run's history did not load</strong>
-                      <p>{telemetry.error.message}</p>
-                      <button onClick={telemetry.refresh} type="button">
-                        Try again
-                      </button>
+                  {readFailed && telemetry.error ? (
+                    <div className="loading-state">
+                      <div className="read-failed" role="alert">
+                        <strong>This run's history did not load</strong>
+                        <p>{telemetry.error.message}</p>
+                        <button onClick={telemetry.refresh} type="button">
+                          Try again
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : !detail &&
-                  (telemetry.loading || selectedRunId !== undefined) ? (
-                  <div aria-live="polite" className="loading-state">
-                    <Skeleton className="h-2 w-48" />
-                    <Skeleton className="h-2 w-32" />
-                    Loading execution history…
-                  </div>
-                ) : detail && selectedRunId ? (
-                  selection.view === "overall" ? (
-                    <OverallView
-                      client={client}
-                      detail={detail}
-                      hiddenTypes={selection.hiddenEventTypes}
-                      key={selectedRunId}
-                      onHiddenTypesChange={selection.selectEventTypes}
-                      journalSeq={graph?.last_seq}
-                      nodes={nodes}
-                      onRetry={telemetry.refresh}
-                      state={state}
-                      status={control.status}
-                      timeline={telemetry.timeline}
-                      timelineError={telemetry.timelineError}
-                      onSelectNode={selection.selectNode}
-                      onSelectItem={selection.selectItem}
-                      selectedItemId={selection.itemId}
-                    />
-                  ) : selectedNode ? (
-                    // Opening a node hands it the whole working area: the graph stays
-                    // one breadcrumb away rather than one narrow column beside it.
-                    <NodeTimelineView
-                      client={client}
-                      hiddenTypes={selection.hiddenEventTypes}
-                      key={`${selectedRunId}:${selectedNode.id}`}
-                      onHiddenTypesChange={selection.selectEventTypes}
-                      runLoaded={runLoaded}
-                      onRetry={telemetry.refresh}
-                      node={selectedNode}
-                      nodes={nodes}
-                      onBack={() => selection.selectNode(undefined)}
-                      onSelectItem={selection.selectItem}
-                      runId={selectedRunId}
-                      selectedItemId={selection.itemId}
-                      selectedTab={selection.nodeTab}
-                      onSelectTab={selection.selectNodeTab}
-                      timeline={telemetry.timeline}
-                      timelineError={telemetry.timelineError}
-                    />
+                  ) : !detail &&
+                    (telemetry.loading || selectedRunId !== undefined) ? (
+                    <div aria-live="polite" className="loading-state">
+                      <Skeleton className="h-2 w-48" />
+                      <Skeleton className="h-2 w-32" />
+                      Loading execution history…
+                    </div>
+                  ) : detail && selectedRunId ? (
+                    selection.view === "overall" ? (
+                      <OverallView
+                        client={client}
+                        detail={detail}
+                        hiddenTypes={selection.hiddenEventTypes}
+                        key={selectedRunId}
+                        onHiddenTypesChange={selection.selectEventTypes}
+                        journalSeq={graph?.last_seq}
+                        nodes={nodes}
+                        onRetry={telemetry.refresh}
+                        state={state}
+                        status={control.status}
+                        timeline={telemetry.timeline}
+                        timelineError={telemetry.timelineError}
+                        onSelectNode={selection.selectNode}
+                        onSelectItem={selection.selectItem}
+                        selectedItemId={selection.itemId}
+                      />
+                    ) : selectedNode ? (
+                      // Opening a node hands it the whole working area: the graph stays
+                      // one breadcrumb away rather than one narrow column beside it.
+                      <NodeTimelineView
+                        client={client}
+                        hiddenTypes={selection.hiddenEventTypes}
+                        key={`${selectedRunId}:${selectedNode.id}`}
+                        onHiddenTypesChange={selection.selectEventTypes}
+                        runLoaded={runLoaded}
+                        onRetry={telemetry.refresh}
+                        node={selectedNode}
+                        nodes={nodes}
+                        onBack={() => selection.selectNode(undefined)}
+                        onSelectItem={selection.selectItem}
+                        runId={selectedRunId}
+                        selectedItemId={selection.itemId}
+                        selectedTab={selection.nodeTab}
+                        onSelectTab={selection.selectNodeTab}
+                        timeline={telemetry.timeline}
+                        timelineError={telemetry.timelineError}
+                      />
+                    ) : (
+                      <DagGraph
+                        journalSeq={graph?.last_seq}
+                        nodes={nodes}
+                        rejectedEdits={graph?.rejected_edits}
+                        selectedNodeId={selection.nodeId}
+                        onSelectNode={selection.selectNode}
+                      />
+                    )
                   ) : (
-                    <DagGraph
-                      journalSeq={graph?.last_seq}
-                      nodes={nodes}
-                      rejectedEdits={graph?.rejected_edits}
-                      selectedNodeId={selection.nodeId}
-                      onSelectNode={selection.selectNode}
-                    />
-                  )
-                ) : (
-                  <div className="empty-state">
-                    <Workflow size={34} />
-                    <h2>No DAG runs found</h2>
-                    <p>Start an orchestrated run to see it appear here.</p>
-                  </div>
-                )}
-              </TabsContent>
-            </Tabs>
+                    <div className="empty-state">
+                      <Workflow size={34} />
+                      <h2>No DAG runs found</h2>
+                      <p>Start an orchestrated run to see it appear here.</p>
+                    </div>
+                  )}
+                </TabsContent>
+              </Tabs>
+            )}
+          </main>
+          {historyLoading && historyFailed === undefined && (
+            <p className="history-loading" role="status">
+              {HISTORY_LOADING_TEXT}
+            </p>
           )}
-        </main>
-        {historyLoading && historyFailed === undefined && (
-          <p className="history-loading" role="status">
-            {HISTORY_LOADING_TEXT}
-          </p>
-        )}
-      </div>
+        </div>
+      </TimelinePopoverLayer>
     </TooltipProvider>
   );
 }

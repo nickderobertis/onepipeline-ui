@@ -43,6 +43,7 @@ import { formatDuration } from "../../lib/time";
 import { useRead } from "../../lib/useRead";
 import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
+import { ConversationPlotHover } from "./TimelinePopover";
 import {
   dispatchRoleLabel,
   editAuthor,
@@ -374,12 +375,14 @@ function Session({
         </header>
         <Separator className="my-2.5" />
         <div className="conversation-timeline-sticky" ref={pinned}>
-          <ConversationTimeline
-            cursor={sync.cursor}
-            {...(focus === undefined ? {} : { focus })}
-            onSelectTurn={sync.scrollTo}
-            turns={[...turns]}
-          />
+          <ConversationPlotHover>
+            <ConversationTimeline
+              cursor={sync.cursor}
+              {...(focus === undefined ? {} : { focus })}
+              onSelectTurn={sync.scrollTo}
+              turns={[...turns]}
+            />
+          </ConversationPlotHover>
         </div>
         {/* llmlint: ignore[changed_behavior_has_e2e] the same unproducible state as
             above, from the other side: a served timeline names this turn, so only a
