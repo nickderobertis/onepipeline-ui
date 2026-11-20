@@ -877,3 +877,14 @@ one; it serves no project graph, so nothing it serves changes. The move is
 announced as a break: the re-exported engine types change. Its oneagentgraph,
 onejudge, oneharness-core, onemessagebus and onevcs requirements are the ones
 0.114.0 resolved.
+
+0.115.1 is the engine that links onetaskgraph 0.14.19, whose `linear` plugin keeps an
+item's metadata in one collapsed block at the end of its long form — `+++ onetaskgraph
+metadata`, a blank line, the canonical JSON in one code span, a blank line, `+++` — and
+still reads the ``<!-- onetaskgraph.metadata `{…}` -->`` slot it wrote before. This crate
+moves to it, and to that store release, so that a Linear-homed plan whose items the host's
+commands and the engine now write in the block is read with its goal, node ids and
+settlements rather than as carrying no metadata. A patch move within 0.115, so the
+re-exported engine types do not change; it serves nothing new. Its oneagentgraph,
+onejudge, oneharness-core, onemessagebus and onevcs requirements are the ones 0.115.0
+resolved.

@@ -613,6 +613,214 @@ fn a_private_linear_home_with_a_public_destination_task_is_readable() {
     assert_eq!(missing.status, 404, "{}", missing.body);
 }
 
+/// The native id of the Linear project [`a_linear_home_in_the_collapsed_block_is_read_through_the_linked_plugin`] launches.
+#[cfg(unix)]
+const LINEAR_HOME: &str = "5d1f0a3e-7c42-4b8e-9a61-2f8c3b9e4d70";
+/// Its task written in the collapsed metadata block.
+#[cfg(unix)]
+const LINEAR_BLOCK_TASK: &str = "8a3c6e12-4f5b-4d27-b8e9-1c0d7a2f6b35";
+/// Its task still holding the legacy comment slot.
+#[cfg(unix)]
+const LINEAR_SLOT_TASK: &str = "c47e9b20-1d8a-4f63-a5c2-9e3b0f7d1a84";
+
+/// `content` ending in the collapsed block the linked `linear` plugin writes a Linear item's
+/// metadata in: `+++ onetaskgraph metadata`, a blank line, the canonical JSON in one code span,
+/// a blank line, `+++` — set off from the content by one blank line, with nothing after it.
+///
+/// A copy of the shape onetaskgraph 0.14.19's `docs/metadata.md` states, and of nothing the
+/// plugin exports: the journey that reads it, below, is what goes red when the two drift.
+#[cfg(unix)]
+fn linear_metadata_block(content: &str, metadata: &Value) -> String {
+    format!("{content}\n\n+++ onetaskgraph metadata\n\n`{metadata}`\n\n+++")
+}
+
+/// `content` ending in the one-line comment slot the plugin wrote before the collapsed block,
+/// which `tests/fixtures/private-linear-home/linear-home.md` holds and reads still accept.
+#[cfg(unix)]
+fn linear_metadata_slot(content: &str, metadata: &Value) -> String {
+    format!("{content}\n\n<!-- onetaskgraph.metadata `{metadata}` -->")
+}
+
+/// A task's long form as a planner writes one: what, why, and its acceptance criteria.
+#[cfg(unix)]
+fn linear_task_body(node: &str) -> String {
+    format!("## What\nDo {node}.\n\n## Why\nSo the run can settle.\n\n## Acceptance criteria\n\n* {node} is done.")
+}
+
+/// A Linear-homed plan whose home and one task end in the collapsed metadata block and whose
+/// other task still holds the legacy comment slot is launched by the pinned engine — the
+/// release this crate links, reading the Linear items through the same `linear` plugin release
+/// — over a loopback Linear, and the read API serves the run with every metadata-derived field
+/// of all three: the plan's goal off the home, each task's node id, and each task's stored
+/// settlement, continued rather than dispatched.
+///
+/// Each of those fields exists only in an item's metadata, so a store that read either spelling
+/// as carrying none would launch a plan with no goal and no node ids — or refuse it — and the
+/// API would answer none of what is asserted here.
+// llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] this read journey produces records with the pinned engine CLI already provisioned by this tier, then queries the real read API. It needs only that existing setup and a loopback socket; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
+#[cfg(unix)]
+#[test]
+fn a_linear_home_in_the_collapsed_block_is_read_through_the_linked_plugin() {
+    let (workspace, root) = fixture_run::workspace();
+    let dir = workspace.path().to_path_buf();
+    // Start validates the dispatch graph even though a plan whose every task is continued
+    // dispatches nothing.
+    let graphs = dir.join("graphs");
+    fs::create_dir_all(&graphs).expect("graph directory");
+    fs::write(graphs.join("node-scope.yaml"),
+        "version: 1\nname: node-scope\nmembers:\n  worker:\n    kind: oneharness\n    oneharness_config: oneharness.toml\n")
+        .expect("the launch graph");
+    fs::write(
+        graphs.join("oneharness.toml"),
+        "run_mode = \"fallback\"\nharnesses = [\"claude-code\"]\n",
+    )
+    .expect("the unused dispatch harness configuration");
+
+    let goal = "Deliver the Linear plan";
+    // Keys in canonical (sorted) order, as the plugin writes them.
+    let settled = |branch: &str| json!({"branch": branch, "outcome": "merged", "status": "done"});
+    // llmlint: ignore[e2e_not_mocked] Linear is the external tracker this journey may double: this repository holds no Linear credential and runs no live journey against it, so the loopback answers only the plugin's own `graphql` documents, refuses any other, and the engine, the linked plugin and the read API under test are all real.
+    let linear = crate::linear_workspace::LinearWorkspace::start();
+    linear.add_project(
+        LINEAR_HOME,
+        "Linear plan",
+        &linear_metadata_block(
+            "Ship the plan.",
+            &json!({
+                "onepipeline.concurrency": 1,
+                "onepipeline.goal": {"text": goal},
+                "onepipeline.schema_version": onepipeline::plan::PLAN_SCHEMA_VERSION,
+            }),
+        ),
+    );
+    linear.add_issue(
+        LINEAR_BLOCK_TASK,
+        LINEAR_HOME,
+        "chore: anchor",
+        &linear_metadata_block(
+            &linear_task_body("anchor"),
+            &json!({
+                "onepipeline.id": "anchor",
+                "onepipeline.persona": "engineer",
+                "onepipeline.settlement": settled("lin/anchor"),
+            }),
+        ),
+    );
+    linear.add_issue(
+        LINEAR_SLOT_TASK,
+        LINEAR_HOME,
+        "docs: examples",
+        &linear_metadata_slot(
+            &linear_task_body("examples"),
+            &json!({
+                "onepipeline.id": "examples",
+                "onepipeline.persona": "engineer",
+                "onepipeline.settlement": settled("lin/examples"),
+            }),
+        ),
+    );
+    fs::write(
+        dir.join("onetaskgraph.yaml"),
+        format!(
+            "sources:\n  linear:\n    plugin: linear\n    config:\n      endpoint: {:?}\n      team: {}\n      api_key_env: LINEAR_API_KEY\n      status_mapping:\n        todo: Todo\n        done: Done\n",
+            linear.endpoint,
+            crate::linear_workspace::TEAM,
+        ),
+    )
+    .expect("the store configuration");
+
+    let project = format!("linear:{LINEAR_HOME}");
+    let launched = provisioned_onepipeline_with_env(
+        &root,
+        &dir,
+        &graphs.join("node-scope.yaml"),
+        &[("LINEAR_API_KEY", "fixture-key")],
+        &["start", &project, "--detach"],
+    );
+    let run = started_and_let_go(&launched);
+    {
+        let held = linear.held();
+        assert!(
+            held.unexpected.is_empty(),
+            "the plugin sent requests the loopback Linear does not answer: {:#?}",
+            held.unexpected
+        );
+        // The engine's write-back of each settled task is the plugin writing the block itself,
+        // so the helper above is held to the plugin's own bytes, not only to what it reads.
+        for (issue, node) in [
+            (LINEAR_BLOCK_TASK, "anchor"),
+            (LINEAR_SLOT_TASK, "examples"),
+        ] {
+            let description = held
+                .issues
+                .iter()
+                .find(|row| row["id"] == issue)
+                .and_then(|row| row["description"].as_str())
+                .expect("the task's description");
+            let written: Value = serde_json::from_str(
+                description
+                    .split("\n\n+++ onetaskgraph metadata\n\n`")
+                    .nth(1)
+                    .and_then(|rest| rest.strip_suffix("`\n\n+++"))
+                    .unwrap_or_else(|| {
+                        panic!("{node} was not written in the block: {description}")
+                    }),
+            )
+            .expect("the block's JSON");
+            assert_eq!(written["onepipeline.id"], json!(node), "{description}");
+            assert_eq!(
+                description,
+                linear_metadata_block(&linear_task_body(node), &written),
+                "the plugin's block differs from the shape this journey writes"
+            );
+        }
+    }
+
+    let serving = Serving::start_in_as_with_env(
+        workspace,
+        fixture_run::SESSION,
+        &[("LINEAR_API_KEY", "fixture-key")],
+    );
+    let listed = http::get(serving.address, "/api/v2/runs?include_settled=true");
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    let row = listed.json()["runs"]
+        .as_array()
+        .expect("runs")
+        .iter()
+        .find(|row| row["run_id"] == json!(run))
+        .cloned()
+        .unwrap_or_else(|| panic!("the run is not listed: {}", listed.body));
+    assert_eq!(row["project"], json!(project), "{row}");
+    let detail = http::get(serving.address, &format!("/api/v2/runs/{run}"));
+    assert_eq!(detail.status, 200, "{}", detail.body);
+    let detail = detail.json();
+    assert_enveloped(&detail);
+    let plan = &detail["graph"]["plan"];
+    assert_eq!(plan["goal"]["text"], json!(goal), "{detail}");
+    let ids: Vec<&Value> = plan["tasks"]
+        .as_array()
+        .expect("the plan's tasks")
+        .iter()
+        .map(|task| &task["id"])
+        .collect();
+    assert_eq!(ids, [&json!("anchor"), &json!("examples")], "{detail}");
+    assert_eq!(
+        detail["graph"]["node_status"],
+        json!({"anchor": "done", "examples": "done"}),
+        "{detail}"
+    );
+    for (node, branch) in [("anchor", "lin/anchor"), ("examples", "lin/examples")] {
+        let result = &detail["graph"]["node_results"][node];
+        assert_eq!(result["status"], json!("done"), "{node}: {detail}");
+        assert_eq!(result["outcome"], json!("merged"), "{node}: {detail}");
+        assert_eq!(result["branch"], json!(branch), "{node}: {detail}");
+    }
+    let goals = http::get(serving.address, &format!("/api/v2/runs/{run}/goals"));
+    assert_eq!(goals.status, 200, "{}", goals.body);
+    assert!(goals.body.contains(goal), "{}", goals.body);
+}
+// llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
+
 #[test]
 fn a_run_launched_from_a_plan_store_project_is_served_by_every_route() {
     // The shape every run this host launches now has, and the one an eleven-minor

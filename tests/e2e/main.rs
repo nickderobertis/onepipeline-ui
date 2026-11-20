@@ -115,3 +115,6 @@ mod workspace_copy;
 #[cfg(unix)]
 #[path = "../support/github_board.rs"]
 mod github_board;
+#[cfg(unix)]
+#[path = "../support/linear_workspace.rs"]
+mod linear_workspace;
