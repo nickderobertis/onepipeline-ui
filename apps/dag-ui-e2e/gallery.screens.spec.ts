@@ -834,7 +834,7 @@ const SURFACES: readonly Surface[] = [
       await settleReads(page);
       await page
         .getByRole("region", { name: "Node transcript" })
-        .getByRole("button", { name: /^Open You've hit your weekly limit/u })
+        .getByRole("button", { name: /^Open You.ve hit your weekly limit/u })
         .first()
         .click({ position: { x: 24, y: 8 } });
       await expect(
