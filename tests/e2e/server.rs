@@ -17543,6 +17543,14 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
             "--detach",
         ]),
     );
+    // The driver writes the approval's `waiting` settlement back to its task
+    // before it waits; a person's edit is one made after that write.
+    eventually("the waiting settlement reached the task", || {
+        stored_task(&dir, &approval.to_string())
+            .metadata
+            .get("onepipeline.settlement")
+            .is_some_and(|settlement| settlement["status"] == "waiting")
+    });
     // A person edits the board while approval waits. The settlement's narrow
     // write adds its metadata without re-reading the body to screen it.
     let approval = approval.to_string();
