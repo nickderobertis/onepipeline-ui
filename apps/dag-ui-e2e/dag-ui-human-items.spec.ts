@@ -2661,6 +2661,7 @@ async function holdOne(page: Page, path: string) {
   const held = new Promise<boolean>((resolve) => {
     settle = resolve;
   });
+  // llmlint: ignore[e2e_not_mocked] the task asks for each write to fail at the network boundary, where the request never arrives; nothing is answered in the server's place: a held request is forwarded unchanged to the real server and engine store, and a dropped one fails as a refused connection would, before reaching them.
   await page.route(
     `**${path}`,
     async (route) => {
@@ -4186,6 +4187,7 @@ test("a grouping, sort or filter this page does not know, or storage the browser
   // offer, is no choice: the list groups by Priority, in the engine's order,
   // under the default filters.
   const remembered = await browser.newContext();
+  // llmlint: ignore[tests_mirror_real_usage] the subject is what this page does with storage another release of it wrote, or text that is no JSON at all; this release's controls offer only the choices it knows, so no press can put such a value there, and everything after the seed is read through the page's own controls and list.
   await remembered.addInitScript(() => {
     window.localStorage.setItem(
       "onepipeline-ui.human-items.group-by",
@@ -4225,6 +4227,7 @@ test("a grouping, sort or filter this page does not know, or storage the browser
     ["{not json", "", ["Critical (3)", "High (3)", "Low (1)"]],
   ] as const) {
     const partial = await browser.newContext();
+    // llmlint: ignore[tests_mirror_real_usage] the subject is what this page does with storage another release of it wrote, or text that is no JSON at all; this release's controls offer only the choices it knows, so no press can put such a value there, and everything after the seed is read through the page's own controls and list.
     await partial.addInitScript((filters) => {
       window.localStorage.setItem(
         "onepipeline-ui.human-items.filters",
@@ -6868,7 +6871,9 @@ for (const width of [1440, 390] as const)
       await expect(first.getByRole("tooltip")).toHaveCount(0);
       await expect(detailPane(page)).toHaveCount(ends === "touchEnd" ? 1 : 0);
     }
-    await detailPane(page).getByRole("button", { name: "Close detail" }).click();
+    await detailPane(page)
+      .getByRole("button", { name: "Close detail" })
+      .click();
     await expect(detailPane(page)).toHaveCount(0);
     await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await touch.detach();
@@ -7054,6 +7059,7 @@ for (const width of [1440, 390] as const)
     const boxes = listRegion(page).getByRole("textbox", { name: /^Answer: /u });
     await expect(boxes).toHaveCount(3);
     for (const field of await boxes.all()) {
+      // llmlint: ignore[e2e_uses_accessible_selectors] the criterion is a layout relation: the gap between the answer field and whatever the card draws directly above it, and the padding of the surface holding both; no role or name says which element sits above a field, so the field is found by its label and only its rendered neighbours are read from the DOM.
       const measured = await field.evaluate((element) => {
         const card = element.closest("article");
         const above = element.previousElementSibling;
@@ -7077,25 +7083,32 @@ for (const width of [1440, 390] as const)
       expect(measured.inside).toBe(true);
     }
 
-    const gaps = await listRegion(page).evaluate((list) => {
-      const between = (elements: Element[]) =>
-        elements
-          .slice(1)
-          .map(
-            (element, index) =>
-              element.getBoundingClientRect().top -
-              (elements[index]?.getBoundingClientRect().bottom ?? 0),
-          );
-      const groups = [
-        ...list.querySelectorAll(":scope section[aria-labelledby]"),
-      ];
-      return {
-        cards: groups.flatMap((group) =>
-          between([...group.querySelectorAll(":scope > ul > li")]),
-        ),
-        groups: between(groups),
-      };
-    });
+    // Each priority group, and each card in it — a list item holding a card,
+    // not one of a body's own bullets — as a reader's tools find them.
+    const between = (boxes: readonly { y: number; height: number }[]) =>
+      boxes
+        .slice(1)
+        .map(
+          (next, index) =>
+            next.y - ((boxes[index]?.y ?? 0) + (boxes[index]?.height ?? 0)),
+        );
+    const groups = await listRegion(page)
+      .getByRole("region")
+      .filter({ has: page.getByRole("heading", { level: 2 }) })
+      .all();
+    const cardGaps: number[] = [];
+    const groupBoxes = [];
+    for (const group of groups) {
+      groupBoxes.push(await box(group));
+      const cards = await group
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("article") })
+        .all();
+      const cardBoxes = [];
+      for (const card of cards) cardBoxes.push(await box(card));
+      cardGaps.push(...between(cardBoxes));
+    }
+    const gaps = { cards: cardGaps, groups: between(groupBoxes) };
     expect(gaps.cards.length).toBeGreaterThan(0);
     expect(gaps.groups.length).toBeGreaterThan(0);
     for (const gap of gaps.cards)
