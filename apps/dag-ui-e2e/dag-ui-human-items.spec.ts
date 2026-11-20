@@ -2817,13 +2817,21 @@ for (const { from, verb, key, title } of [
     await page.waitForTimeout(500);
     await expectPending(pending, doing);
     expect(stored(served, id).state).toBe("open");
+    // A reader who opens another item while the write is out keeps that one:
+    // the receipt closes only the detail of the item it resolved.
+    const next = "Rotate the staging certificate";
+    if (from === "detail") await openDetail(page, next);
     release();
 
     // The receipt lands: the toast says so, the card leaves and the detail with
     // it, and the engine holds the browser's write.
     await expect(outcome(page)).toHaveText(`${done}: ${title}`);
     await expect(card(page, title)).toHaveCount(0);
-    await expect(detailPane(page)).toHaveCount(0);
+    if (from === "detail")
+      await expect(
+        detailPane(page).getByRole("heading", { name: next }),
+      ).toBeVisible();
+    else await expect(detailPane(page)).toHaveCount(0);
     expect(stored(served, id)).toMatchObject({
       state: done.toLowerCase(),
       resolution: { actor: `browser:session:${SUPERVISOR}` },
@@ -6842,6 +6850,26 @@ for (const width of [1440, 390] as const)
     });
     await expect(first.getByRole("tooltip")).toHaveCount(0);
     await expect(detailPane(page)).toHaveCount(0);
+    // A touch the browser takes over for a scroll, or a finger lifted before
+    // the hold is long, is no long press: no moment shows, then or later. The
+    // lifted finger is a tap, which opens the card as a tap anywhere on it does.
+    for (const ends of ["touchCancel", "touchEnd"] as const) {
+      await touch.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: finger,
+      });
+      await page.waitForTimeout(100);
+      await touch.send("Input.dispatchTouchEvent", {
+        type: ends,
+        touchPoints: [],
+      });
+      // Past the hold a long press takes, so a timer left running would show.
+      await page.waitForTimeout(700);
+      await expect(first.getByRole("tooltip")).toHaveCount(0);
+      await expect(detailPane(page)).toHaveCount(ends === "touchEnd" ? 1 : 0);
+    }
+    await detailPane(page).getByRole("button", { name: "Close detail" }).click();
+    await expect(detailPane(page)).toHaveCount(0);
     await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await touch.detach();
 
@@ -6963,6 +6991,33 @@ for (const width of [1440, 390] as const)
     await expect
       .poll(() => groupedTitles(page))
       .toEqual([byRaised(raisedAt, dismissed, "newest")]);
+    // Leaving the page and coming back keeps every choice, as a reload does.
+    if (width === 1440) {
+      const nav = page.getByRole("navigation", { name: "Projects" });
+      await nav.getByRole("button", { name: "Host" }).click();
+      await expect(listRegion(page)).toHaveCount(0);
+      await nav.getByRole("button", { name: "Action items" }).click();
+      await expect(page.getByRole("article").first()).toBeVisible();
+      await expect(sortControl(page)).toHaveValue("newest");
+      await expect(
+        page.getByRole("combobox", { name: "Group by" }),
+      ).toHaveValue("kind");
+      await expect
+        .poll(() => groupedTitles(page))
+        .toEqual([byRaised(raisedAt, dismissed, "newest")]);
+    }
+    // Ungrouped, the one list stands in the chosen order too.
+    await inFilters(page, async () => {
+      await page
+        .getByRole("combobox", { name: "Group by" })
+        .selectOption("none");
+    });
+    for (const order of ["oldest", "newest"] as const) {
+      await sortControl(page).selectOption(order);
+      await expect
+        .poll(() => titles(listRegion(page)))
+        .toEqual(byRaised(raisedAt, dismissed, order));
+    }
     // None of it was a write: the journal holds only the CLI's dismissals.
     const appended = journal(served)
       .slice(journalBefore.length)

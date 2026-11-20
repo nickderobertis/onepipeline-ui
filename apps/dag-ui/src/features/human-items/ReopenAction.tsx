@@ -1,6 +1,12 @@
 import type { HumanItemReopen } from "@onepipeline-ui/dag-model";
 import { useId, useState } from "react";
 
+/** What puts a control in the card-action group, where it is one. */
+export interface CardControl {
+  readonly "data-card-action"?: string;
+  readonly tabIndex?: number;
+}
+
 /**
  * Restore or Reopen, as the engine's `reopen` answer has it. Where the engine
  * says it cannot be, it is greyed, and a small question mark set on its text as
@@ -34,10 +40,7 @@ export function ReopenAction({
   readonly disabled?: boolean;
   readonly onPress: () => void;
   readonly className: string;
-  readonly control?: {
-    readonly "data-card-action"?: string;
-    readonly tabIndex?: number;
-  };
+  readonly control?: CardControl;
 }) {
   const [pinned, setPinned] = useState(false);
   const [hovered, setHovered] = useState(false);

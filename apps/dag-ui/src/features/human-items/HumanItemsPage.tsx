@@ -53,7 +53,7 @@ import {
   sourceWords,
   stateLabel,
 } from "./human-items-model";
-import { ReopenAction } from "./ReopenAction";
+import { type CardControl, ReopenAction } from "./ReopenAction";
 import { SendBar } from "./SendBar";
 import {
   type HumanItemWrite,
@@ -748,12 +748,6 @@ function WriteButton({
     children: sending ? words.busy : words.label,
   };
   return children ? children(props) : <button {...props} />;
-}
-
-/** What puts a control in the card-action group, where it is one. */
-export interface CardControl {
-  readonly "data-card-action"?: string;
-  readonly tabIndex?: number;
 }
 
 interface WriteButtonProps extends CardControl {
