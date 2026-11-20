@@ -10,7 +10,6 @@ import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { NODE_TIMELINE_PARTIAL_DELAY_MS } from "@onepipeline-ui/timeline-categories";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-/** What a span's read is held under, before the span's id. */
 const SPAN_KEY = "span:";
 
 /** Rows a zoom, a span's or a whole row's expansion asks for per request. */

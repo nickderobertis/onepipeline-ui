@@ -543,10 +543,12 @@ test("a conversation item opens in the conversation view alone, before, while an
   const held = new Promise<void>((resolve) => {
     release = resolve;
   });
+  // llmlint: ignore-block[e2e_not_mocked] the acceptance criterion requires the transcript response held back at the network boundary so the panel can be observed while it loads; nothing is doubled, the real server's own answer is passed through unchanged once released.
   await page.route(CONVERSATIONS, async (route) => {
     await held;
     await route.continue();
   });
+  // llmlint: ignore-end[e2e_not_mocked]
   await openRow(page, new RegExp(facts.usageLimit.slice(0, 25)));
   await expect(detail(page).getByText("Loading transcript…")).toBeVisible();
   expect(await seen(page), "the field/value view while loading").toEqual({
@@ -615,6 +617,7 @@ test("a conversation item whose transcript cannot be served says so with its rec
     .parse(item.fields.transcript);
 
   // A transcript the server cannot answer, refused at the network boundary.
+  // llmlint: ignore-block[e2e_not_mocked] the acceptance criterion requires the transcript request failing so the conversation view's failure state is shown; the real server over this corpus always serves the transcript, so the failure is made at the network boundary, in the API's own error envelope, and every other request reaches the real server.
   await page.route(CONVERSATIONS, (route) =>
     route.fulfill({
       status: 503,
@@ -624,6 +627,7 @@ test("a conversation item whose transcript cannot be served says so with its rec
       }),
     }),
   );
+  // llmlint: ignore-end[e2e_not_mocked]
   await openNode(page, facts.run, "narrated");
   await openRow(page, new RegExp(facts.usageLimit.slice(0, 25)));
   const failed = detail(page)

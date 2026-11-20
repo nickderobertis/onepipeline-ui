@@ -54,7 +54,6 @@ test("an observer's oneharness dispatch opens with nothing failed, and the run's
   await openRunLevel(page);
   const read = page.waitForResponse((response) => isSpanPage(response.url()));
   await openObserver(page);
-  // The span's own page, asked for and answered.
   expect((await read).status()).toBe(200);
   expect(new URL(page.url()).searchParams.get("event")).toMatch(/^harness\./u);
   await expect(panel(page)).not.toContainText(FAILED);
@@ -111,6 +110,7 @@ test("a span page that failed is said in its panel alone, read again on Try agai
   const asked: string[] = [];
   // A refused connection is the one fault a browser test cannot earn from the real
   // server; every page not refused goes through to it unchanged.
+  // llmlint: ignore-block[e2e_not_mocked] the acceptance criterion requires one span page forced to fail at the network boundary and then the network restored; a refused connection cannot be earned from the real server, and every request not refused is passed to it unchanged.
   await page.route(
     (url) => isSpanPage(url.toString()),
     async (route) => {
@@ -119,6 +119,7 @@ test("a span page that failed is said in its panel alone, read again on Try agai
       else await route.continue();
     },
   );
+  // llmlint: ignore-end[e2e_not_mocked]
 
   await openRunLevel(page);
   await openObserver(page);
