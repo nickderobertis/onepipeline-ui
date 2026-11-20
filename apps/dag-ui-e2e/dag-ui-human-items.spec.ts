@@ -6347,8 +6347,42 @@ test("Reopen on a resolved card and in its detail follows the engine's answer, i
     resolution: null,
   });
   await showState(page, "open");
-  await expect(card(page, certificate)).toBeVisible();
-  await expect(card(page, plain)).toBeVisible();
+  // Each reopened item reads as open again, on its card and in its detail,
+  // with nothing left of the resolution it had.
+  for (const [title, resolved, saved] of [
+    [certificate, "Dismissed", "Reason: Rotated already"],
+    [plain, "Completed", undefined],
+  ] as const) {
+    const reopened = card(page, title);
+    await expect(reopened).toBeVisible();
+    await expect(reopened).not.toContainText(resolved);
+    if (saved !== undefined) await expect(reopened).not.toContainText(saved);
+    await expect(
+      reopened.getByRole("button", { name: `Complete: ${title}` }),
+    ).toBeEnabled();
+    await expect(
+      reopened.getByRole("button", { name: `Dismiss: ${title}` }),
+    ).toBeEnabled();
+    await expect(
+      reopened.getByRole("button", { name: `Reopen: ${title}` }),
+    ).toHaveCount(0);
+    const detail = await openDetail(page, title);
+    await expect(metadataOf(detail, "State")).toHaveText("Open");
+    for (const gone of [resolved, "Reason", "Comment"])
+      await expect(
+        detail
+          .getByRole("term")
+          .filter({ hasText: new RegExp(`^${gone}$`, "u") }),
+      ).toHaveCount(0);
+    await expect(
+      detail.getByRole("button", { name: "Reopen", exact: true }),
+    ).toHaveCount(0);
+    await expect(detail.getByRole("button", { name: "Dismiss" })).toBeEnabled();
+    await detail.getByRole("button", { name: "Close detail" }).click();
+    expect(
+      stored(served, idOf(served, title === plain ? "plain" : "certificate")),
+    ).toMatchObject({ state: "open", resolution: null });
+  }
 });
 
 for (const { verb, undo, key, title, done, undone } of [
