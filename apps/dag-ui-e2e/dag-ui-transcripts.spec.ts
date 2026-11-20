@@ -625,10 +625,11 @@ test("a conversation item opens in the conversation view alone, before, while an
  * item's top edge is the item, and what is hit at Close is Close.
  */
 async function expectNothingPinnedOver(page: Page): Promise<void> {
-  // llmlint: ignore[e2e_uses_accessible_selectors] `aria-current` is the package's own mark of the item a panel opened on — the turn, or the tool call within it (its plot marks the same turn, hence the article) — and no role query can filter on it; the criterion is about that one item.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` is the package's own mark of the item a panel opened on — the turn, or the tool call within it (its plot marks the same turn, hence the article) — and no role query can filter on it; the criterion is about that one item.
   const focused = detail(page)
     .locator('article[aria-current="true"], article [aria-current="true"]')
     .first();
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   await expect(focused).toBeVisible();
   await focused.evaluate((element) => {
     element.scrollIntoView({ block: "start" });
@@ -638,27 +639,23 @@ async function expectNothingPinnedOver(page: Page): Promise<void> {
   });
   await expect(pinned).toBeVisible();
   const close = page.getByRole("button", { name: "Close detail" });
-  const hits = await focused.evaluate((element, closeLabel) => {
+  const button = await close.elementHandle();
+  if (button === null) throw new Error("the panel has no Close control");
+  const hits = await focused.evaluate((element, button) => {
     const box = element.getBoundingClientRect();
-    const button = document.querySelector(`[aria-label="${closeLabel}"]`);
     const at = (x: number, y: number) => document.elementFromPoint(x, y);
     const edge = [0.1, 0.5, 0.9].map((share) => {
       const hit = at(box.left + box.width * share, box.top + 4);
       return hit !== null && element.contains(hit);
     });
-    const closeBox = button?.getBoundingClientRect();
-    const closeHit =
-      closeBox === undefined
-        ? null
-        : at(
-            closeBox.left + closeBox.width / 2,
-            closeBox.top + closeBox.height / 2,
-          );
-    return {
-      edge,
-      close: closeHit !== null && button?.contains(closeHit) === true,
-    };
-  }, "Close detail");
+    const closeBox = button.getBoundingClientRect();
+    const closeHit = at(
+      closeBox.left + closeBox.width / 2,
+      closeBox.top + closeBox.height / 2,
+    );
+    return { edge, close: closeHit !== null && button.contains(closeHit) };
+  }, button);
+  await button.dispose();
   expect(hits.edge, "the opened item's top edge is the item").toEqual([
     true,
     true,
@@ -666,17 +663,17 @@ async function expectNothingPinnedOver(page: Page): Promise<void> {
   ]);
   expect(hits.close, "Close is what a tap at Close hits").toBe(true);
   // And the conversation's pinned header leaves Close a place of its own.
-  const [header, button] = await Promise.all([
+  const [header, control] = await Promise.all([
     pinned.boundingBox(),
     close.boundingBox(),
   ]);
-  if (header === null || button === null)
+  if (header === null || control === null)
     throw new Error("the pinned header or Close is not laid out");
   const apart =
-    button.x >= header.x + header.width ||
-    button.x + button.width <= header.x ||
-    button.y >= header.y + header.height ||
-    button.y + button.height <= header.y;
+    control.x >= header.x + header.width ||
+    control.x + control.width <= header.x ||
+    control.y >= header.y + header.height ||
+    control.y + control.height <= header.y;
   expect(apart, "the pinned header lies under Close").toBe(true);
 }
 
