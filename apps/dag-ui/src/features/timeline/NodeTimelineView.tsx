@@ -653,12 +653,17 @@ function NodeExecution({
     [containerRef],
   );
   const plotArea = useRef<HTMLElement | null>(null);
-  const { loadSpan } = history;
+  const { loadSpan, forgetSpan } = history;
   const openedSpan =
     selected?.rowKind === "span" ? selected.span.id : undefined;
   useEffect(() => {
-    if (openedSpan !== undefined) loadSpan(openedSpan);
-  }, [openedSpan, loadSpan]);
+    if (openedSpan === undefined) return;
+    loadSpan(openedSpan);
+    // A panel closed, or another opened, takes its span's failed read with it.
+    return () => forgetSpan(openedSpan);
+  }, [openedSpan, loadSpan, forgetSpan]);
+  const spanFailure =
+    openedSpan === undefined ? undefined : history.spanFailure(openedSpan);
   // The hook returns a new object on each render, including a cursor update
   // from scrolling. Only a changed selection should scroll again; depending on
   // that object makes the selected stamp race the scroll-derived reading cursor.
@@ -784,6 +789,7 @@ function NodeExecution({
             row={selected}
             runId={runId}
           />
+          {spanFailure !== undefined && <HistoryFailed failure={spanFailure} />}
         </aside>
       )}
     </div>

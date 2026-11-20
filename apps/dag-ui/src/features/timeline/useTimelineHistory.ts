@@ -10,6 +10,8 @@ import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { NODE_TIMELINE_PARTIAL_DELAY_MS } from "@onepipeline-ui/timeline-categories";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+const SPAN_KEY = "span:";
+
 /** Rows a zoom, a span's or a whole row's expansion asks for per request. */
 const WIDE_PAGE = 500;
 
@@ -73,7 +75,15 @@ export interface TimelineHistory {
     to: number,
     node: string | undefined,
   ) => void;
+  /**
+   * The failure of a read the timeline itself asked for — a row's, a stretch's, or a
+   * node's whole timeline — and never a span's, whose failure is its panel's.
+   */
   readonly failure?: HistoryFailure;
+  /** Why the last read of one span failed, while it has not been read since. */
+  readonly spanFailure: (spanId: string) => HistoryFailure | undefined;
+  /** The span's panel closed: its read's failure goes with it. */
+  readonly forgetSpan: (spanId: string) => void;
   /** A node's whole-timeline read; absent for the run scope. */
   readonly nodeLoad?: NodeLoad;
 }
@@ -145,7 +155,11 @@ export function useTimelineHistory({
   const spanFields = useRef(new Map<string, SpanFields>());
   const asked = useRef(new Set<string>());
   const [version, setVersion] = useState(0);
-  const [failure, setFailure] = useState<HistoryFailure>();
+  // Each failure is held under the read that failed, so it is cleared by that read
+  // succeeding and shown only by the view that asked for it.
+  const [failures, setFailures] = useState<ReadonlyMap<string, HistoryFailure>>(
+    () => new Map(),
+  );
 
   const bump = useCallback(() => setVersion((value) => value + 1), []);
   const take = useCallback(
@@ -154,15 +168,25 @@ export function useTimelineHistory({
     },
     [],
   );
+  const cleared = useCallback((key: string) => {
+    setFailures((held) => {
+      if (!held.has(key)) return held;
+      const rest = new Map(held);
+      rest.delete(key);
+      return rest;
+    });
+  }, []);
   const failed = useCallback(
-    (caught: unknown, retry: () => void) => {
-      setFailure({
-        message: caught instanceof Error ? caught.message : String(caught),
-        retry: () => {
-          setFailure(undefined);
-          retry();
-        },
-      });
+    (key: string, caught: unknown, retry: () => void) => {
+      // Not asked any more: whatever asks for it next reads it again.
+      asked.current.delete(key);
+      setFailures((held) =>
+        new Map(held).set(key, {
+          message: caught instanceof Error ? caught.message : String(caught),
+          // Read again, never answered from what was asked before.
+          retry,
+        }),
+      );
       bump();
     },
     [bump],
@@ -217,10 +241,21 @@ export function useTimelineHistory({
     if (scope !== "node" || !nodeLoading) return [];
     return unheldStretches(merged?.spans ?? []);
   }, [merged, scope, nodeLoading]);
-  const shownFailure = nodeLoad?.failure ?? failure;
+  const shownFailure =
+    nodeLoad?.failure ??
+    [...failures].find(([key]) => !key.startsWith(SPAN_KEY))?.[1];
+  const spanFailure = useCallback(
+    (spanId: string) => failures.get(`${SPAN_KEY}${spanId}`),
+    [failures],
+  );
+  const forgetSpan = useCallback(
+    (spanId: string) => cleared(`${SPAN_KEY}${spanId}`),
+    [cleared],
+  );
 
   const readAll = useCallback(
     async (
+      key: string,
       query: {
         readonly node?: string;
         readonly span?: string;
@@ -229,6 +264,8 @@ export function useTimelineHistory({
       },
       retry: () => void,
     ) => {
+      // A read under way is the answer now, rather than one that failed before it.
+      cleared(key);
       try {
         let next: string | undefined;
         for (;;) {
@@ -247,23 +284,21 @@ export function useTimelineHistory({
           next = answered.next_cursor;
         }
       } catch (caught) {
-        failed(caught, retry);
+        failed(key, caught, retry);
       }
     },
-    [bump, client, failed, runId, scope, take],
+    [bump, cleared, client, failed, runId, scope, take],
   );
 
   const loadSpan = useCallback(
     (spanId: string) => {
-      const key = `span:${spanId}`;
+      const key = `${SPAN_KEY}${spanId}`;
       if (asked.current.has(key)) return;
       asked.current.add(key);
       void readAll(
+        key,
         { span: spanId, ...(nodeId === undefined ? {} : { node: nodeId }) },
-        () => {
-          asked.current.delete(key);
-          loadSpan(spanId);
-        },
+        () => loadSpan(spanId),
       );
     },
     [nodeId, readAll],
@@ -274,10 +309,9 @@ export function useTimelineHistory({
       const key = `row:${node ?? ""}`;
       if (asked.current.has(key)) return;
       asked.current.add(key);
-      void readAll(node === undefined ? {} : { node }, () => {
-        asked.current.delete(key);
-        loadRow(node);
-      });
+      void readAll(key, node === undefined ? {} : { node }, () =>
+        loadRow(node),
+      );
     },
     [readAll],
   );
@@ -288,15 +322,13 @@ export function useTimelineHistory({
       if (asked.current.has(key)) return;
       asked.current.add(key);
       void readAll(
+        key,
         {
           ...(node === undefined ? {} : { node }),
           from: new Date(from).toISOString(),
           to: new Date(to).toISOString(),
         },
-        () => {
-          asked.current.delete(key);
-          loadStretch(from, to, node);
-        },
+        () => loadStretch(from, to, node),
       );
     },
     [readAll],
@@ -308,6 +340,8 @@ export function useTimelineHistory({
     loadSpan,
     loadRow,
     loadStretch,
+    spanFailure,
+    forgetSpan,
     ...(shownFailure === undefined ? {} : { failure: shownFailure }),
     ...(nodeLoad === undefined ? {} : { nodeLoad: withoutFailure(nodeLoad) }),
   };

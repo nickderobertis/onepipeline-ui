@@ -6111,10 +6111,46 @@ pub fn timeline(
 /// artifact route as the former Agents tabs.
 #[must_use]
 pub(crate) fn timeline_harnesses_over(
-    mut payload: Value,
+    payload: Value,
     view: &Run<'_>,
     scope: &Scope<'_>,
     agents: &Agents,
+) -> Value {
+    let mut payload = match scope {
+        Scope::Run => harnesses_where(payload, view, agents, |_| true),
+        Scope::Node(wanted) => {
+            harnesses_where(payload, view, agents, |node| node == Some(wanted.as_str()))
+        }
+    };
+    if let Scope::Node(node) = scope {
+        stamp_dispatch_groups(view, node.as_str(), &mut payload);
+    }
+    payload
+}
+
+/// The sessions a share of the run timeline holds, laid as the run timeline lays
+/// them: with no `node`, the run's own — an observer graph's monitor among them —
+/// and with one, that node's under its dispatches. A history page reads a share, and
+/// every span the run timeline draws has to answer one.
+#[must_use]
+pub(crate) fn share_harnesses_over(
+    payload: Value,
+    view: &Run<'_>,
+    node: Option<&NodeId>,
+    agents: &Agents,
+) -> Value {
+    harnesses_where(payload, view, agents, |labelled| {
+        labelled == node.map(NodeId::as_str)
+    })
+}
+
+/// The sessions whose node label `keep` admits, laid after `payload`'s spans, each
+/// under the latest of its node's dispatches that it started after.
+fn harnesses_where(
+    mut payload: Value,
+    view: &Run<'_>,
+    agents: &Agents,
+    keep: impl Fn(Option<&str>) -> bool,
 ) -> Value {
     let Some(spans) = payload["spans"].as_array_mut() else {
         return payload;
@@ -6141,10 +6177,8 @@ pub(crate) fn timeline_harnesses_over(
     for session in &agents.sessions {
         let labels = session.labels.as_map();
         let node = labels.get(NODE_LABEL);
-        if let Scope::Node(wanted) = scope {
-            if node.map(String::as_str) != Some(wanted.as_str()) {
-                continue;
-            }
+        if !keep(node.map(String::as_str)) {
+            continue;
         }
         let launch_scope = labels.get(SCOPE_LABEL).map_or("observer", String::as_str);
         for run in &session.runs {
@@ -6215,9 +6249,6 @@ pub(crate) fn timeline_harnesses_over(
             }
             spans.push(span);
         }
-    }
-    if let Scope::Node(node) = scope {
-        stamp_dispatch_groups(view, node.as_str(), &mut payload);
     }
     payload
 }

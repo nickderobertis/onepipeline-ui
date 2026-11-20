@@ -52,6 +52,7 @@ import {
   type TimelineRow,
 } from "./timeline-model";
 import { useConversation } from "./useConversation";
+import { usePinnedHeight } from "./usePinnedHeight";
 import { useStickyBottom } from "./useStickyBottom";
 
 /** How many turns of a long transcript are handed to the reader at once. */
@@ -116,7 +117,10 @@ export function TimelineItemDetail({
                 row={row}
                 transcript={transcript}
               />
-              {row.rowKind === "event" && (
+              {/* One view per item, decided from what the row carries: a
+                  conversation item is read in the conversation alone, before,
+                  during and after its transcript loads. */}
+              {row.rowKind === "event" && !opensConversation(reference) && (
                 <RecordContent client={client} event={row.event} />
               )}
             </>
@@ -145,9 +149,10 @@ function Body({
   readonly reference?: TimelineReference;
   readonly transcript: Transcript;
 }) {
-  // Before the conversation reading: a redirection names the session it happened
-  // in, and opening it as that session's whole transcript would answer a question
-  // nobody asked in place of the one they did.
+  // First, and on the reference alone: whatever else a record carries, one whose
+  // reference is a conversation is read in that conversation and nowhere else.
+  if (opensConversation(reference))
+    return <Session row={row} transcript={transcript} />;
   const redirection = redirectionOf(row);
   if (redirection !== undefined)
     return <Redirection redirection={redirection} row={row} />;
@@ -163,15 +168,6 @@ function Body({
   const surface = surfaceOf(row);
   if (surface !== undefined)
     return <SurfaceRecord row={row} surface={surface} />;
-  if (reference?.kind === "conversation")
-    return (
-      <>
-        {row.rowKind === "event" && (
-          <Recorded row={row} reference={reference} />
-        )}
-        <Session row={row} transcript={transcript} />
-      </>
-    );
   if (isVerification(row))
     return (
       <Verification
@@ -322,6 +318,7 @@ function Session({
   const sync = useTimelineScrollSync(
     turns.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
   );
+  const pinned = usePinnedHeight("--conversation-pinned");
   if (transcript.loading)
     return (
       <div aria-live="polite" className="loading-inline">
@@ -340,7 +337,16 @@ function Session({
         <TriangleAlert />
         <AlertTitle>Transcript unavailable</AlertTitle>
         <AlertDescription>
-          {transcript.error?.message ?? "The server recorded no transcript."}
+          <p>
+            {transcript.error?.message ?? "The server recorded no transcript."}
+          </p>
+          {/* What the record itself holds, so nothing is lost while its
+              conversation cannot be read — inside this state, never as a
+              second view beside it. */}
+          {row.rowKind === "event" &&
+            Object.keys(row.event.fields ?? {}).length > 0 && (
+              <FieldList value={row.event.fields ?? {}} />
+            )}
         </AlertDescription>
       </Alert>
     );
@@ -367,7 +373,7 @@ function Session({
           <StatusBadge state={conversation.state} />
         </header>
         <Separator className="my-2.5" />
-        <div className="conversation-timeline-sticky">
+        <div className="conversation-timeline-sticky" ref={pinned}>
           <ConversationTimeline
             cursor={sync.cursor}
             {...(focus === undefined ? {} : { focus })}
@@ -384,7 +390,7 @@ function Session({
           </p>
         ) : (
           <>
-            <div ref={sync.containerRef}>
+            <div className="conversation-turns" ref={sync.containerRef}>
               {turns.slice(0, visible).map((turn) => (
                 <div
                   key={turn.id}
@@ -940,6 +946,11 @@ function releaseOf(row: TimelineRow): TimelineRelease | undefined {
  */
 function surfaceOf(row: TimelineRow): TimelineSurface | undefined {
   return row.rowKind === "event" ? row.event.surface : undefined;
+}
+
+/** Whether a row opens in the conversation view alone: its reference is one. */
+function opensConversation(reference: TimelineReference | undefined): boolean {
+  return reference?.kind === "conversation";
 }
 
 function referenceOf(row: TimelineRow): TimelineReference | undefined {

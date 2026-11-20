@@ -974,12 +974,25 @@ p {
   top: 12px;
   right: 12px;
 }
+/* Pinned within its card, beneath the panel's own controls: the close button
+   (z-index 2) stays above it, and it is painted in the card's own colour so the
+   turns scrolling under it never show through around it. Its right edge stops
+   short of where the panel's Close sits once it is pinned at the top, so no control
+   of the timeline lies under Close. */
 .conversation-timeline-sticky {
   position: sticky;
-  z-index: 2;
+  z-index: 1;
   top: 0;
+  padding-right: 44px;
   padding-bottom: 10px;
-  background: var(--background);
+  background: var(--card);
+}
+/* A scroll to a turn, or to the item a panel opened on within one, stops below the
+   pinned timeline rather than under it (`usePinnedHeight` keeps its height). */
+.conversation-turns > div,
+.conversation-turns article,
+.conversation-turns [aria-current="true"] {
+  scroll-margin-top: calc(var(--conversation-pinned, 0px) + 8px);
 }
 .node-timeline-sticky [data-testid="timeline-cursor"] {
   pointer-events: none;

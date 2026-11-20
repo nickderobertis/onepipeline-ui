@@ -165,9 +165,13 @@ test("zooming a node's category lanes asks for that stretch, and only then", asy
     served,
     world.facts.openLiveRun,
   );
-  const runSpan = (timeline.spans as Json[]).find(
-    (span) => span.node_id === undefined && span.harness_scope === undefined,
+  // A run-level oneharness session where the run has one: its page is the one a
+  // share once left out.
+  const runLevel = (timeline.spans as Json[]).filter(
+    (span) => span.node_id === undefined,
   );
+  const runSpan =
+    runLevel.find((span) => span.harness_scope !== undefined) ?? runLevel[0];
   if (runSpan === undefined) throw new Error("no run-level span");
   const before = asked.length;
   await page.goto(

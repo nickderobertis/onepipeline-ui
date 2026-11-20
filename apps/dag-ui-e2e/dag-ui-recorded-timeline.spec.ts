@@ -697,6 +697,18 @@ test("every served record fact appears in its panel without empty rows or the se
       `${nodeUrl}&event=${encodeURIComponent(event.record_id ?? event.id)}`,
     );
     const panel = page.getByRole("region", { name: "Timeline item detail" });
+    // A conversation item is read in its conversation alone, never beside its
+    // fields.
+    if (event.reference?.kind === "conversation") {
+      await expect(
+        panel.getByRole("article", { name: /^Turn / }).first(),
+      ).toBeVisible();
+      await expect(
+        panel.getByRole("region", { name: "Recorded fields" }),
+      ).toHaveCount(0);
+      await expect(panel).not.toContainText("Recorded at");
+      continue;
+    }
     await expect(panel).toContainText("Recorded at");
     for (const term of fieldTerms(event.fields))
       await expect(

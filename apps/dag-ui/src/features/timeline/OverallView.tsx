@@ -151,7 +151,7 @@ export function OverallView({
       ? (listedRow ??
         (openedEvent === undefined ? undefined : eventAsRow(openedEvent)))
       : spanAsRow(openedSpan);
-  const { loadSpan, loadRow: loadRunLevel } = history;
+  const { loadSpan, forgetSpan, loadRow: loadRunLevel } = history;
   // An address naming a record this payload does not list is a person asking for it.
   useEffect(() => {
     if (
@@ -163,8 +163,13 @@ export function OverallView({
   }, [selectedItemId, opened, timeline, loadRunLevel]);
   const openedSpanId = openedSpan?.id;
   useEffect(() => {
-    if (openedSpanId !== undefined) loadSpan(openedSpanId);
-  }, [openedSpanId, loadSpan]);
+    if (openedSpanId === undefined) return;
+    loadSpan(openedSpanId);
+    // A panel closed, or another opened, takes its span's failed read with it.
+    return () => forgetSpan(openedSpanId);
+  }, [openedSpanId, loadSpan, forgetSpan]);
+  const spanFailure =
+    openedSpanId === undefined ? undefined : history.spanFailure(openedSpanId);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && selectedItemId !== undefined)
@@ -263,13 +268,15 @@ export function OverallView({
                 </p>
               ) : (
                 <GraphExecution
-                  failureShown={opened === undefined}
                   graph={graph}
                   history={history}
+                  // A harness session's rows are its transcript's, never the run's
+                  // own: it has none to load.
                   runRecordsToLoad={runLevel.some(
                     (span) =>
-                      span.events_total === undefined ||
-                      span.events_total > span.events.length,
+                      span.harness_scope === undefined &&
+                      (span.events_total === undefined ||
+                        span.events_total > span.events.length),
                   )}
                   onOpenNode={onSelectNode}
                   onOpenItem={onSelectItem}
@@ -303,11 +310,9 @@ export function OverallView({
             <X />
           </Button>
           <TimelineItemDetail client={client} row={opened} runId={runId} />
-          {/* The panel covers the plot beside it, so a read that failed is said here,
-              where the person who opened the item is looking. */}
-          {history.failure !== undefined && (
-            <HistoryFailed failure={history.failure} />
-          )}
+          {/* The opened span's own read, said where the person who opened it is
+              looking, and gone with the panel. */}
+          {spanFailure !== undefined && <HistoryFailed failure={spanFailure} />}
         </aside>
       )}
     </div>
@@ -322,7 +327,6 @@ export function OverallView({
  * given, so a wheel or a brush anywhere reframes the lot together.
  */
 function GraphExecution({
-  failureShown,
   graph,
   history,
   runRecordsToLoad,
@@ -330,8 +334,6 @@ function GraphExecution({
   onOpenItem,
   selectedItemId,
 }: {
-  /** Whether a failed read is said here, rather than in an open item's panel. */
-  readonly failureShown: boolean;
   readonly graph: ReturnType<typeof graphTimeline>;
   readonly history: TimelineHistory;
   /** Whether the run's own records are not all held. */
@@ -401,7 +403,8 @@ function GraphExecution({
         range={range}
         selectedId={selectedItemId}
       />
-      {failureShown && history.failure !== undefined && (
+      {/* The reads this plot asked for: a row's, a stretch's, the run's own. */}
+      {history.failure !== undefined && (
         <HistoryFailed failure={history.failure} />
       )}
       {/* Records the run made at no node, those after execution ended among them,

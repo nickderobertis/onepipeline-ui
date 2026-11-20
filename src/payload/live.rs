@@ -31,9 +31,9 @@ use onepipeline::views::RunView;
 use serde_json::{json, Map, Value};
 
 use super::{
-    detail_document, is_end_boundary, is_settlement, measured, moment_of, share_spans,
-    timeline_harnesses_over, turns_of, ActivityFold, DeclaredMembers, Ends, ItemsWindow, Rendered,
-    Run, Scope, Share, SurfaceStates, Transcripts,
+    detail_document, is_end_boundary, is_settlement, measured, moment_of, share_harnesses_over,
+    share_spans, timeline_harnesses_over, turns_of, ActivityFold, DeclaredMembers, Ends,
+    ItemsWindow, Rendered, Run, Scope, Share, SurfaceStates, Transcripts,
 };
 use crate::contract::NodeId;
 use crate::filter::EventFilter;
@@ -889,7 +889,10 @@ impl LiveTimeline {
             TimelineScope::Run => {
                 timeline_harnesses_over(payload, &Run::of(view), &Scope::Run, agents)
             }
-            TimelineScope::RunShare | TimelineScope::NodeShare(_) => payload,
+            TimelineScope::RunShare => share_harnesses_over(payload, &Run::of(view), None, agents),
+            TimelineScope::NodeShare(node) => {
+                share_harnesses_over(payload, &Run::of(view), Some(node), agents)
+            }
             TimelineScope::Node(node) => {
                 let read;
                 let (events, positions) = match held {
@@ -938,7 +941,7 @@ impl LiveTimeline {
         self.ends = ends;
         match &self.scope {
             TimelineScope::RunShare => {
-                if !(ends_moved || touched.run) {
+                if !(ends_moved || agents_moved || touched.run) {
                     return Vec::new();
                 }
                 self.seed(&Owner::Run);
