@@ -4134,17 +4134,18 @@ test("what is asked of a toast before its receipt waits for it, and is dropped w
     ["human-item-noted", certificateId],
   ]);
 
-  // Restore pressed again while the first is still waiting on Dismiss's
-  // receipt is the same request: one reopen reaches the server, after it.
+  // Restore, once pressed while Dismiss's receipt is out, is pending and
+  // cannot be pressed again: one reopen reaches the server, after it.
   const releaseRestored = await holdRequests(
     page,
     `/api/human-items/${plainId}/dismiss`,
   );
   await page.getByRole("button", { name: `Dismiss: ${plain}` }).click();
   await toast(page).getByRole("button", { name: "Restore" }).click();
-  await toast(page)
-    .getByRole("button", { name: /^Restore/u })
-    .click();
+  await expectPending(
+    toast(page).getByRole("button", { name: "Restore…" }),
+    "Restore…",
+  );
   await page.waitForTimeout(500);
   expect(verbs(sent).slice(4)).toEqual(["dismiss"]);
   releaseRestored();
