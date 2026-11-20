@@ -517,12 +517,12 @@ for (const [reading, node, settled] of [
  * selectors because they name the view's own parts, none of which has a role.
  */
 const FIELD_VIEW = {
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] every entry is read by `dom-watch`'s in-page MutationObserver, installed before the click so a single painted frame is caught, where only `document.querySelector` exists and no Playwright role query can run (the recorded-fields region is named by its own aria-label); the field/value view's generic reference line and its `dl` of values have no role or accessible name to query by, and the criterion is that exactly these never appear in a conversation item's panel.
   recordedRegion: {
     selector:
       '[aria-label="Timeline item detail"] [aria-label="Recorded fields"]',
   },
   recordedHeading: { text: "Recorded fields" },
-  // llmlint: ignore-block[e2e_uses_accessible_selectors] these are read by `dom-watch`'s in-page MutationObserver, installed before the click so a single painted frame is caught, where only `document.querySelector` exists and no Playwright role query can run; the field/value view's generic reference line and its `dl` of values have no role or accessible name to query by, and the criterion is that exactly these never appear in a conversation item's panel.
   referenceLine: {
     selector: '[aria-label="Timeline item detail"] .detail-reference-kind',
   },
@@ -567,10 +567,11 @@ test("a conversation item opens in the conversation view alone, before, while an
   // llmlint: ignore[e2e_uses_accessible_selectors] the package marks who speaks only by this attribute, and the criterion is that its own blocks are drawn: a re-styled list would carry no such marks.
   const you = turn.locator('[data-message-author="user"]');
   await expect(you).toContainText("You");
-  // llmlint: ignore[e2e_uses_accessible_selectors] the same attribute, for the agent's block, and the package's own avatar and chip slots, none of which has a role.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the same attribute, for the agent's block, and the package's own avatar and model-chip slots, none of which has a role or accessible name: the criterion is that the package's own parts are drawn, which only its own marks can tell from a re-styled copy.
   const agent = turn.locator('[data-message-author="assistant"]');
   await expect(agent.locator('[data-slot="avatar"]').first()).toBeVisible();
   await expect(agent.locator('[data-slot="badge"]').first()).toBeVisible();
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   await expect(
     turn.getByRole("button", { name: / tool details$/ }).first(),
   ).toBeVisible();

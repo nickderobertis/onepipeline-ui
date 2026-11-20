@@ -31,10 +31,12 @@ export async function watch(page: Page, watched: Watched): Promise<void> {
       if (body === null) return;
       for (const [name, what] of Object.entries(wanted)) {
         if (seen[name]) continue;
+        // llmlint: ignore-block[e2e_uses_accessible_selectors] this runs inside the page as an init script on every DOM mutation, so a view painted for one frame is caught; Playwright's role and text locators do not exist there, and each selector is the calling journey's, which carries its own reason.
         seen[name] =
           "selector" in what
             ? document.querySelector(what.selector) !== null
             : (body.textContent ?? "").includes(what.text);
+        // llmlint: ignore-end[e2e_uses_accessible_selectors]
       }
     };
     new MutationObserver(look).observe(document, {

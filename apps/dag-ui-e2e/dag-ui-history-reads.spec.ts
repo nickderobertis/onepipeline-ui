@@ -26,7 +26,9 @@ const isSpanPage = (url: string) =>
 /** Overall on the live run, its run-level lane open. */
 async function openRunLevel(page: Page): Promise<void> {
   await page.goto(`/?run=${runs().live}&view=overall`);
-  await expect(page.locator("[data-first-screen]")).toHaveCount(0);
+  await expect(
+    page.getByRole("tab", { name: "Overall", selected: true }),
+  ).toBeVisible();
   await graph(page).getByRole("button", { name: "Expand timeline" }).click();
   await page
     .getByRole("region", { name: "Run-level timeline", exact: true })
@@ -74,7 +76,9 @@ test("an observer's oneharness dispatch opens with nothing failed, and the run's
   // A fresh view of the same run holds none of its own rows, and offers to load
   // them through the page's own control.
   await page.goto(`/?run=${runs().live}&view=overall`);
-  await expect(page.locator("[data-first-screen]")).toHaveCount(0);
+  await expect(
+    page.getByRole("tab", { name: "Overall", selected: true }),
+  ).toBeVisible();
   const rows = page.waitForResponse(
     (response) =>
       response.url().includes("/timeline/events?") &&
