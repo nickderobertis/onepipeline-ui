@@ -3,6 +3,7 @@ import {
   parseRunDetail,
   parseRunTimeline,
   type SubscriptionView,
+  type TimelineEvent,
 } from "@onepipeline-ui/dag-model";
 import {
   act,
@@ -530,6 +531,162 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(
       within(detail()).queryByText(/^Left to end|^Interrupted —/),
     ).toBeNull();
+  });
+
+  /**
+   * The one-view rule is the reference's alone. A record carrying a redirection, a
+   * release or a surface beside a conversation reference is read in that
+   * conversation and never in its own specialized view or the field/value view —
+   * while its transcript loads, once it has, and when it cannot be served, where
+   * the conversation's failure state carries the record's values. The server pairs
+   * a conversation reference only with turn records today, so this state is
+   * reached through the client's own contract, which admits it.
+   */
+  test("opens a conversation-referenced record in its conversation alone, whatever else it carries", async () => {
+    /** What each record carries besides its conversation reference. */
+    type Carrying = Pick<
+      TimelineEvent,
+      "id" | "kind" | "redirection" | "release" | "surface"
+    > & {
+      readonly fields: Readonly<Record<string, string | number>>;
+    };
+    const carrying: readonly Carrying[] = [
+      {
+        id: "turn-redirected",
+        kind: "turn-interrupted",
+        redirection: {
+          delivered: true,
+          delivery: "live" as const,
+          member: "worker",
+          node_id: "dashboard",
+        },
+        fields: { member: "worker", input_bytes: 31 },
+      },
+      {
+        id: "turn-released",
+        kind: "release-arrived",
+        release: { identity: "github.com/example/engine", version: "1.2.3" },
+        fields: {
+          identity: "github.com/example/engine",
+          version: "1.2.3",
+        },
+      },
+      {
+        id: "turn-surfaced",
+        kind: "planner-surfaced",
+        surface: {
+          kind: "sentinel-lost",
+          message: "the sentinel stopped answering",
+          source: "sentinel",
+          blocking: true,
+        },
+        fields: { kind: "sentinel-lost", source: "sentinel" },
+      },
+    ];
+    const records = carrying.map((record) => ({
+      ...record,
+      at: "2026-07-26T11:00:52.000Z",
+      node_id: "dashboard",
+      reference: { kind: "conversation" as const, value: WORKER_SESSION },
+      tool: { index: 0, turn: `${WORKER_SESSION}-0` },
+    }));
+    const served = parseRunTimeline(runTimeline(LIVE_RUN));
+    const dashboard = served.spans.find((span) =>
+      span.events.some((event) => event.id === "event-10"),
+    );
+    if (dashboard === undefined) throw new Error("fixture lost event-10");
+    dashboard.events.push(...records);
+
+    /** Whether either other view was ever drawn in the panel, at any moment. */
+    const watchPanel = () => {
+      const seen = { otherView: false, recordedFields: false };
+      const look = () => {
+        const panel = document.querySelector(
+          '[aria-label="Timeline item detail"]',
+        );
+        if (panel === null) return;
+        // Every specialized view and the field/value view draw their facts as
+        // this list; the failure state's own values are a `record-fields` list.
+        if (panel.querySelector("dl.facts:not(.record-fields)") !== null)
+          seen.otherView = true;
+        if ((panel.textContent ?? "").includes("Recorded fields"))
+          seen.recordedFields = true;
+      };
+      const observer = new MutationObserver(look);
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        characterData: true,
+      });
+      return { seen, stop: () => observer.disconnect() };
+    };
+
+    for (const record of records) {
+      // Loading, then the conversation itself.
+      let release: (response: Response) => void = () => {};
+      const { client } = telemetryHarness((url) => {
+        if (isTimeline(url)) return Response.json(served);
+        if (isConversation(url))
+          return new Promise<Response>((resolve) => {
+            release = resolve;
+          });
+        return defaultResponder(url);
+      });
+      window.history.replaceState(
+        null,
+        "",
+        `/?run=${LIVE_RUN}&node=dashboard&event=${record.id}`,
+      );
+      const watched = watchPanel();
+      render(<App client={client} />);
+      const panel = await openedDetail();
+      expect(
+        await within(panel).findByText("Loading transcript…"),
+        record.kind,
+      ).toBeVisible();
+      release(
+        defaultResponder(
+          new URL(
+            `/api/v2/runs/${LIVE_RUN}/conversations/${WORKER_SESSION}`,
+            window.location.origin,
+          ),
+        ),
+      );
+      expect(
+        await within(detail()).findByRole("article", { name: /^Turn / }),
+        record.kind,
+      ).toBeVisible();
+      watched.stop();
+      expect(watched.seen, `${record.kind} drew another view`).toEqual({
+        otherView: false,
+        recordedFields: false,
+      });
+      cleanup();
+
+      // A transcript the server cannot serve: the conversation says so, with the
+      // record's values inside its own failure state.
+      const refused = telemetryHarness((url) => {
+        if (isTimeline(url)) return Response.json(served);
+        if (isConversation(url))
+          return Response.json(
+            { error: { code: "unavailable", message: "history offline" } },
+            { status: 503 },
+          );
+        return defaultResponder(url);
+      });
+      const failing = watchPanel();
+      render(<App client={refused.client} />);
+      const alert = await within(await openedDetail()).findByRole("alert");
+      expect(alert, record.kind).toHaveTextContent("Transcript unavailable");
+      for (const value of Object.values(record.fields))
+        expect(alert, record.kind).toHaveTextContent(String(value));
+      failing.stop();
+      expect(failing.seen, `${record.kind} drew another view`).toEqual({
+        otherView: false,
+        recordedFields: false,
+      });
+      cleanup();
+    }
   });
 
   test("shows a verification, a publication, and an aggregate as themselves", async () => {

@@ -119,10 +119,9 @@ export function TimelineItemDetail({
               {/* One view per item, decided from what the row carries: a
                   conversation item is read in the conversation alone, before,
                   during and after its transcript loads. */}
-              {row.rowKind === "event" &&
-                !opensConversation(row, reference) && (
-                  <RecordContent client={client} event={row.event} />
-                )}
+              {row.rowKind === "event" && !opensConversation(reference) && (
+                <RecordContent client={client} event={row.event} />
+              )}
             </>
           )}
         </div>
@@ -149,9 +148,10 @@ function Body({
   readonly reference?: TimelineReference;
   readonly transcript: Transcript;
 }) {
-  // Before the conversation reading: a redirection names the session it happened
-  // in, and opening it as that session's whole transcript would answer a question
-  // nobody asked in place of the one they did.
+  // First, and on the reference alone: whatever else a record carries, one whose
+  // reference is a conversation is read in that conversation and nowhere else.
+  if (opensConversation(reference))
+    return <Session row={row} transcript={transcript} />;
   const redirection = redirectionOf(row);
   if (redirection !== undefined)
     return <Redirection redirection={redirection} row={row} />;
@@ -167,8 +167,6 @@ function Body({
   const surface = surfaceOf(row);
   if (surface !== undefined)
     return <SurfaceRecord row={row} surface={surface} />;
-  if (opensConversation(row, reference))
-    return <Session row={row} transcript={transcript} />;
   if (isVerification(row))
     return (
       <Verification
@@ -948,21 +946,9 @@ function surfaceOf(row: TimelineRow): TimelineSurface | undefined {
   return row.rowKind === "event" ? row.event.surface : undefined;
 }
 
-/**
- * Whether `row` opens in the conversation view alone: its reference is a
- * conversation, and it is none of the records read as what they say they are
- * before any reference.
- */
-function opensConversation(
-  row: TimelineRow,
-  reference: TimelineReference | undefined,
-): boolean {
-  return (
-    reference?.kind === "conversation" &&
-    redirectionOf(row) === undefined &&
-    releaseOf(row) === undefined &&
-    surfaceOf(row) === undefined
-  );
+/** Whether a row opens in the conversation view alone: its reference is one. */
+function opensConversation(reference: TimelineReference | undefined): boolean {
+  return reference?.kind === "conversation";
 }
 
 function referenceOf(row: TimelineRow): TimelineReference | undefined {
