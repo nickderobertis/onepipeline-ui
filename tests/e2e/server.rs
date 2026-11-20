@@ -737,7 +737,7 @@ fn a_linear_home_in_the_collapsed_block_is_read_through_the_linked_plugin() {
         &[("LINEAR_API_KEY", "fixture-key")],
         &["start", &project, "--detach"],
     );
-    let run = started_and_let_go(&launched);
+    let run = started_and_let_go(&root, &launched);
     {
         let held = linear.held();
         assert!(
@@ -15713,6 +15713,7 @@ fn a_node_held_on_an_unanswered_source_renders_and_adopts_with_or_without_its_ca
         );
         eventually("the driver let go and was reaped", || !process_is_live(pid));
         drop(driver);
+        let handed = handed_off(&serving.runs_root(), run);
         let events = events_on(
             &http::get(
                 serving.address,
@@ -15720,14 +15721,16 @@ fn a_node_held_on_an_unanswered_source_renders_and_adopts_with_or_without_its_ca
             )
             .json(),
         );
+        // The adoption, and the driver it handed the run to as it returned.
         assert_eq!(
             events
                 .iter()
                 .filter(|event| event["kind"] == json!("driver-adopted"))
                 .count(),
-            1,
+            2,
             "{events:?}"
         );
+        drop(handed);
     }
     serving.stop_on(Stop::Terminate);
 }
@@ -15969,6 +15972,10 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
     });
     eventually("the driver let go and was reaped", || !process_is_live(pid));
     drop(driver);
+    // The adoption handed the run to a driver that waits on its decision; the
+    // next adoption is the one that reads the configuration written below, so
+    // that driver goes as a lost host's does.
+    lose(handed_off(&serving.runs_root(), run));
     let records = projections();
     assert!(!records.is_empty(), "no projection was attempted");
     for record in &records {
@@ -15998,15 +16005,19 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
         .filter(|record| record["outcome"] != json!("projected"))
         .cloned()
         .collect();
-    assert_eq!(refusals.len(), 1, "{refusals:?}");
-    let refusal = &refusals[0];
-    assert_eq!(refusal["class"], json!("refused"), "{refusal}");
-    assert_eq!(refusal["kind"], json!("config-setting"), "{refusal}");
-    let reason = refusal["reason"].as_str().expect("a refusal's reason");
-    assert!(
-        reason.contains("sources.followups.config.metadata_fields.0.paths"),
-        "{reason}"
-    );
+    // Each driver that takes the run up — the adoption, and the one it hands
+    // the run to as it returns — attempts the write-back, and each is refused
+    // the same way.
+    assert!(!refusals.is_empty(), "no write-back was refused");
+    for refusal in &refusals {
+        assert_eq!(refusal["class"], json!("refused"), "{refusal}");
+        assert_eq!(refusal["kind"], json!("config-setting"), "{refusal}");
+        let reason = refusal["reason"].as_str().expect("a refusal's reason");
+        assert!(
+            reason.contains("sources.followups.config.metadata_fields.0.paths"),
+            "{reason}"
+        );
+    }
     serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
@@ -16247,8 +16258,10 @@ fn a_run_launched_outside_any_flow_is_read_beside_a_live_flow() {
 /// each settlement back where its task lives.
 ///
 /// The member's sign-off depends on the home's approval across the two sources,
-/// so three retained drivers settle the graph: one leaves the approval waiting,
-/// one completes it and leaves the sign-off waiting, and one completes that. Read
+/// so one adoption settles the graph: it leaves the approval waiting, and the
+/// driver it hands the run to applies each attestation and drives on —
+/// completing the approval and leaving the sign-off waiting, then completing
+/// that. Read
 /// back through the store the binary links, each task's item in its own source's
 /// project carries its settled status and settlement, neither project holds an
 /// item for the other's task, and every projection the drivers recorded landed
@@ -16265,36 +16278,36 @@ fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
     let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
     let status = |node: &str| detail()["graph"]["node_status"][node].clone();
-    let drive = |until: &str, settled: &dyn Fn() -> bool| {
-        let pid = serving.drive_fixture(run);
-        let driver = RetainedDriver(pid);
-        eventually(until, settled);
-        eventually("the driver let go and was reaped", || !process_is_live(pid));
-        drop(driver);
-    };
     let attest = |node: &str| {
         engine_attest(&serving.runs_root(), run, node)
             .expect("the engine attests the ready action");
+        driven_past(&serving.runs_root(), run, &[node]);
     };
     let (approve, signoff) = (
         fixture_run::APPROVAL_NODE_ID,
         fixture_run::SIGNOFF_MEMBER_NODE_ID,
     );
 
-    drive("the first driver left the approval waiting", &|| {
+    let pid = serving.drive_fixture(run);
+    let adoption = RetainedDriver(pid);
+    eventually("the adoption left the approval waiting", || {
         status(approve) == json!("waiting")
     });
+    eventually("the adoption returned and was reaped", || {
+        !process_is_live(pid)
+    });
+    drop(adoption);
+    let driver = handed_off(&serving.runs_root(), run);
+    driven_past(&serving.runs_root(), run, &[]);
     // The sign-off in the member's source waits on the home's approval.
     assert_ne!(status(signoff), json!("waiting"), "{}", detail());
     attest(approve);
-    drive("the second driver left the sign-off waiting", &|| {
-        status(approve) == json!("done") && status(signoff) == json!("waiting")
-    });
+    assert_eq!(status(approve), json!("done"), "{}", detail());
+    assert_eq!(status(signoff), json!("waiting"), "{}", detail());
     attest(signoff);
-    drive("the third driver completed the graph", &|| {
-        detail()["run"]["state"] == json!("settled")
-    });
+    assert_eq!(detail()["run"]["state"], json!("settled"), "{}", detail());
     assert_eq!(status(signoff), json!("done"), "{}", detail());
+    drop(driver);
 
     // Each task's own item, in its own source's project, carries what its node
     // settled as.
@@ -16717,19 +16730,22 @@ fn launch_rendered_over_local_md_store(
         &[&approval],
     );
 
-    let run = started_and_let_go(&onepipeline(&[
-        "start",
-        &format!(
-            "{}:{}",
-            fixture_run::LOCAL_MD_SOURCE,
-            fixture_run::LOCAL_MD_PROJECT
-        ),
-        "--detach",
-        onepipeline::templates::ROOT_FLAG,
-        "template-root",
-        onepipeline::templates::REQUIRE_RENDERED_FLAG,
-        "true",
-    ]));
+    let run = started_and_let_go(
+        root,
+        &onepipeline(&[
+            "start",
+            &format!(
+                "{}:{}",
+                fixture_run::LOCAL_MD_SOURCE,
+                fixture_run::LOCAL_MD_PROJECT
+            ),
+            "--detach",
+            onepipeline::templates::ROOT_FLAG,
+            "template-root",
+            onepipeline::templates::REQUIRE_RENDERED_FLAG,
+            "true",
+        ]),
+    );
     let template_root = template_root
         .canonicalize()
         .expect("the template root resolves");
@@ -16787,17 +16803,124 @@ fn provisioned_onepipeline_with_env(
     output.stdout
 }
 
-/// The run a detached `start` printed as `launched`, once the driver it left
-/// has let go of it.
+/// The run a detached `start` printed as `launched` under `root`, once the
+/// driver it left can do nothing more without a person — the run has ended, or
+/// it waits on a decision — and that driver has gone, as a host's driver goes
+/// when the host loses it. The engine's retained driver waits on a decision
+/// rather than letting go of the run, and refuses an `adopt` while it does, so a
+/// journey about adoption ends it the way a lost host does: `SIGKILL`, which
+/// leaves the run with work left for an adoption to take over.
 #[cfg(unix)]
-fn started_and_let_go(launched: &[u8]) -> String {
+fn started_and_let_go(root: &Path, launched: &[u8]) -> String {
+    let (run, driver) = started_and_driven(root, launched);
+    lose(driver);
+    run
+}
+
+/// End `driver` as a host that loses it does: `SIGKILL`, so it journals
+/// nothing on its way out and leaves its run with work left for an adoption to
+/// take over, as the engine documents. Returns once the process has gone.
+#[cfg(unix)]
+fn lose(driver: RetainedDriver) {
+    let pid = driver.0;
+    std::mem::forget(driver);
+    let raw = i32::try_from(pid).expect("a pid");
+    // SAFETY: the pid is one this journey's own engine printed or journalled
+    // for a driver it started; SIGKILL passes no memory to libc.
+    unsafe {
+        libc::kill(raw, libc::SIGKILL);
+    }
+    eventually("the lost driver let go of the run", || {
+        !process_is_live(pid)
+    });
+}
+
+/// The run a detached `start` printed as `launched` under `root`, once the
+/// driver it left can do nothing more without a person, as [`driven_past`]
+/// reads it; answers the run and that driver, ended when the journey drops it.
+#[cfg(unix)]
+fn started_and_driven(root: &Path, launched: &[u8]) -> (String, RetainedDriver) {
     let launched: Value = serde_json::from_slice(launched).expect("start prints its launch");
     let run = launched["run_id"].as_str().expect("a run id").to_owned();
     let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    eventually("the launched driver let go of the run", || {
-        !process_is_live(pid)
+    let driver = RetainedDriver(pid);
+    driven_past(root, &run, &[]);
+    (run, driver)
+}
+
+/// The driver an attached `adopt` of `run` under `root` handed the run to as it
+/// returned — journalled as the run's next adoption — which waits on the run's
+/// decision; ended when the journey drops it.
+#[cfg(unix)]
+fn handed_off(root: &Path, run: &str) -> RetainedDriver {
+    let adopted = || -> Vec<u32> {
+        fs::read_to_string(root.join(run).join("events.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|event| event["kind"] == "driver-adopted")
+            .filter_map(|event| event["payload"]["pid"].as_u64())
+            .filter_map(|pid| u32::try_from(pid).ok())
+            .collect()
+    };
+    eventually("the attached adoption handed the run on", || {
+        adopted().len() >= 2
     });
-    run
+    RetainedDriver(*adopted().last().expect("the hand-off's driver"))
+}
+
+/// Wait until the driver of `run` under `root` has taken up the decisions on
+/// `decided` and can do nothing more without a person, as the engine's own
+/// `status RUN --json` reads it: the run has ended, or it is paused on a
+/// decision none of `decided` names. A retained driver applies an attestation
+/// itself and drives the run on, so nothing here runs `adopt`.
+#[cfg(unix)]
+fn driven_past(root: &Path, run: &str, decided: &[&str]) {
+    let deadline = std::time::Instant::now() + DRIVER_PATIENCE;
+    loop {
+        let reading = match onepipeline::verbs::status(root, Some(run)) {
+            Ok(onepipeline::verbs::Status::Run(status)) => {
+                Some(onepipeline::views::reading(&status.view))
+            }
+            _ => None,
+        };
+        // A pause reads from the decision the driver journalled, which it
+        // journals before it records the action's `waiting` settlement; only
+        // that record makes the action one an attestation can complete.
+        let journal = fs::read_to_string(root.join(run).join("events.jsonl")).unwrap_or_default();
+        let settled_waiting = |action: &String| {
+            journal
+                .lines()
+                .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+                .any(|record| {
+                    record["kind"] == "node-settled"
+                        && record["labels"]["node"] == json!(action)
+                        && record["payload"]["status"] == "waiting"
+                })
+        };
+        let done = reading.as_ref().is_some_and(|reading| {
+            reading.ending.is_some()
+                || reading.paused.as_ref().is_some_and(|paused| {
+                    paused.human_actions.iter().all(settled_waiting)
+                        && decided
+                            .iter()
+                            .all(|node| !paused.human_actions.iter().any(|waiting| waiting == node))
+                })
+        });
+        if done {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the driver of {run} neither waited on a decision past {decided:?} nor let go within \
+             {DRIVER_PATIENCE:?}; the engine reads it as {}",
+            reading.map_or_else(
+                || "unreadable".to_owned(),
+                |reading| serde_json::to_string(&reading).expect("a reading serializes")
+            )
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 /// The launch record of `run` under `root`, as the engine last wrote it.
@@ -17031,13 +17154,16 @@ fn launch_copied_from_plan_task_renderings(
         .unwrap_or_else(|| panic!("the copy names where the project landed: {report:?}"))
         .to_string();
 
-    let run = started_and_let_go(&onepipeline(&[
-        "start",
-        &home,
-        "--detach",
-        onepipeline::templates::REQUIRE_RENDERED_FLAG,
-        "true",
-    ]));
+    let run = started_and_let_go(
+        root,
+        &onepipeline(&[
+            "start",
+            &home,
+            "--detach",
+            onepipeline::templates::REQUIRE_RENDERED_FLAG,
+            "true",
+        ]),
+    );
     (run, report)
 }
 
@@ -17183,7 +17309,7 @@ fn an_adopted_run_settles_a_store_copied_plan_launched_under_the_rendered_only_c
 // llmlint: ignore-block[expensive_tests_stay_behind_their_own_edge] these read journeys produce records with the pinned engine CLI already provisioned by this tier, then query the real read API. They need only that existing setup and local files; no additional host prerequisite or reusable expensive setup belongs behind another project edge.
 /// A run the pinned engine wrote from first record to last — launched by its
 /// `start` from a `local-md` project, each human action completed by its
-/// `attest` and each pass driven by its `adopt` — is served as that engine
+/// `attest` and each pass driven by the driver that `start` retained — is served as that engine
 /// recorded it: the plan the run holds, every node's status at each point the
 /// run stopped, and its settlement, each read beside the engine's own record of
 /// it rather than beside anything this journey wrote.
@@ -17222,15 +17348,18 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
         &[&approval],
     );
     let engine = |arguments: &[&str]| provisioned_onepipeline(&root, &dir, &graph, arguments);
-    let run = started_and_let_go(&engine(&[
-        "start",
-        &format!(
-            "{}:{}",
-            fixture_run::LOCAL_MD_SOURCE,
-            fixture_run::LOCAL_MD_PROJECT
-        ),
-        "--detach",
-    ]));
+    let (run, driver) = started_and_driven(
+        &root,
+        &engine(&[
+            "start",
+            &format!(
+                "{}:{}",
+                fixture_run::LOCAL_MD_SOURCE,
+                fixture_run::LOCAL_MD_PROJECT
+            ),
+            "--detach",
+        ]),
+    );
     let recorded_statuses = || -> Value {
         let printed: Value =
             serde_json::from_slice(&engine(&["results", "--json", &run])).expect("results JSON");
@@ -17316,7 +17445,7 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
     assert_eq!(recorded_statuses(), waiting);
 
     engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
-    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    driven_past(&root, &run, &[fixture_run::APPROVAL_NODE_ID]);
     let approved = recorded_statuses();
     assert_eq!(
         approved,
@@ -17325,7 +17454,8 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
     assert_eq!(served_statuses(), approved, "{}", detail()["graph"]);
 
     engine(&["attest", &run, SIGNOFF]);
-    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    driven_past(&root, &run, &[SIGNOFF]);
+    drop(driver);
     let settled = recorded_statuses();
     assert_eq!(
         settled,
@@ -17401,15 +17531,18 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
     )
     .expect("a public destination");
     let engine = |arguments: &[&str]| provisioned_onepipeline(&root, &dir, &graph, arguments);
-    let run = started_and_let_go(&engine(&[
-        "start",
-        &format!(
-            "{}:{}",
-            fixture_run::LOCAL_MD_SOURCE,
-            fixture_run::LOCAL_MD_PROJECT
-        ),
-        "--detach",
-    ]));
+    let (run, driver) = started_and_driven(
+        &root,
+        &engine(&[
+            "start",
+            &format!(
+                "{}:{}",
+                fixture_run::LOCAL_MD_SOURCE,
+                fixture_run::LOCAL_MD_PROJECT
+            ),
+            "--detach",
+        ]),
+    );
     // A person edits the board while approval waits. The settlement's narrow
     // write adds its metadata without re-reading the body to screen it.
     let approval = approval.to_string();
@@ -17432,7 +17565,8 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
         json!("waiting")
     );
     engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
-    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    driven_past(&root, &run, &[fixture_run::APPROVAL_NODE_ID]);
+    drop(driver);
     let written = fs::read_to_string(&path).expect("the settlement write-back");
     assert!(
         written.contains("Approve the velvetquasar change."),
@@ -18221,18 +18355,21 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
         fixture_run::LOCAL_MD_SOURCE,
         fixture_run::LOCAL_MD_PROJECT
     );
-    let run = started_and_let_go(&provisioned_onepipeline(
+    let run = started_and_let_go(
         &root,
-        &dir,
-        &graph,
-        &[
-            "start",
-            &project,
-            "--detach",
-            "--bus-config",
-            &bus.display().to_string(),
-        ],
-    ));
+        &provisioned_onepipeline(
+            &root,
+            &dir,
+            &graph,
+            &[
+                "start",
+                &project,
+                "--detach",
+                "--bus-config",
+                &bus.display().to_string(),
+            ],
+        ),
+    );
     // The engine recorded the hook as the launch declared it, so the bus every
     // writer of this run opens — this server's included — runs it.
     assert_eq!(
@@ -18286,9 +18423,17 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
     }
     assert_eq!(served_tasks[0]["id"], json!(node));
     assert_eq!(launched["graph"]["plan"]["name"], recorded["name"]);
+    // Each settlement also records the digest of the task it settled, which the
+    // engine reads to redo changed work; this journey is about the status.
+    let statuses = || -> Vec<Value> {
+        settled_records()
+            .into_iter()
+            .map(|settlement| settlement["status"].clone())
+            .collect()
+    };
     assert_eq!(
-        settled_records(),
-        [json!({ "status": "waiting" })],
+        statuses(),
+        [json!("waiting")],
         "the launch settled the approval as anything but waiting"
     );
     assert_eq!(launched["graph"]["node_status"][node], json!("waiting"));
@@ -18334,7 +18479,7 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
             .any(|record| record["kind"] == json!("edit-committed")),
         "a dropped envelope was committed"
     );
-    assert_eq!(settled_records(), [json!({ "status": "waiting" })]);
+    assert_eq!(statuses(), [json!("waiting")]);
     assert_eq!(detail()["graph"]["node_status"][node], json!("waiting"));
 
     // The hook keeps this one, unchanged: the receipt says it applied and says
@@ -18829,13 +18974,16 @@ fn an_adopted_private_coordination_run_keeps_its_public_task_public_and_hands_it
         fixture_run::LOCAL_MD_SOURCE,
         fixture_run::LOCAL_MD_PROJECT
     );
-    let run = started_and_let_go(&provisioned_onepipeline_with_env(
+    let run = started_and_let_go(
         &root,
-        &dir,
-        &graph,
-        &launching,
-        &["start", &project, "--detach"],
-    ));
+        &provisioned_onepipeline_with_env(
+            &root,
+            &dir,
+            &graph,
+            &launching,
+            &["start", &project, "--detach"],
+        ),
+    );
 
     let serving = Serving::start_in_as_with_env(workspace, fixture_run::SESSION, &environment);
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
@@ -20043,6 +20191,37 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     }
     // llmlint: ignore-end[tests_mirror_real_usage]
     let run = "cached-approval";
+    // The attached `start` handed the run to a driver that waits on its
+    // decision. Taking the run up, that driver projects the run onto the board
+    // again; the reads below are of the run once that projection has finished,
+    // as its record says, and the driver waits.
+    let records = |name: &str| -> Vec<Value> {
+        fs::read_to_string(root.join(run).join(name))
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .collect()
+    };
+    eventually(
+        "the driver the launch handed the run to projected it",
+        || {
+            let Some(adopted) = records("events.jsonl")
+                .into_iter()
+                .rfind(|record| record["kind"] == "driver-adopted")
+            else {
+                return false;
+            };
+            let since = adopted["ts"].as_str().expect("a record's time").to_owned();
+            records(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE)
+                .iter()
+                .any(|projection| {
+                    projection["at"]
+                        .as_str()
+                        .is_some_and(|at| at >= since.as_str())
+                })
+        },
+    );
+    driven_past(&root, run, &[]);
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
         fixture_run::SESSION,
@@ -20103,13 +20282,13 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
         .as_array()
         .expect("requests")
         .len();
-    let pid = serving.drive_fixture(run);
-    let driver = RetainedDriver(pid);
+    // The attached `start` handed the run to the driver it adopted, which waits
+    // on the decision: it applies the reply and drives the run on, and would
+    // refuse an `adopt` here.
     eventually("the adopted engine settled the remote plan", || {
         http::get(serving.address, &detail_path).json()["run"]["state"] == json!("settled")
     });
-    eventually("the adopted engine let go", || !process_is_live(pid));
-    drop(driver);
+    driven_past(&serving.runs_root(), run, &[]);
     let events = events_on(
         &http::get(
             serving.address,
@@ -22457,13 +22636,7 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
         "{}",
         String::from_utf8_lossy(&launched.stderr)
     );
-    let launched: Value =
-        serde_json::from_slice(&launched.stdout).expect("start prints its launch");
-    let run = launched["run_id"].as_str().expect("a run id").to_owned();
-    let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    eventually("the launched driver let go of the run", || {
-        !process_is_live(pid)
-    });
+    let run = started_and_let_go(&root, &launched.stdout);
 
     let serving = Serving::start_in_as_with_env_removing(
         workspace,

@@ -1576,7 +1576,17 @@ fn a_run_stopped_or_settled_retires_only_its_own_holds_and_tells_their_owner() {
         world.root.join(&settled).join("result.json").is_file(),
         "the run settled"
     );
-    assert_eq!(world.stored(&settles)["state"], "dismissed");
+    // The driver retires the run's holds as it lets go of the settled run,
+    // which may be just after the watch saw it settle.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while world.stored(&settles)["state"] != "dismissed" {
+        assert!(
+            Instant::now() < deadline,
+            "the settled run never retired its hold: {}",
+            world.stored(&settles)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert_eq!(
         world.stored(&settles)["resolution"]["reason"],
         "the run ended"
