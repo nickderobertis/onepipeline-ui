@@ -934,10 +934,11 @@ test("a conversation item opens at that item, outlined in the view's selection a
     expect(tint.a).toBeLessThanOrEqual(0.15 + 1 / 255);
     if (tint.a > 0) expect(sameColour(tint, accent, 24)).toBe(true);
     // And a sibling item it did not open carries neither.
-    // llmlint: ignore[e2e_uses_accessible_selectors] the turn's other items, by the package's own address of an item.
+    // llmlint: ignore-block[e2e_uses_accessible_selectors] the turn's other items, by the package's own address of an item.
     const sibling = turn
       .locator(`[data-event-index]:not([data-event-index="${item.index}"])`)
       .first();
+    // llmlint: ignore-end[e2e_uses_accessible_selectors]
     expect(
       await sibling.evaluate(
         (element) => getComputedStyle(element).outlineStyle,

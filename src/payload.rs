@@ -3092,12 +3092,12 @@ fn evidence<'a>(view: &Run<'a>, node: &str) -> Vec<Evidence<'a>> {
                 .iter()
                 .filter(|artifact| is_evidence(artifact))
                 .map(move |artifact| Evidence {
-                artifact: artifact.id.as_str(),
-                since,
-                at: event.ts.as_str(),
-                ok,
-                output_tail: prose.clone(),
-            })
+                    artifact: artifact.id.as_str(),
+                    since,
+                    at: event.ts.as_str(),
+                    ok,
+                    output_tail: prose.clone(),
+                })
         })
         .collect()
 }
@@ -3317,9 +3317,7 @@ fn node_details(view: &Run<'_>) -> Value {
     nodes.extend(
         view.events
             .iter()
-            .filter(|event| {
-                event.artifacts.iter().any(is_evidence) || event.source == Source::Vcs
-            })
+            .filter(|event| event.artifacts.iter().any(is_evidence) || event.source == Source::Vcs)
             .filter_map(|event| event.labels.node.as_deref()),
     );
     for node in nodes {
@@ -5316,10 +5314,12 @@ fn kept_report<'a>(paths: &RunPaths, recorded: &'a str) -> Option<&'a str> {
     let path = Path::new(recorded);
     let reports = paths.reports_dir();
     let parent = path.parent()?;
-    (path.is_absolute() && parent.file_name().is_some() && parent.file_name() == reports.file_name())
-        .then(|| path.file_name()?.to_str())
-        .flatten()
-        .filter(|name| ArtifactId::try_from(*name).is_ok())
+    (path.is_absolute()
+        && parent.file_name().is_some()
+        && parent.file_name() == reports.file_name())
+    .then(|| path.file_name()?.to_str())
+    .flatten()
+    .filter(|name| ArtifactId::try_from(*name).is_ok())
 }
 
 /// A refused edit's complete refusal: the JSON string the engine kept for it, read

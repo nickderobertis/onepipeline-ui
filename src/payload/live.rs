@@ -267,7 +267,10 @@ impl Indexed {
         let mut merged: Vec<(usize, Envelope)> = positions.into_iter().zip(events).collect();
         merged.extend(refused);
         merged.sort_by_key(|(place, _)| *place);
-        merged.into_iter().map(|(place, event)| (event, place)).unzip()
+        merged
+            .into_iter()
+            .map(|(place, event)| (event, place))
+            .unzip()
     }
 
     /// Whether every record of `node` is read: the view's, or a held share.

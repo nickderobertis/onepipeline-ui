@@ -91,6 +91,7 @@ async function open(page: Page, list: Locator, name: string): Promise<void> {
 async function stated(page: Page): Promise<Record<string, string>> {
   const refusal = detail(page).getByRole("region", { name: "Refused edit" });
   await expect(refusal).toBeVisible();
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] each fact is a term and its definition grouped in the list's own row, and a role query would flatten the command's own nested terms into the same list; the pairs are read as the list groups them.
   return refusal
     .locator(":scope > dl > div")
     .evaluateAll((pairs) =>
@@ -101,6 +102,7 @@ async function stated(page: Page): Promise<Record<string, string>> {
         ]),
       ),
     );
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
 }
 
 test("the graph draws no box of refusals, and Overall lists each refusal once, attributed and not applied", async ({
@@ -177,6 +179,7 @@ test("each refusal's detail states who, what and where, and the complete refusal
     name: "Complete refusal",
   });
   await expect(complete).toBeVisible();
+  // llmlint: ignore[e2e_uses_accessible_selectors] the figure's preformatted text has no role of its own; what is measured is the text as it is laid out in lines.
   const text = await complete.locator("pre").evaluate(
     // The rendered text as it lies on screen, so lines are lines.
     (pre) => (pre as HTMLElement).innerText,
@@ -215,6 +218,7 @@ test("each refusal's detail states who, what and where, and the complete refusal
   const kept = detail(page).getByRole("figure", { name: "Complete refusal" });
   await expect(kept).toBeVisible();
   // Every line of the kept text, scrolled within the panel rather than cut.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the figure's preformatted text has no role of its own; what is measured is its lines and whether it scrolls.
   const lines = await kept
     .locator("pre")
     .evaluate((pre) => (pre as HTMLElement).innerText.split("\n").length);
@@ -222,6 +226,7 @@ test("each refusal's detail states who, what and where, and the complete refusal
   const scrolls = await kept
     .locator("pre")
     .evaluate((pre) => pre.scrollHeight > pre.clientHeight);
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   expect(scrolls).toBe(true);
 
   // The older shape: a row, and its reason in the detail.

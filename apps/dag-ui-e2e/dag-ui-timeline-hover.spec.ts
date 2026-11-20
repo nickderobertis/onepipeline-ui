@@ -59,6 +59,7 @@ interface Point {
  * bars where nothing is drawn, and along the marker row past the last bar — on
  * each marker there and between them.
  */
+// llmlint: ignore-block[e2e_uses_accessible_selectors] where the walk goes is read off the geometry of every bar and glyph the package draws, which it marks `data-timeline-entry` and which no role query lists apart from the plot's other buttons; nothing here is clicked or asserted by selector.
 async function walkOver(plot: Locator): Promise<readonly Point[]> {
   // Taken once the plot has stopped moving: records still arriving re-lay it out.
   let previous = "";
@@ -143,6 +144,7 @@ async function walkOver(plot: Locator): Promise<readonly Point[]> {
   }
   return points;
 }
+// llmlint: ignore-end[e2e_uses_accessible_selectors]
 
 /** The reading the package's resolved entry carries: its own text, or its glyph's. */
 async function resolvedReading(plot: Locator): Promise<string> {
@@ -153,6 +155,7 @@ async function resolvedReading(plot: Locator): Promise<string> {
     const described = entry.getAttribute("aria-describedby");
     if (described !== null)
       return document.getElementById(described)?.textContent?.trim() ?? "";
+    // llmlint: ignore[e2e_uses_accessible_selectors] the reading a glyph carries is hung on it as this attribute, which is the text the layer shows; it is read, not selected.
     const hung = entry
       .querySelector("[data-timeline-reading]")
       ?.getAttribute("data-timeline-reading")

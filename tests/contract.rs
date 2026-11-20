@@ -1222,6 +1222,15 @@ fn the_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract
             "docs/contract.md's timeline schema {schema} adds no `{field}`"
         );
     }
+    for &(schema, kind, field) in timeline_schema::TIMELINE_KIND_ADDITIONS {
+        let paragraph = timeline_schema_paragraph(schema);
+        assert!(
+            schema <= u64::from(TIMELINE_SCHEMA_VERSION)
+                && paragraph.contains(&format!("**`{field}`**"))
+                && paragraph.contains(&format!("`{kind}`")),
+            "docs/contract.md's timeline schema {schema} adds no `{field}` to `{kind}`"
+        );
+    }
     // The one bump that re-keyed a field rather than adding one says so.
     assert!(
         timeline_schema::WIRE_KEYED_FIELDS <= u64::from(TIMELINE_SCHEMA_VERSION)

@@ -70,7 +70,9 @@ use crate::fixture_run;
 use crate::http;
 use crate::serving::{ForeignServing, Serving};
 use crate::sibling;
-use crate::timeline_schema::{TIMELINE_EVENT_ADDITIONS, WIRE_KEYED_FIELDS};
+use crate::timeline_schema::{
+    TIMELINE_EVENT_ADDITIONS, TIMELINE_KIND_ADDITIONS, WIRE_KEYED_FIELDS,
+};
 
 /// The environment variable naming the provisioned baseline server.
 ///
@@ -536,6 +538,11 @@ fn as_served_at(mut timeline: Value, base_schema: u64) -> Value {
             if base_schema < 14 && event["kind"] == "turn-activity" {
                 event.as_object_mut().expect("event").remove("reference");
             }
+            for (schema, kind, field) in TIMELINE_KIND_ADDITIONS {
+                if base_schema < *schema && event["kind"] == *kind {
+                    event.as_object_mut().expect("event").remove(*field);
+                }
+            }
             for field in &added {
                 // A dotted field was added inside an object the event already
                 // carried, and only the leaf is newer than the base.
@@ -688,7 +695,10 @@ fn timelines_of(
         schema == base_schema
             || TIMELINE_EVENT_ADDITIONS
                 .iter()
-                .any(|(added, _)| *added == schema),
+                .any(|(added, _)| *added == schema)
+            || TIMELINE_KIND_ADDITIONS
+                .iter()
+                .any(|(added, _, _)| *added == schema),
         "{path} serves timeline schema {schema} and `TIMELINE_EVENT_ADDITIONS` says \
          nothing about what it added"
     );

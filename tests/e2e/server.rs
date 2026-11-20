@@ -23195,7 +23195,10 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
         *run.lock().expect("the run") = write_refusals_run(root);
     });
     let run = run.lock().expect("the run").clone();
-    let timeline = http::get(serving.address, &format!("/api/v2/runs/{run}/timeline?scope=run"));
+    let timeline = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=run"),
+    );
     assert_eq!(timeline.status, 200, "{}", timeline.body);
     let timeline = timeline.json();
     assert_eq!(
@@ -23235,7 +23238,10 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
         .as_str()
         .expect("the record's own full_reason");
     assert!(kept.ends_with(&format!("/{name}")), "{kept} is not {name}");
-    let artifact = http::get(serving.address, &format!("/api/v2/runs/{run}/artifacts/{name}"));
+    let artifact = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/artifacts/{name}"),
+    );
     assert_eq!(artifact.status, 200, "{}", artifact.body);
     let artifact = artifact.json();
     let expected: String =
@@ -23256,7 +23262,10 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
     let cut = refused[3];
     assert_eq!(cut["fields"]["full_reason_truncated"], json!(true));
     let cut_name = cut["reference"]["value"].as_str().expect("a name");
-    let whole = http::get(serving.address, &format!("/api/v2/runs/{run}/artifacts/{cut_name}"));
+    let whole = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/artifacts/{cut_name}"),
+    );
     assert_eq!(whole.status, 200, "{}", whole.body);
     let whole = whole.json();
     assert_eq!(whole["truncated"], json!(false));
@@ -23309,7 +23318,10 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
 
     // Nothing else opens: a name no record kept, a traversal, a kept file gone, and
     // one that is not a JSON string.
-    for absent in ["edit-rejected-full-reason-nobody-1.json", "..%2Fevents.jsonl"] {
+    for absent in [
+        "edit-rejected-full-reason-nobody-1.json",
+        "..%2Fevents.jsonl",
+    ] {
         let refused = http::get(
             serving.address,
             &format!("/api/v2/runs/{run}/artifacts/{absent}"),
@@ -23322,10 +23334,16 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
         );
     }
     fs::write(kept, "not a JSON string").expect("spoil the kept refusal");
-    let spoiled = http::get(serving.address, &format!("/api/v2/runs/{run}/artifacts/{name}"));
+    let spoiled = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/artifacts/{name}"),
+    );
     assert_eq!(spoiled.status, 404, "{}", spoiled.body);
     fs::remove_file(kept).expect("remove the kept refusal");
-    let gone = http::get(serving.address, &format!("/api/v2/runs/{run}/artifacts/{name}"));
+    let gone = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/artifacts/{name}"),
+    );
     assert_eq!(gone.status, 404, "{}", gone.body);
 }
 
