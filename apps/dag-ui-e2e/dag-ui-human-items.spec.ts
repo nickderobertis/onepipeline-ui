@@ -6933,7 +6933,8 @@ for (const width of [1440, 390] as const)
     for (const id of [ids[1], ids[0], ids[2]])
       cli(served, ["human-items", "dismiss", id ?? ""], SUPERVISOR);
     await inFilters(page, () => showState(page, "dismissed"));
-    const dismissed = [later[0], later[1], later[2]] as string[];
+    // All three were dismissed, so the State filter lists exactly them.
+    const dismissed = [...later];
     await expect.poll(() => groupedTitles(page)).toEqual([dismissed]);
     await sortControl(page).selectOption("newest");
     await expect
