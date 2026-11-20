@@ -495,11 +495,16 @@ function sortOf(value: string): SortOrder {
   return oneOf(SORT_CHOICES, value) ?? "default";
 }
 
-/** A click on the card itself selects it; a click on one of its controls does not. */
+/**
+ * A click on the card itself selects it; a click on one of its controls, or the
+ * one a finger sends on lifting from a long press of its raised time, does not.
+ */
 function selectsCard(event: MouseEvent<HTMLElement>): boolean {
   return (
     event.target instanceof Element &&
-    event.target.closest("a, button, textarea, input, select") === null
+    event.target.closest(
+      'a, button, textarea, input, select, [data-long-pressed="true"]',
+    ) === null
   );
 }
 
@@ -767,6 +772,9 @@ interface WriteButtonProps extends CardControl {
  */
 function RaisedAt({ at }: { readonly at: string }) {
   const [held, setHeld] = useState(false);
+  // Set from the moment a long press shows the moment until the next press:
+  // the click a lifted finger sends after it is no press on the card.
+  const [pressedLong, setPressedLong] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const tip = useId();
   const parsed = parseTimestamp(at);
@@ -775,11 +783,19 @@ function RaisedAt({ at }: { readonly at: string }) {
     <span
       aria-describedby={held ? tip : undefined}
       className="human-item-raised"
+      data-long-pressed={pressedLong}
+      // A press target of its own, out of the Tab sequence: a finger on the
+      // time is otherwise moved by the browser to the card's buttons just above.
+      tabIndex={-1}
       onPointerCancel={cancel}
       onPointerDown={(event) => {
+        setPressedLong(false);
         if (event.pointerType === "mouse") return;
         cancel();
-        timer.current = setTimeout(() => setHeld(true), LONG_PRESS_MS);
+        timer.current = setTimeout(() => {
+          setHeld(true);
+          setPressedLong(true);
+        }, LONG_PRESS_MS);
       }}
       onPointerLeave={() => {
         cancel();

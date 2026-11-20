@@ -4159,7 +4159,7 @@ test("what is asked of a toast before its receipt waits for it, and is dropped w
   ]);
 });
 
-test("a grouping this page does not know, or storage the browser refuses, groups by Priority and still groups as chosen", async ({
+test("a grouping, sort or filter this page does not know, or storage the browser refuses, groups by Priority in the engine's order and still sorts and groups as chosen", async ({
   browser,
 }) => {
   const served = await serveWorld("queue");
@@ -4167,25 +4167,63 @@ test("a grouping this page does not know, or storage the browser refuses, groups
     listRegion(page).getByRole("heading", { level: 2 });
 
   // A choice another release of the page remembered, which this one does not
-  // offer, is no choice: the list groups by Priority.
+  // offer, is no choice: the list groups by Priority, in the engine's order,
+  // under the default filters.
   const remembered = await browser.newContext();
-  await remembered.addInitScript(() =>
+  await remembered.addInitScript(() => {
     window.localStorage.setItem(
       "onepipeline-ui.human-items.group-by",
       "assignee",
-    ),
-  );
+    );
+    window.localStorage.setItem("onepipeline-ui.human-items.sort", "random");
+    window.localStorage.setItem(
+      "onepipeline-ui.human-items.filters",
+      JSON.stringify({ state: "archived", kind: "task" }),
+    );
+  });
   const first = await remembered.newPage();
   await open(first, served, { groupBy: null });
   await expect(first.getByRole("combobox", { name: "Group by" })).toHaveValue(
     "priority",
   );
+  await expect(first.getByRole("combobox", { name: "Sort" })).toHaveValue(
+    "default",
+  );
+  await expect(first.getByLabel("State", { exact: true })).toHaveValue("open");
+  await expect(first.getByLabel("Kind", { exact: true })).toHaveValue("");
   await expect(headings(first)).toHaveText([
     "Critical (3)",
     "High (3)",
     "Low (1)",
   ]);
   await remembered.close();
+
+  // Filters whose state is known keep what they know and drop what they do
+  // not; text that is not JSON is no choice at all.
+  for (const [stored, priority, shown] of [
+    [
+      JSON.stringify({ state: "open", kind: "robot", priority: "urgent" }),
+      "urgent",
+      ["Critical (3)"],
+    ],
+    ["{not json", "", ["Critical (3)", "High (3)", "Low (1)"]],
+  ] as const) {
+    const partial = await browser.newContext();
+    await partial.addInitScript((filters) => {
+      window.localStorage.setItem(
+        "onepipeline-ui.human-items.filters",
+        filters,
+      );
+    }, stored);
+    const third = await partial.newPage();
+    await open(third, served, { groupBy: null });
+    await expect(third.getByLabel("Kind", { exact: true })).toHaveValue("");
+    await expect(third.getByLabel("Priority", { exact: true })).toHaveValue(
+      priority,
+    );
+    await expect(headings(third)).toHaveText([...shown]);
+    await partial.close();
+  }
 
   // A browser that refuses this page its storage — as one blocking site data
   // does, throwing on every access — still groups this visit as asked.
@@ -4207,6 +4245,20 @@ test("a grouping this page does not know, or storage the browser refuses, groups
   ]);
   await second.getByRole("combobox", { name: "Group by" }).selectOption("kind");
   await expect(headings(second)).toHaveText(["Task (4)", "Question (3)"]);
+  const tasks = await groupedTitles(second);
+  await second.getByRole("combobox", { name: "Sort" }).selectOption("oldest");
+  await expect(second.getByRole("combobox", { name: "Sort" })).toHaveValue(
+    "oldest",
+  );
+  const raised = new Map(
+    listed(served, ["--all", "--full"]).map(({ item }) => [
+      item.title,
+      item.created_at,
+    ]),
+  );
+  await expect
+    .poll(() => groupedTitles(second))
+    .toEqual(tasks.map((group) => byRaised(raised, group, "oldest")));
   await refusing.close();
 });
 
@@ -6625,10 +6677,17 @@ function rendered(select: HTMLSelectElement) {
       background: style.backgroundColor,
     };
   };
+  const edges = ({ top, bottom, left, right, height }: DOMRect) => ({
+    top,
+    bottom,
+    left,
+    right,
+    height,
+  });
   return {
-    select: select.getBoundingClientRect().toJSON() as DOMRect,
-    label: label.getBoundingClientRect().toJSON() as DOMRect,
-    text: range.getBoundingClientRect().toJSON() as DOMRect,
+    select: edges(select.getBoundingClientRect()),
+    label: edges(label.getBoundingClientRect()),
+    text: edges(range.getBoundingClientRect()),
     selectLooks: read(select),
     labelLooks: read(label),
   };
@@ -6667,19 +6726,32 @@ for (const width of [1440, 390] as const)
       await expect(card(page, item.title)).toContainText(/Raised \d+ \w+ ago/u);
       await expectAge(raised, item.created_at);
     }
-    // A long press, which is what a phone has for hover, shows the moment.
+    // A long press, which is what a phone has for hover, shows the moment
+    // while the finger is down, without opening the card.
     const first = card(page, later[0] ?? "");
-    await first
-      .getByRole("time")
-      .dispatchEvent("pointerdown", { pointerType: "touch", isPrimary: true });
+    const age = first.getByRole("time");
+    // A touch screen is a coarse pointer, which lays the card out for fingers:
+    // where the time sits is read once the page is one.
+    const touch = await page.context().newCDPSession(page);
+    await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    await age.scrollIntoViewIfNeeded();
+    const at = await box(age);
+    const finger = [{ x: at.x + at.width / 2, y: at.y + at.height / 2 }];
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: finger,
+    });
     await expect(first.getByRole("tooltip")).toHaveText(
-      (await first.getByRole("time").getAttribute("title")) ?? "",
+      (await age.getAttribute("title")) ?? "",
     );
-    // The finger lifting off leaves the card, as a touch pointer does.
-    await first
-      .getByRole("time")
-      .dispatchEvent("pointerout", { pointerType: "touch", isPrimary: true });
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
     await expect(first.getByRole("tooltip")).toHaveCount(0);
+    await expect(detailPane(page)).toHaveCount(0);
+    await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await touch.detach();
 
     // Where Sort sits, and that it reads as its neighbours do.
     if (width === 1440) {
