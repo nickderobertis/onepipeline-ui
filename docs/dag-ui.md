@@ -667,7 +667,7 @@ being photographed.
 | `23-overall-timeline-crosshair` | the overall timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
 | `24-held-graph` | a run holding finished work for releases: a held-unlanded and a draft node, each card naming what it awaits |
 | `25-held-node` | the draft node's view, naming every release it awaits in full above the settlement's detail |
-| `26-action-items` | Action items: six long realistic cards under their priority headings, the filters folded at phone width |
+| `26-action-items` | Action items: six long realistic cards under their priority headings, each saying when it was raised, Sort in the filter row or beside the folded filters at phone width, and the questions' answer boxes |
 | `27-action-items-filters` | the same cards grouped by kind with the filters showing, unfolded at phone width |
 | `28-action-items-detail` | an item's detail with its whole body, beside the list or over it at phone width |
 | `29-action-items-dismissed` | the green toast after Dismiss, offering Restore and Add reason, the card already gone |
@@ -675,6 +675,7 @@ being photographed.
 | `31-action-items-refused` | the red toast with the engine's refusal of a review whose document changed, and the replacement card |
 | `32-action-items-reopen-unavailable` | Reopen greyed for a review with no undo, its question mark pressed and the reason showing |
 | `34-action-items-history` | an item's history in the detail: raised and completed by the manager, completed and noted by you, every time as an age |
+| `35-action-items-dismissed-reason` | a dismissed item under State: Dismissed, the reason saved with it on its card beside Reopen |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the

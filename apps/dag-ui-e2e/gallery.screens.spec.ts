@@ -957,6 +957,36 @@ const SURFACES: readonly Surface[] = [
       await settleReads(page);
     },
   },
+  {
+    name: "35-action-items-dismissed-reason",
+    title: "Action items: a dismissed item with the reason saved with it",
+    open: async (page) => {
+      const list = await openActionItems(page, "realistic");
+      await page
+        .getByRole("button", { name: /^Dismiss: / })
+        .first()
+        .click();
+      const toast = resultToast(page);
+      await toast.getByRole("button", { name: "Add reason" }).click();
+      await toast
+        .getByRole("textbox", { name: "Reason" })
+        .fill("Duplicate of the release-notes review; tracked there.");
+      await toast.getByRole("button", { name: "Send" }).click();
+      await expect(toast).toContainText("Reason saved");
+      await toast.getByRole("button", { name: "Close" }).click();
+      const folded = page.getByRole("button", { name: /^Filters/u });
+      if (await folded.isVisible()) await folded.click();
+      await page
+        .getByRole("group", { name: "Filter action items" })
+        .getByLabel("State", { exact: true })
+        .selectOption("dismissed");
+      if (await folded.isVisible()) await folded.click();
+      await expect(list.getByRole("article")).toHaveCount(1);
+      await expect(list.getByRole("article")).toContainText(
+        "Reason: Duplicate of the release-notes review",
+      );
+    },
+  },
 ];
 
 /**
