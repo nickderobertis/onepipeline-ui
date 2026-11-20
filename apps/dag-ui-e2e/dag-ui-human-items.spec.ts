@@ -2639,6 +2639,13 @@ async function backgroundOf(locator: Locator) {
   return { r, g, b };
 }
 
+/** Press `control` with the mouse at its centre, as a pointer would, enabled or not. */
+async function pressByPointer(page: Page, control: Locator): Promise<void> {
+  await control.scrollIntoViewIfNeeded();
+  const at = await box(control);
+  await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+}
+
 async function box(locator: Locator) {
   const found = await locator.boundingBox();
   if (found === null) throw new Error("no box: the element is not rendered");
@@ -6296,6 +6303,39 @@ test("Reopen on a resolved card and in its detail follows the engine's answer, i
     .click();
   await expect(card(page, step).getByRole("tooltip")).toHaveText(reopen.reason);
   await expect(detailPane(page)).toHaveCount(0);
+
+  // A pointer pressed on the greyed Reopen, on the card and then in Details,
+  // where the same reason is given, sends nothing and changes nothing the
+  // engine holds.
+  const recorded = () => cli(served, ["human-items", "show", stepId, "--json"]);
+  const before = JSON.parse(recorded());
+  const sent = writes(page);
+  const greyed = card(page, step).getByRole("button", {
+    name: "Reopen",
+    exact: true,
+  });
+  await pressByPointer(page, greyed);
+  await expect(greyed).toBeDisabled();
+  const stepPane = await openDetail(page, step);
+  const greyedInDetail = stepPane.getByRole("button", {
+    name: "Reopen",
+    exact: true,
+  });
+  await expect(greyedInDetail).toBeDisabled();
+  await stepPane
+    .getByRole("button", { name: "Why Reopen is unavailable" })
+    .click();
+  await expect(stepPane.getByRole("tooltip")).toHaveText(reopen.reason);
+  await pressByPointer(page, greyedInDetail);
+  await expect(greyedInDetail).toBeDisabled();
+  await expect(metadataOf(stepPane, "State")).toHaveText("Dismissed");
+  // Reading the detail again goes to the server after both presses, so a
+  // write either one had started would have been sent before it.
+  await stepPane.getByRole("button", { name: "Close detail" }).click();
+  await openDetail(page, step);
+  expect(sent).toHaveLength(0);
+  expect(JSON.parse(recorded())).toEqual(before);
+  await detailPane(page).getByRole("button", { name: "Close detail" }).click();
 
   // Refused, then lost: the card stays under Dismissed with the reason.
   const path = `/api/human-items/${certificateId}/reopen`;
