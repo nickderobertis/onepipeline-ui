@@ -199,8 +199,9 @@ fn required<'a>(input: &'a Value, field: &str) -> Result<&'a str, String> {
 /// non-string operand.
 fn eq_operand<'a>(predicate: &'a Value, what: &str) -> Result<&'a str, String> {
     match predicate.as_object() {
-        Some(operators) if operators.len() == 1 => operators["eq"]
-            .as_str()
+        Some(operators) if operators.len() == 1 => operators
+            .get("eq")
+            .and_then(Value::as_str)
             .ok_or_else(|| format!("the {what} predicate {predicate}")),
         _ => Err(format!("the {what} predicate {predicate}")),
     }
@@ -236,9 +237,10 @@ fn meets(record: &Value, filter: &Value) -> Result<bool, String> {
             "team" if predicate == &json!({"key": {"eqIgnoreCase": TEAM}}) => true,
             "project" if predicate == &json!({"null": true}) => record["project"].is_null(),
             "project" => match predicate.as_object() {
-                Some(fields) if fields.len() == 1 && fields.contains_key("id") => {
-                    record["project"]["id"] == eq_operand(&fields["id"], "project id")?
-                }
+                Some(fields) if fields.len() == 1 => match fields.get("id") {
+                    Some(id) => record["project"]["id"] == eq_operand(id, "project id")?,
+                    None => return Err(format!("the project predicate {predicate}")),
+                },
                 _ => return Err(format!("the project predicate {predicate}")),
             },
             "id" => record["id"] == eq_operand(predicate, "id")?,
