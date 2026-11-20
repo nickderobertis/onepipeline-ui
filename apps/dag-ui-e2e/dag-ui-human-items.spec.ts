@@ -5867,6 +5867,14 @@ async function expectAge(time: Locator, at: string): Promise<void> {
   expect(local).toBeLessThan(1_000);
 }
 
+/** `tip` is showing the local moment `at` names, to the second. */
+async function expectMoment(tip: Locator, at: string): Promise<void> {
+  await expect(tip).toBeVisible();
+  const shown = (await tip.textContent()) ?? "";
+  const clock = shown.replace(/(?<=[AP]M) .+$/u, "");
+  expect(Math.abs(Date.parse(clock) - Date.parse(at))).toBeLessThan(1_000);
+}
+
 /** The engine's history of `id`, as the detail route serves it to the page. */
 async function servedHistory(page: Page, served: FixtureServer, id: string) {
   const response = await page.request.get(
@@ -6761,10 +6769,18 @@ for (const width of [1440, 390] as const)
       await expect(card(page, item.title)).toContainText(/Raised \d+ \w+ ago/u);
       await expectAge(raised, item.created_at);
     }
-    // A long press, which is what a phone has for hover, shows the moment
-    // while the finger is down, without opening the card.
     const first = card(page, later[0] ?? "");
     const age = first.getByRole("time");
+    const firstRaised = raisedAt.get(later[0] ?? "") ?? "";
+    // A mouse resting on the time shows the moment the engine recorded, and
+    // leaving takes it away, without opening the card.
+    await age.hover();
+    await expectMoment(first.getByRole("tooltip"), firstRaised);
+    await page.mouse.move(0, 0);
+    await expect(first.getByRole("tooltip")).toHaveCount(0);
+    await expect(detailPane(page)).toHaveCount(0);
+    // A long press, which is what a phone has for hover, shows the moment
+    // while the finger is down, without opening the card.
     // A touch screen is a coarse pointer, which lays the card out for fingers:
     // where the time sits is read once the page is one.
     const touch = await page.context().newCDPSession(page);
@@ -6779,6 +6795,7 @@ for (const width of [1440, 390] as const)
     await expect(first.getByRole("tooltip")).toHaveText(
       (await age.getAttribute("title")) ?? "",
     );
+    await expectMoment(first.getByRole("tooltip"), firstRaised);
     await touch.send("Input.dispatchTouchEvent", {
       type: "touchEnd",
       touchPoints: [],

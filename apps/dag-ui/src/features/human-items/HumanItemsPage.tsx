@@ -788,6 +788,12 @@ function RaisedAt({ at }: { readonly at: string }) {
       // time is otherwise moved by the browser to the card's buttons just above.
       tabIndex={-1}
       onPointerCancel={cancel}
+      // A mouse shows the moment while it rests on the time, as a finger does
+      // on a long press, so both read the same tip rather than the native one
+      // only a mouse ever gets.
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse") setHeld(true);
+      }}
       onPointerDown={(event) => {
         setPressedLong(false);
         if (event.pointerType === "mouse") return;
