@@ -113,8 +113,17 @@ async function readDetail(
     ).toHaveCount(0);
     return;
   }
-  const detail = panel.getByRole("region", { name: "Recorded fields" });
+  // A refused edit is read as the refusal it is — who, what, where and why —
+  // with the rest of its record beneath, so its values are read across both.
+  const detail =
+    record.kind === "edit-rejected"
+      ? panel.getByRole("region", { name: "Timeline item detail" })
+      : panel.getByRole("region", { name: "Recorded fields" });
   await expect(detail, `${record.source} ${record.kind} opens`).toBeVisible();
+  if (record.kind === "edit-rejected")
+    await expect(
+      panel.getByRole("region", { name: "Refused edit" }),
+    ).toBeVisible();
   const text = await detail.innerText();
   for (const leaf of leaves(record.payload))
     expect(text, `${record.kind}'s detail shows ${leaf}`).toContain(leaf);

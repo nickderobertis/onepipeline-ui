@@ -23214,13 +23214,17 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
         .iter()
         .filter(|event| event["kind"] == "edit-rejected")
         .collect();
-    // Every refusal the run made, the three naming a node among them.
-    assert_eq!(refused.len(), 4, "{refused:#?}");
+    // Every refusal the run made, the six naming a node among them.
+    assert_eq!(refused.len(), 7, "{refused:#?}");
     let named: Vec<&str> = refused
         .iter()
         .filter_map(|event| event["node_id"].as_str())
         .collect();
-    assert_eq!(named, vec!["review", "build", "ship"], "{refused:#?}");
+    assert_eq!(
+        named,
+        vec!["review", "build", "ship", "ship", "ship", "ship"],
+        "{refused:#?}"
+    );
 
     let hook = refused[1];
     let reference = &hook["reference"];
@@ -23280,6 +23284,14 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
         .collect();
     assert_eq!(on_node.len(), 1, "{on_node:#?}");
     assert_eq!(on_node[0]["record_id"], hook["record_id"]);
+    // A kept refusal is the refusal's text, never evidence the node verified.
+    let verifying: Vec<&Value> = node["spans"]
+        .as_array()
+        .expect("the node's spans")
+        .iter()
+        .filter(|span| span["kind"] == "verification")
+        .collect();
+    assert!(verifying.is_empty(), "{verifying:#?}");
 
     // The run's own pages list them too, once the complete read has ended.
     let page = http::get(
@@ -23293,7 +23305,7 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
         .iter()
         .filter(|row| row["kind"] == "edit-rejected")
         .count();
-    assert_eq!(paged, 4);
+    assert_eq!(paged, 7);
 
     // Nothing else opens: a name no record kept, a traversal, a kept file gone, and
     // one that is not a JSON string.

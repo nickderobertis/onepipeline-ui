@@ -3052,6 +3052,13 @@ fn verdict_of(event: &Envelope) -> bool {
         .is_none_or(|status| status_word(status) == "done")
 }
 
+/// Whether an artifact a node's record stored is evidence of its work. A refused
+/// edit's complete refusal is kept beside the record that names the node, and is
+/// the refusal's text rather than anything the node verified.
+fn is_evidence(artifact: &onepipeline::event::ArtifactRef) -> bool {
+    ReferenceKind::of(&artifact.kind) != ReferenceKind::Refusal
+}
+
 /// Every artifact one node's events stored, oldest first.
 fn evidence<'a>(view: &Run<'a>, node: &str) -> Vec<Evidence<'a>> {
     let mine: Vec<&Envelope> = view
@@ -3080,7 +3087,11 @@ fn evidence<'a>(view: &Run<'a>, node: &str) -> Vec<Evidence<'a>> {
                 .unwrap_or_default()
                 .to_owned();
             let ok = verdict_of(event);
-            event.artifacts.iter().map(move |artifact| Evidence {
+            event
+                .artifacts
+                .iter()
+                .filter(|artifact| is_evidence(artifact))
+                .map(move |artifact| Evidence {
                 artifact: artifact.id.as_str(),
                 since,
                 at: event.ts.as_str(),
@@ -3306,7 +3317,9 @@ fn node_details(view: &Run<'_>) -> Value {
     nodes.extend(
         view.events
             .iter()
-            .filter(|event| !event.artifacts.is_empty() || event.source == Source::Vcs)
+            .filter(|event| {
+                event.artifacts.iter().any(is_evidence) || event.source == Source::Vcs
+            })
             .filter_map(|event| event.labels.node.as_deref()),
     );
     for node in nodes {

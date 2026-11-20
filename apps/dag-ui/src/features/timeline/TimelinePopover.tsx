@@ -62,6 +62,9 @@ const MARGIN = 8;
 /** The prefix the package derives every segment description's id from. */
 const DESCRIBED = '[aria-describedby^="timeline-detail-"]';
 
+/** What the package marks every bar and marker glyph it draws with. */
+const ENTRY = "[data-timeline-entry]";
+
 /** What is being read, and the text somebody else composed for it. */
 interface Anchored {
   readonly element: HTMLElement;
@@ -82,12 +85,20 @@ const anchoredAt = (target: EventTarget | null): Anchored | undefined => {
   const marker = markerReadingAt(target);
   if (marker !== undefined) return marker;
   const element = target.closest(DESCRIBED);
-  if (!(element instanceof HTMLElement)) return undefined;
-  const described = document.getElementById(
-    element.getAttribute("aria-describedby") ?? "",
-  );
-  const detail = described?.textContent?.trim();
-  return detail ? { element, detail } : undefined;
+  if (element instanceof HTMLElement) {
+    const described = document.getElementById(
+      element.getAttribute("aria-describedby") ?? "",
+    );
+    const detail = described?.textContent?.trim();
+    return detail ? { element, detail } : undefined;
+  }
+  // A marker drawn with no reading hung on it — the graph timeline's — is read by
+  // the name the package gives the entry, which says whose record it is and what.
+  const entry = target.closest(ENTRY);
+  const named = entry?.getAttribute("aria-label")?.replace(/, marker$/u, "");
+  return entry instanceof HTMLElement && named
+    ? { element: entry, detail: named }
+    : undefined;
 };
 
 /** Keeps the previous value when the same thing is entered again, so nothing churns. */

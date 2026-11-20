@@ -5,11 +5,17 @@ import {
   conversationSchema,
   runTimelineSchema,
 } from "@onepipeline-ui/dag-model";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { seen, watch } from "./dom-watch";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
 import { appendRecords } from "./load/journal";
+import {
+  backdrop,
+  computedColour,
+  contrast,
+  sameColour,
+} from "./rendered-colour";
 
 /**
  * Every turn read whole from the transcript it was recorded in.
@@ -725,4 +731,245 @@ test("a conversation item whose transcript cannot be served says so with its rec
   await expect(
     detail(page).getByRole("article", { name: /^Turn / }),
   ).toHaveCount(0);
+});
+
+/**
+ * The narrated node's conversation items as its served timeline lists them: an
+ * agent message, a reasoning item and a tool call, each with the `tool.index`
+ * that is its place in the conversation and the one line its row is opened by.
+ */
+async function narratedItems(page: Page) {
+  const timeline = runTimelineSchema.parse(
+    await (
+      await page.request.get(
+        `${server.origin}/api/v2/runs/${facts.run}/timeline?scope=node&node=narrated`,
+      )
+    ).json(),
+  );
+  const items = timeline.spans
+    .flatMap((span) => span.events)
+    .filter(
+      (event) =>
+        event.kind === "turn-activity" &&
+        event.tool !== undefined &&
+        event.reference?.kind === "conversation" &&
+        typeof event.description === "string",
+    );
+  // The usage-limit message rather than the turn's closing words, which are its
+  // reply and no item of its activity.
+  const of = (kind: string) => {
+    const found = items
+      .filter((event) => event.fields?.kind === kind)
+      .filter(
+        (event) => kind !== "message" || event.description === facts.usageLimit,
+      )
+      // The turn's first reasoning, far from the message opened before it.
+      .at(kind === "reasoning" ? 0 : -1);
+    if (found?.tool === undefined || found.description === undefined)
+      throw new Error(`the narrated node lists no ${kind}`);
+    return { index: found.tool.index, description: found.description, kind };
+  };
+  return [of("message"), of("reasoning"), of("tool_call")] as const;
+}
+
+/** The panel's scrolling viewport: what of the conversation is on screen. */
+const viewport = (page: Page) =>
+  // llmlint: ignore[e2e_uses_accessible_selectors] the scroll area's viewport is the package's own slot and carries no role; what is measured is what lies within it.
+  detail(page).locator('[data-slot="scroll-area-viewport"]').first();
+
+/** The one item the panel marks as the one it opened on. */
+const current = (page: Page) =>
+  // llmlint: ignore[e2e_uses_accessible_selectors] `aria-current` is the package's own mark of the opened item and no role query filters on it; the criterion is about that one item, among the conversation's turns and their items (the plot above marks its own selection apart).
+  detail(page).locator(
+    'article[data-turn-id][aria-current="true"], article[data-turn-id] [aria-current="true"]',
+  );
+
+/** The conversation item at producer index `index`, in the opened turn. */
+const itemAt = (page: Page, index: number) =>
+  // llmlint: ignore[e2e_uses_accessible_selectors] `data-event-index` is the package's documented address of a conversation item, the same index the record carries.
+  detail(page).locator(`article [data-event-index="${index}"]`).first();
+
+/**
+ * The package's own turn structure, found by its own roles and marks: the
+ * collapsible turn header, the YOU block, the agent block with its avatar and
+ * model chip, the tool-call rows and the token chips.
+ */
+async function turnParts(turn: Locator) {
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the package marks who speaks only by `data-message-author`, and its avatar and model chip only by their `data-slot`: the criterion is that its own parts are drawn, which only its own marks can tell from a re-styled copy.
+  const agent = turn.locator('[data-message-author="assistant"]');
+  return {
+    header: await turn
+      .getByRole("button", { name: /^(Collapse|Expand) turn /u })
+      .count(),
+    you: await turn.locator('[data-message-author="user"]').count(),
+    agent: await agent.count(),
+    avatar: await agent.locator('[data-slot="avatar"]').count(),
+    model: await agent.locator('[data-slot="badge"]').count(),
+    // llmlint: ignore-end[e2e_uses_accessible_selectors]
+    tools: await turn.getByRole("button", { name: / tool details$/u }).count(),
+    usage: await turn.getByLabel("Usage").count(),
+  };
+}
+
+test("a conversation item opens at that item, outlined in the view's selection accent, and opening another moves it", async ({
+  page,
+}) => {
+  test.setTimeout(180_000);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const items = await narratedItems(page);
+  await openNode(page, facts.run, "narrated");
+  const list = page.getByRole("region", { name: "Node transcript" });
+
+  // The same session as the observer's dispatch panel draws it: the parts the
+  // item panel must draw the same way, by the package's own marks.
+  await list
+    .getByRole("button", { name: /^Open Agent \(/u })
+    .first()
+    .click();
+  // llmlint: ignore[e2e_uses_accessible_selectors] the turn's id is the package's own mark; the comparison is of the one turn both panels draw.
+  const dispatchTurn = detail(page).locator("article[data-turn-id]").first();
+  await expect(dispatchTurn).toBeVisible();
+  const turnId = await dispatchTurn.getAttribute("data-turn-id");
+  const dispatchParts = await turnParts(
+    // llmlint: ignore[e2e_uses_accessible_selectors] as above.
+    detail(page).locator(`article[data-turn-id="${turnId}"]`),
+  );
+  expect(dispatchParts.header).toBe(1);
+  expect(dispatchParts.you).toBeGreaterThan(0);
+  expect(dispatchParts.agent).toBeGreaterThan(0);
+  expect(dispatchParts.avatar).toBeGreaterThan(0);
+  expect(dispatchParts.model).toBeGreaterThan(0);
+  expect(dispatchParts.tools).toBeGreaterThan(0);
+  expect(dispatchParts.usage).toBeGreaterThan(0);
+  await page.getByRole("button", { name: "Close detail" }).click();
+
+  let previous: { index: number; top: number } | undefined;
+  for (const item of items) {
+    // A reader who scrolled back up to the prompt before opening the next item.
+    if (previous !== undefined)
+      await viewport(page).evaluate((element) => {
+        element.scrollTop = 0;
+      });
+    // Whether the item about to be opened is already on screen in an open panel.
+    const inView =
+      previous !== undefined &&
+      (await itemAt(page, item.index).evaluate((element, selector) => {
+        const scroller = element.closest(selector);
+        if (scroller === null) return false;
+        const box = element.getBoundingClientRect();
+        const view = scroller.getBoundingClientRect();
+        return box.top >= view.top && box.top < view.bottom;
+      }, '[data-slot="scroll-area-viewport"]'));
+    // Pressed where the row shows beside the open panel, as a person reaches it.
+    await list
+      .getByRole("button", { name: `Open ${item.description}` })
+      .first()
+      .click({ position: { x: 24, y: 8 } });
+    const turn = detail(page).getByRole("article", { name: /^Turn .* from / });
+    await expect(turn).toBeVisible();
+    // Nothing but the conversation: no field/value block, under any heading.
+    await expect(
+      detail(page).getByRole("region", { name: "Recorded fields" }),
+    ).toHaveCount(0);
+    await expect(detail(page).getByText("Recorded fields")).toHaveCount(0);
+    // The package's own turn, drawn as the dispatch panel draws it.
+    expect(await turnParts(turn)).toEqual(dispatchParts);
+
+    // Exactly that item carries the mark, and it lies in the panel's view.
+    const marked = await current(page).evaluateAll((all) =>
+      all.map((element) => element.outerHTML.slice(0, 160)),
+    );
+    expect(marked, "one item carries the mark").toHaveLength(1);
+    await expect(current(page)).toHaveAttribute(
+      "data-event-index",
+      String(item.index),
+    );
+    const focused = current(page);
+    // Below the fold: from the top of the panel it lies past the visible area,
+    // so what put it on screen is the panel opening at it.
+    const fold = await focused.evaluate((element, viewportSelector) => {
+      const scroller = element.closest(viewportSelector);
+      if (scroller === null) throw new Error("the item is in no scroll area");
+      const box = element.getBoundingClientRect();
+      const view = scroller.getBoundingClientRect();
+      return {
+        offset: box.top - view.top + scroller.scrollTop,
+        height: scroller.clientHeight,
+      };
+    }, '[data-slot="scroll-area-viewport"]');
+    expect(fold.offset, `${item.kind} starts below the fold`).toBeGreaterThan(
+      fold.height,
+    );
+    await expect
+      .poll(
+        async () => {
+          const [box, view] = await Promise.all([
+            focused.boundingBox(),
+            viewport(page).boundingBox(),
+          ]);
+          if (box === null || view === null) return false;
+          return box.y >= view.y - 1 && box.y < view.y + view.height - 8;
+        },
+        { message: `${item.kind} lies within the panel's visible area` },
+      )
+      .toBe(true);
+
+    // Marked in the view's own selection accent: the border a selected row of
+    // the node's list carries, with at most a faint tint of it behind.
+    // llmlint: ignore[e2e_uses_accessible_selectors] the selected row is the article the list marks `aria-current`; its border is the accent compared against.
+    const selectedRow = list.locator('article[aria-current="true"]').first();
+    await expect(selectedRow).toBeVisible();
+    const accent = await computedColour(selectedRow, "border-top-color");
+    const outline = await computedColour(focused, "outline-color");
+    expect(
+      await focused.evaluate(
+        (element) => getComputedStyle(element).outlineStyle,
+      ),
+    ).toBe("solid");
+    expect(
+      sameColour(outline, accent),
+      `${JSON.stringify(outline)} is the accent ${JSON.stringify(accent)}`,
+    ).toBe(true);
+    const tint = await computedColour(focused, "background-color");
+    expect(tint.a).toBeLessThanOrEqual(0.15 + 1 / 255);
+    if (tint.a > 0) expect(sameColour(tint, accent, 24)).toBe(true);
+    // And a sibling item it did not open carries neither.
+    // llmlint: ignore[e2e_uses_accessible_selectors] the turn's other items, by the package's own address of an item.
+    const sibling = turn
+      .locator(`[data-event-index]:not([data-event-index="${item.index}"])`)
+      .first();
+    expect(
+      await sibling.evaluate(
+        (element) => getComputedStyle(element).outlineStyle,
+      ),
+    ).toBe("none");
+    const siblingTint = await computedColour(sibling, "background-color");
+    expect(siblingTint.a === 0 || !sameColour(siblingTint, accent, 24)).toBe(
+      true,
+    );
+
+    // Readable against the panel it sits in.
+    const panel = await backdrop(focused, false);
+    expect(contrast(outline, panel)).toBeGreaterThanOrEqual(3);
+
+    if (previous !== undefined) {
+      // The mark, the scroll and the highlight all moved: the item opened before
+      // is no longer marked or outlined.
+      const before = itemAt(page, previous.index);
+      await expect(before).not.toHaveAttribute("aria-current", "true");
+      expect(
+        await before.evaluate(
+          (element) => getComputedStyle(element).outlineStyle,
+        ),
+      ).toBe("none");
+      // It was off screen, so the panel scrolled to it.
+      expect(inView, "the next item starts off screen").toBe(false);
+      const top = await viewport(page).evaluate((element) => element.scrollTop);
+      expect(top).toBeGreaterThan(0);
+    }
+    previous = {
+      index: item.index,
+      top: await viewport(page).evaluate((element) => element.scrollTop),
+    };
+  }
 });

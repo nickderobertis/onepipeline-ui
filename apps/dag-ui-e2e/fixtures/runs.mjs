@@ -16,6 +16,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import { z } from "zod";
 import { appendLines } from "../load/journal.ts";
+import { refusalRecords } from "./refusal-records.mjs";
 import { thisHost } from "./this-host.mjs";
 
 /** The in-flight run every graph, node and timeline journey opens. */
@@ -4430,89 +4431,43 @@ export function buildCommandStepsRuns(root) {
 }
 
 /**
- * One refused live edit as the engine (onepipeline 0.116.1) records it, appended
- * to `journal`: the complete refusal kept as a JSON string in the run's reports
- * directory, named as `Journal::artifact` names it — the artifact kind, the stream
- * and the seq the record takes — and recorded as the record's own artifact, which
- * `full_reason` names by its absolute path; the `edit-rejected` itself, labelled
- * with the node its command names; and the reconciler's non-blocking
- * `edit-rejected` surface, whose `rejection` names that record by stream and seq.
- * `read`, where given, is the seconds after which the planner read the surface.
- *
- * Shared by the refusals corpus and the large-run world, so a journey and a
- * measurement read one shape; `tests/e2e/server.rs` holds what it writes to the
- * linked engine's schema for each kind and its command to the engine's `Command`.
+ * One refused live edit appended to `journal` in the engine's own records
+ * (`refusal-records.mjs`): the `edit-rejected`, the reconciler surface raised for
+ * it, and — where `refusal.read` gives the seconds after which the planner read
+ * that surface — its `planner-surfaced`.
  */
 export function emitRefusal(journal, dir, refusal) {
-  const {
-    author,
-    command,
-    node,
-    reason,
-    summary,
-    full,
-    truncated = false,
-    refused,
-    envelope,
-    index,
-    surface,
-    read,
-  } = refusal;
-  const run = { run_id: journal.runId };
-  const seq = journal.lines.length;
-  const reports = join(dir, "reports");
-  mkdirSync(reports, { recursive: true });
-  const kept = join(
-    reports,
-    `${REFUSAL_ARTIFACT_KIND}-${journal.stream}-${seq}.json`,
+  const { rejected, raised, surfaced } = refusalRecords(
+    dir,
+    {
+      stream: journal.stream,
+      seq: journal.lines.length,
+      run: { run_id: journal.runId },
+    },
+    refusal,
   );
-  const body = JSON.stringify(full);
-  writeFileSync(kept, body);
   journal.emit(
     "pipeline",
     "edit-rejected",
-    node === undefined ? run : { ...run, node },
-    {
-      author,
-      command,
-      reason,
-      ...(envelope === undefined ? {} : { envelope }),
-      ...(index === undefined ? {} : { index }),
-      ...(refused === undefined ? {} : { refusal: refused }),
-      ...(node === undefined ? {} : { node }),
-      summary,
-      full_reason: kept,
-      full_reason_truncated: truncated,
-    },
-    [
-      {
-        id: kept,
-        kind: REFUSAL_ARTIFACT_KIND,
-        bytes: Buffer.byteLength(body),
-      },
-    ],
+    rejected.labels,
+    rejected.payload,
+    rejected.artifacts,
   );
-  const raised = {
-    surface,
-    kind: "edit-rejected",
-    message: `reconciler: rejected — ${reason}`,
-    source: "reconciler",
-    blocking: false,
-  };
-  journal.emit("pipeline", "planner-surface-queued", run, {
-    ...raised,
-    rejection: { stream: journal.stream, seq },
-  });
-  if (read !== undefined)
-    journal.advance(read).emit("pipeline", "planner-surfaced", run, {
-      ...raised,
-      queued_at: journal.at,
-    });
+  journal.emit(
+    "pipeline",
+    "planner-surface-queued",
+    raised.labels,
+    raised.payload,
+  );
+  if (refusal.read !== undefined)
+    journal
+      .advance(refusal.read)
+      .emit("pipeline", "planner-surfaced", surfaced.labels, {
+        ...surfaced.payload,
+        queued_at: journal.at,
+      });
   return journal;
 }
-
-/** The artifact kind the engine keeps a refused edit's complete refusal under. */
-const REFUSAL_ARTIFACT_KIND = "edit-rejected-full-reason";
 
 /** The refusals corpus's run. */
 export const REFUSALS_RUN = "dag-ui-refusals";
@@ -4542,7 +4497,9 @@ const REFUSAL_HOOK_LINE =
  * planner's amendment, whose complete refusal runs to several lines; an edit the
  * engine itself refused the monitor, naming the node it concerned; and a second
  * hook refusal of the planner whose stderr ran past the engine's read bound — each
- * beside the reconciler surface it raised, the first two read by the planner. A
+ * beside the reconciler surface it raised, the first two read by the planner — and,
+ * once the last node settled, three more of the monitor's and the planner's naming it, which lie
+ * past every bar the node's and the run's timelines draw. A
  * fourth refusal is the shape the engine wrote before it summarised refusals, with
  * no `summary`, `node` or `full_reason`, at no node and with no surface.
  */
@@ -4676,6 +4633,32 @@ export function buildRefusalsRuns(root) {
         index: 0,
         surface: 2,
       });
+    }
+    if (node === "ship") {
+      // After the last node settled, the monitor and the planner each tried to
+      // change it: records past every bar either timeline draws, at the node and
+      // the run, and no two alike back to back.
+      const cancel = "cancel: node 'ship' has settled and cannot be cancelled";
+      const amend =
+        "amend: node 'ship' has settled done, so nothing would read the amendment";
+      for (const [attempt, [author, command, said]] of [
+        ["monitor", { op: "cancel", id: "ship" }, cancel],
+        ["planner", { op: "amend", id: "ship", text: "Ship it again." }, amend],
+        ["monitor", { op: "cancel", id: "ship" }, cancel],
+      ].entries()) {
+        journal.advance(20);
+        emitRefusal(journal, dir, {
+          author,
+          command,
+          node: "ship",
+          reason: `refused: ${said}`,
+          summary: said,
+          full: `refused: ${said}`,
+          envelope: 5 + attempt,
+          index: 0,
+          surface: 3 + attempt,
+        });
+      }
     }
   }
   journal.write();

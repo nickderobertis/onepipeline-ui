@@ -116,6 +116,12 @@ export interface GraphRow {
 export interface GraphTimeline {
   /** Launch to finish, or to the moment the served record was read while it runs. */
   readonly range: readonly [number, number];
+  /**
+   * What the plot spans unzoomed: the run's range, carried on to the last record
+   * made after execution ended, so those records — markers no bar lies under — are
+   * drawn rather than left outside the plot.
+   */
+  readonly plotted: readonly [number, number];
   /** True while the record holds work it never closed. */
   readonly live: boolean;
   readonly rows: readonly GraphRow[];
@@ -172,8 +178,12 @@ export function graphTimeline(
     entry.items.filter((item) => item.payload.kind === "work"),
   );
   const work = plotted.filter((item) => item.payload.countsAsWork !== false);
+  const after = rows.flatMap((entry) =>
+    entry.markers.filter((marker) => marker.at > range[1]),
+  );
   return {
     range,
+    plotted: [range[0], Math.max(range[1], ...after.map(({ at }) => at))],
     live: spans.some((span) => span.ended_at === null),
     rows,
     line: {
@@ -193,9 +203,7 @@ export function graphTimeline(
         ),
         // Post-execution records share no work interval. Keep every identity,
         // including commands recorded at the same instant, on their own rail.
-        ...rows.flatMap((entry) =>
-          entry.markers.filter((marker) => marker.at > range[1]),
-        ),
+        ...after,
       ],
       lanes,
     },
