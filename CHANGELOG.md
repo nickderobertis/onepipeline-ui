@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.85.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.84.1...v0.85.0) - 2026-11-20
+
+### Fixed
+
+- *(dag-ui)* page history for every span the timeline draws, and open each event in one view ([#844](https://github.com/nickderobertis/onepipeline-ui/pull/844))
+- *(deps)* [**breaking**] link the engine and plan store whose project graph names each task's location ([#841](https://github.com/nickderobertis/onepipeline-ui/pull/841))
+
 ## [0.84.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.84.0...v0.84.1) - 2026-11-19
 
 ### Added
