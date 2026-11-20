@@ -11,7 +11,8 @@ import { runs } from "./fixture-facts";
  * run-level lane as `harness.<history id>`, and opening it reads that span's page
  * through the real read API. Every span a timeline draws answers a page, so opening
  * it says nothing failed; a page the network refuses is said in its panel only, gone
- * when it is read again or the panel closes.
+ * when it is read again or the panel closes. The history run, whose own rows a
+ * fresh Overall has not read, is where the control that loads them is offered.
  */
 
 const FAILED = "did not load:";
@@ -54,14 +55,18 @@ test("an observer's oneharness dispatch opens with nothing failed, and the run's
   await openRunLevel(page);
   const read = page.waitForResponse((response) => isSpanPage(response.url()));
   await openObserver(page);
-  expect((await read).status()).toBe(200);
+  const answer = await read;
+  expect(answer.status()).toBe(200);
+  // The session has no rows of its own: its page is whole, and empty.
+  expect(await answer.json()).toMatchObject({ rows: [], total: 0 });
   expect(new URL(page.url()).searchParams.get("event")).toMatch(/^harness\./u);
   await expect(panel(page)).not.toContainText(FAILED);
   await page.getByRole("button", { name: "Close detail" }).click();
   await expect(panel(page)).toHaveCount(0);
   await expect(page.getByText(FAILED)).toHaveCount(0);
-  // Every row of the run's own is held, and a harness session — which has none —
-  // offers nothing more to load.
+  // Every row of the run's own is shown, and the harness session — which has none —
+  // is not counted as one still to load, so the control is not offered on its
+  // account.
   await expect(
     page
       .getByRole("region", { name: "Run events" })
@@ -72,9 +77,9 @@ test("an observer's oneharness dispatch opens with nothing failed, and the run's
     page.getByRole("button", { name: "Load the run's own records" }),
   ).toHaveCount(0);
 
-  // A fresh view of the same run holds none of its own rows, and offers to load
-  // them through the page's own control.
-  await page.goto(`/?run=${runs().live}&view=overall`);
+  // A run whose own rows this view has not read yet offers to load them, through
+  // the page's own control, and they load with nothing failed.
+  await page.goto(`/?run=${runs().history}&view=overall`);
   await expect(
     page.getByRole("tab", { name: "Overall", selected: true }),
   ).toBeVisible();
