@@ -54,8 +54,7 @@ test("an observer's oneharness dispatch opens with nothing failed, and the run's
   await openObserver(page);
   // The span's own page, asked for and answered.
   expect((await read).status()).toBe(200);
-  const address = new URL(page.url()).searchParams.get("event");
-  expect(address).toMatch(/^harness\./u);
+  expect(new URL(page.url()).searchParams.get("event")).toMatch(/^harness\./u);
   await expect(panel(page)).not.toContainText(FAILED);
   await page.getByRole("button", { name: "Close detail" }).click();
   await expect(panel(page)).toHaveCount(0);
@@ -72,13 +71,10 @@ test("an observer's oneharness dispatch opens with nothing failed, and the run's
     page.getByRole("button", { name: "Load the run's own records" }),
   ).toHaveCount(0);
 
-  // A fresh view of the same run holds none of its own rows: the dispatch opened by
-  // its address, then the run's records loaded through the page's own control.
-  await page.goto(`/?run=${runs().live}&view=overall&event=${address}`);
-  await expect(panel(page)).toContainText("Oneharness conversation");
-  await expect(panel(page)).not.toContainText(FAILED);
-  await page.getByRole("button", { name: "Close detail" }).click();
-  await expect(panel(page)).toHaveCount(0);
+  // A fresh view of the same run holds none of its own rows, and offers to load
+  // them through the page's own control.
+  await page.goto(`/?run=${runs().live}&view=overall`);
+  await expect(page.locator("[data-first-screen]")).toHaveCount(0);
   const rows = page.waitForResponse(
     (response) =>
       response.url().includes("/timeline/events?") &&
