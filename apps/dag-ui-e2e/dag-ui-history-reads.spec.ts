@@ -130,8 +130,8 @@ test("a span page that failed is said in its panel alone, read again on Try agai
   await openObserver(page);
   const failure = panel(page).getByRole("alert").filter({ hasText: FAILED });
   await expect(failure).toBeVisible();
-  // The panel's failure is its own: nothing is said under the graph.
-  await expect(graph(page).getByText(FAILED)).toHaveCount(0);
+  // The panel's failure is its own: said once, there, and not under the graph.
+  await expect(page.getByText(FAILED)).toHaveCount(1);
 
   // The network back, the panel still open: Try again reads the page afresh.
   refusing = false;
@@ -140,8 +140,7 @@ test("a span page that failed is said in its panel alone, read again on Try agai
   await failure.getByRole("button", { name: "Try again" }).click();
   expect((await read).status()).toBe(200);
   expect(asked.length).toBeGreaterThan(before);
-  await expect(panel(page).getByText(FAILED)).toHaveCount(0);
-  await expect(graph(page).getByText(FAILED)).toHaveCount(0);
+  await expect(page.getByText(FAILED)).toHaveCount(0);
 
   // Again, from a fresh view: refused, then the panel closed with it said.
   refusing = true;
@@ -256,4 +255,80 @@ test("a node timeline's span page that failed is said in its panel alone, read a
   expect(await seen(page), "the first span's failure came back").toEqual({
     failure: false,
   });
+});
+
+test("a failed run read stays under the graph while a span's failed page is said in its panel, and each goes only with its own read", async ({
+  page,
+}) => {
+  const isRunRowsPage = (url: string) =>
+    url.includes("/timeline/events?") && !url.includes("span=");
+  let refusingRows = true;
+  let refusingSpan = true;
+  // Both reads refused at once, each let through to the real server on its own
+  // once restored; every other request reaches it unchanged.
+  // llmlint: ignore-block[e2e_not_mocked] two reads have to fail at the same time for their failures to be told apart, and a refused connection cannot be earned from the real server; each refused read is passed to it unchanged once restored, as is every other request.
+  await page.route(
+    (url) => isRunRowsPage(url.toString()) || isSpanPage(url.toString()),
+    async (route) => {
+      const url = route.request().url();
+      if (isSpanPage(url) ? refusingSpan : refusingRows)
+        return route.abort("connectionrefused");
+      await route.continue();
+    },
+  );
+  // llmlint: ignore-end[e2e_not_mocked]
+
+  // The run-level lane reads the run's own rows as it opens: refused, said under
+  // the graph.
+  await openRunLevel(page);
+  const failures = page.getByRole("alert").filter({ hasText: FAILED });
+  await expect(failures).toHaveCount(1);
+  const spanFailure = panel(page).getByRole("alert").filter({
+    hasText: FAILED,
+  });
+  // The observer opened with its own page refused too: the panel says its own, and
+  // the graph's stays where it was, beside the open panel.
+  await openObserver(page);
+  await expect(spanFailure).toBeVisible();
+  await expect(failures).toHaveCount(2);
+  await expect(spanFailure).toHaveCount(1);
+
+  // Its panel closed: the span's failure goes with the panel, and the graph's is
+  // still said.
+  await page.getByRole("button", { name: "Close detail" }).click();
+  await expect(panel(page)).toHaveCount(0);
+  await expect(failures).toHaveCount(1);
+
+  // Reopened, still refused: the panel says its own again.
+  await openObserver(page);
+  await expect(spanFailure).toBeVisible();
+  await expect(failures).toHaveCount(2);
+
+  // The graph's own read again and served: its failure goes, the panel's stays.
+  refusingRows = false;
+  const rows = page.waitForResponse((response) =>
+    isRunRowsPage(response.url()),
+  );
+  // The graph's is the first said, the panel coming after the page it covers; the
+  // open panel covers it at this width, so it is reached as a keyboard user does.
+  const again = failures.first().getByRole("button", { name: "Try again" });
+  await again.focus();
+  await again.press("Enter");
+  expect((await rows).status()).toBe(200);
+  await expect(failures).toHaveCount(1);
+  await expect(spanFailure).toHaveCount(1);
+
+  // And the span's read again and served: nothing failed is said anywhere, and
+  // the run's own rows are shown.
+  refusingSpan = false;
+  const read = page.waitForResponse((response) => isSpanPage(response.url()));
+  await spanFailure.getByRole("button", { name: "Try again" }).click();
+  expect((await read).status()).toBe(200);
+  await expect(failures).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("region", { name: "Run events" })
+      .getByRole("article")
+      .first(),
+  ).toBeVisible();
 });
