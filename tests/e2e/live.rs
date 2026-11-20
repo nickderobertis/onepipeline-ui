@@ -3147,9 +3147,15 @@ fn pages_open_each_run_once_two_at_a_time_and_an_untaken_opening_is_let_go() {
     );
     assert_eq!(seen.len(), 3, "{seen:?}");
     assert_eq!(seen[2], json!(runs[2]));
-    // Each opening is held for the same time after it is traced, so the one traced
-    // first is the one let go first — whichever of the two that was — and its
-    // subscription opens the run itself.
+    // Both first openings began their holds before the third was traced, so a whole
+    // hold after it both have been let go. Waiting is what makes that so: holds begun
+    // milliseconds apart can wake in either order on a loaded host, so the first one
+    // traced is not always the first let go. A run let go is opened by its
+    // subscription itself.
+    std::thread::sleep(
+        Duration::from_millis(hold.1.parse().expect("a hold in milliseconds"))
+            + Duration::from_millis(300),
+    );
     let released = seen[0].as_str().expect("a run id").to_owned();
     let answer = live.subscribe(&json!({ "view": { "type": "detail", "run_id": released } }));
     assert_eq!(answer["initial"]["snapshot"]["visible"]["type"], "detail");
