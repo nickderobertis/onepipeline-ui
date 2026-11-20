@@ -28,6 +28,7 @@ import {
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { z } from "zod";
+import { refusalRecords } from "../fixtures/refusal-records.mjs";
 import { receiptFor } from "./journal.ts";
 import { toolOutput } from "./output.mjs";
 // The workload every budget is stated over, declared once for this writer,
@@ -690,6 +691,10 @@ function writeLargeRun(root, runId, project, scale, startMs, stepMs) {
     );
   }
   journal.pad(large.journal_bytes);
+  const refusals =
+    large.refusals === undefined
+      ? undefined
+      : refuseEdits(journal, dir, steps, large.refusals);
   journal.writeSessionFiles();
   writeHarnessPointers(
     dir,
@@ -720,7 +725,81 @@ function writeLargeRun(root, runId, project, scale, startMs, stepMs) {
     historyStore: store,
     sessions: journal.large.sessions,
     settled,
+    ...(refusals === undefined ? {} : { refusals }),
   };
+}
+
+/** The plan-edit hook the large run's refusals name. */
+const REFUSING_HOOK = "scripts/plan-edit-hook.sh";
+
+/**
+ * A reviewer's findings, `bytes` long exactly, a line apiece: the complete
+ * refusal a plan-edit hook kept for refusal `number`.
+ */
+function findings(number, bytes) {
+  const lines = [];
+  let size = 0;
+  for (let line = 0; size < bytes; line += 1) {
+    const text = `finding ${number}.${line}: ${toolOutput(number * 131 + line)
+      .replaceAll("\n", " ")
+      .slice(0, 90)}`;
+    lines.push(text);
+    size += Buffer.byteLength(text) + 1;
+  }
+  return lines.join("\n").slice(0, bytes);
+}
+
+/**
+ * The large run's refused edits, appended after its padded work two seconds
+ * apart: each a plan-edit hook's refusal of an amendment to one of the steps, its
+ * complete refusal kept at `full_reason_bytes`, beside the reconciler surface it
+ * raised, in the engine's own records (`../fixtures/refusal-records.mjs`). The
+ * oldest and the newest are named, with the text each kept.
+ */
+function refuseEdits(journal, dir, steps, { records, full_reason_bytes }) {
+  const named = [];
+  for (let number = 0; number < records; number += 1) {
+    journal.at += 2_000;
+    const node = steps[number % steps.length];
+    const full = findings(number, full_reason_bytes);
+    const seq = journal.seqs.get(journal.stream) ?? 0;
+    const { rejected, raised } = refusalRecords(
+      dir,
+      { stream: journal.stream, seq, run: { run_id: journal.runId } },
+      {
+        author: "planner",
+        command: { op: "amend", id: node, text: `Amendment ${number}.` },
+        node,
+        reason: `refused: amend: the plan-edit hook \`${REFUSING_HOOK}\` refused node '${node}', so none of this reply's edits were applied: ${full.slice(0, 3_500)}`,
+        summary: `amend of node '${node}': review ${number} found the amendment incomplete`,
+        full,
+        envelope: 10_000 + number,
+        index: 0,
+        surface: 100_000 + number,
+      },
+    );
+    journal.emit(
+      "pipeline",
+      "edit-rejected",
+      rejected.labels,
+      rejected.payload,
+      rejected.artifacts,
+    );
+    journal.emit(
+      "pipeline",
+      "planner-surface-queued",
+      raised.labels,
+      raised.payload,
+    );
+    if (number === 0 || number === records - 1)
+      named.push({
+        record: `${journal.stream}.${seq}`,
+        kept: rejected.payload.full_reason,
+        lines: full.split("\n").length,
+      });
+  }
+  const [oldest, newest] = named;
+  return { records, oldest, newest: newest ?? oldest };
 }
 
 /** How many records each node beyond the budget's named ones holds. */
@@ -925,6 +1004,10 @@ function scaleOfWorkload(path) {
           checkpoint_bytes: count.positive(),
           busiest_node_records: count.positive(),
           off_graph_node_records: count.positive(),
+          // Refused edits, each with its complete refusal kept at this size.
+          refusals: z
+            .object({ records: count.positive(), full_reason_bytes: count })
+            .optional(),
         })
         .optional(),
       relayed: z

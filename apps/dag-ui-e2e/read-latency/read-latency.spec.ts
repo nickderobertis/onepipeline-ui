@@ -615,6 +615,13 @@ interface LargeWorld {
   readonly writer: ChildProcess | undefined;
 }
 
+/** One refusal the large world wrote: its record, and the file it kept. */
+const refusalFactSchema = z.object({
+  record: z.string().min(1),
+  kept: z.string().min(1),
+  lines: z.number().int().positive(),
+});
+
 const largeFactsSchema = z.object({
   openLiveRun: z.string(),
   otherLiveRuns: z.array(z.string()),
@@ -628,6 +635,11 @@ const largeFactsSchema = z.object({
     crossRunConsumer: z.string(),
     historyStore: z.string(),
     sessions: z.number().int(),
+    refusals: z.object({
+      records: z.number().int().positive(),
+      oldest: refusalFactSchema,
+      newest: refusalFactSchema,
+    }),
   }),
   relayed: z.object({ run: z.string() }),
 });
@@ -1595,11 +1607,131 @@ async function statusRead(world: LargeWorld, port: number) {
 }
 
 /**
+ * How long a person waits for a refused edit's complete text: for the run's
+ * newest and oldest refusal, three times each on a fresh page, from the real press
+ * of its row in Overall's event list until the detail shows every line of the
+ * text the engine kept — read through the release server's artifact route — with
+ * that request's response time and bytes and the time from its response to the
+ * text rendered, all on the page's own clock.
+ */
+async function refusalDetail(
+  world: LargeWorld,
+  port: number,
+  browser: Browser,
+  refusals: z.infer<typeof largeFactsSchema>["large"]["refusals"],
+): Promise<LargeRun["refusal_detail"]> {
+  const { origin, server } = await serveLarge(world, port);
+  const context = await browser.newContext();
+  try {
+    const read = async (refusal: z.infer<typeof refusalFactSchema>) => {
+      const expected: string = JSON.parse(readFileSync(refusal.kept, "utf8"));
+      const readings: LargeRun["refusal_detail"]["newest"]["readings"][number][] =
+        [];
+      for (let reading = 0; reading < 3; reading += 1) {
+        const page = await context.newPage();
+        await page.goto(`${origin}/?run=${world.run}&view=overall`);
+        const events = page.getByRole("region", { name: "Run events" });
+        await page
+          .getByRole("button", { name: "Load the run's own records" })
+          .click({ timeout: NEVER });
+        // llmlint: ignore[e2e_uses_accessible_selectors] the row is found by the record it reads, which every refusal of the world shares a summary pattern with; `data-row-id` is the list's own key for it.
+        const row = events.locator(`article[data-row-id="${refusal.record}"]`);
+        await expect(row).toBeAttached({ timeout: NEVER });
+        // The press and the moment the last line is on screen, on the page's clock.
+        await page.evaluate(
+          ({ record, text }) => {
+            const timing = window as unknown as {
+              __refusal?: { pressed?: number; shown?: number };
+            };
+            timing.__refusal = {};
+            const button = document.querySelector(
+              `article[data-row-id="${record}"] button`,
+            );
+            button?.addEventListener(
+              "click",
+              () => {
+                const held = timing.__refusal ?? {};
+                held.pressed = performance.now();
+                const look = () => {
+                  const shown = document.querySelector(
+                    '[aria-label="Timeline item detail"] .refusal-text',
+                  )?.textContent;
+                  if (shown === text) held.shown = performance.now();
+                  else requestAnimationFrame(look);
+                };
+                requestAnimationFrame(look);
+              },
+              { capture: true, once: true },
+            );
+          },
+          { record: refusal.record, text: expected },
+        );
+        await row.getByRole("button").click();
+        const taken = await page.waitForFunction(
+          () => {
+            const held = (
+              window as unknown as {
+                __refusal?: { pressed?: number; shown?: number };
+              }
+            ).__refusal;
+            if (held?.pressed === undefined || held.shown === undefined)
+              return undefined;
+            const fetched = performance
+              .getEntriesByType("resource")
+              .find((entry) => entry.name.includes("/artifacts/")) as
+              | PerformanceResourceTiming
+              | undefined;
+            return {
+              seconds: (held.shown - held.pressed) / 1000,
+              response_s:
+                fetched === undefined
+                  ? 0
+                  : (fetched.responseEnd - fetched.requestStart) / 1000,
+              bytes: fetched?.decodedBodySize ?? 0,
+              render_s:
+                fetched === undefined
+                  ? 0
+                  : Math.max(0, held.shown - fetched.responseEnd) / 1000,
+            };
+          },
+          undefined,
+          { timeout: NEVER },
+        );
+        readings.push((await taken.jsonValue()) as (typeof readings)[number]);
+        await page.close();
+      }
+      return {
+        record: refusal.record,
+        lines: refusal.lines,
+        readings,
+        median_s: median(readings.map(({ seconds }) => seconds)),
+      };
+    };
+    const newest = await read(refusals.newest);
+    const oldest = await read(refusals.oldest);
+    return {
+      refusals: refusals.records,
+      newest,
+      oldest,
+      slowest_s: Math.max(newest.median_s, oldest.median_s),
+    };
+  } finally {
+    await context.close();
+    await stopServing(server);
+  }
+}
+
+/**
  * What one measurement holds. A generated corpus fills every figure, which the
  * large-run telemetry's schema requires; a host's run may leave the two this
  * names `null`, as `historyPages` and `statusRead` say.
  */
-type Measured = Omit<LargeRun, "first_view" | "history_page" | "status"> & {
+type Measured = Omit<
+  LargeRun,
+  "first_view" | "history_page" | "status" | "refusal_detail"
+> & {
+  /** A host's run holds no refusals the world wrote, so it reads none. */
+  readonly refusal_detail?: LargeRun["refusal_detail"];
   /** A host's measurement of one run reads no relayed run. */
   readonly first_view: z.infer<typeof firstViewSchema>;
   readonly history_page: Omit<
@@ -1721,6 +1853,11 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
     );
     const { rest, history } = await restArrived(world, port, browser, complete);
     const status = await statusRead(world, port);
+    const refusals = world.facts?.large.refusals;
+    const refusal =
+      refusals === undefined
+        ? undefined
+        : await refusalDetail(world, port, browser, refusals);
     const unread: Record<string, number> = {};
     const corpus =
       world.facts === undefined
@@ -1737,6 +1874,7 @@ async function measureLargeRun(browser: Browser): Promise<Measured> {
       history_page: history,
       node_timeline_complete: nodeComplete,
       status,
+      ...(refusal === undefined ? {} : { refusal_detail: refusal }),
       host_load: { start: hostStart, end: hostLoad() },
     };
   } finally {
@@ -1968,7 +2106,7 @@ test("a large run's first screens, the rest, its history and its status, at real
   const git = (args: string[]) =>
     execFileSync("git", args, { cwd: REPO, encoding: "utf8" }).trim();
   const telemetry = largeTelemetrySchema.parse({
-    schema_version: 4,
+    schema_version: 5,
     recorded_at: new Date().toISOString(),
     commit: git(["rev-parse", "HEAD"]),
     dirty: git(["status", "--porcelain"]) !== "",

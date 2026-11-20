@@ -108,3 +108,27 @@ budgets:
     unit: seconds
     direction: max
     threshold: 1
+  - id: dag-ui-refusal-detail-seconds
+    description: >-
+      Refusal detail shows its complete text. Seconds a person waits for a
+      refused edit's complete text: from pressing a refusal row in Overall's
+      event list until its detail shows every line of the full_reason artifact,
+      fetched through the real release server's GET
+      /api/v2/runs/{run}/artifacts/{id} route. The median of 3 readings for each
+      of the newest and the oldest refusal of the run, and the slower of the
+      two; detail reports each reading, the artifact request's response time
+      and bytes, and the time from the response to the text rendered. 850
+      warmed run directories, one tab on loopback, the opened run live at
+      116,000 records and 100 MB, plus 500 edit-rejected records, each with a
+      64 KiB multi-line full_reason artifact (the engine's hook read bound) and
+      its linked reconciler surface: 10x the busiest refusing run on this host,
+      about 51 refusal records, at the largest artifact the engine writes. Basis
+      design (manager ruling a9): the same bound as
+      dag-ui-run-history-page-seconds and dag-ui-run-status-read-seconds, the
+      other single reads a person waits on in this view; telemetry analysis
+      only, approximately 2 seconds, beside about 13 seconds the phase adds.
+    measure: reported
+    command: [node, ../read-latency-budget.mjs, --telemetry, apps/dag-ui-e2e/read-latency/telemetry/read-latency-large.json, --metric, refusal-detail]
+    unit: seconds
+    direction: max
+    threshold: 1
