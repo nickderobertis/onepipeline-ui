@@ -888,3 +888,17 @@ settlements rather than as carrying no metadata. A patch move within 0.115, so t
 re-exported engine types do not change; it serves nothing new. Its oneagentgraph,
 onejudge, oneharness-core, onemessagebus and onevcs requirements are the ones 0.115.0
 resolved.
+
+0.116.1 is the engine whose refused edits say what they were: every `edit-rejected` it
+writes carries a one-line `summary`, the `node` its command names (and is labelled with
+it), and `full_reason`, the id of an artifact of the record keeping the complete refusal
+— a plan-edit hook's whole stderr up to its 64 KiB read bound, `full_reason_truncated`
+saying where it wrote more — and the reconciler's `edit-rejected` surface names the record
+it was raised for as `rejection`. This crate moves to it so the browser shows a refusal as
+an attributed event with its complete text, under timeline schema 17: the reference
+vocabulary gains `refusal`, an artifact the engine kept in the run's reports directory is
+named on the wire by its file name and served whole by the artifact route, and the run's
+own span lists every refusal whatever node it names. It moves onevcs from 0.67.3 to
+0.68.0, as the engine's lock does. The move is announced as a break: the re-exported
+engine types change. Its oneagentgraph, onejudge, oneharness-core, onemessagebus and
+onetaskgraph requirements are the ones 0.115.1 resolved.
