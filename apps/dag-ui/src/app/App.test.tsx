@@ -543,7 +543,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
    * reached through the client's own contract, which admits it.
    */
   test("opens a conversation-referenced record in its conversation alone, whatever else it carries", async () => {
-    /** What each record carries besides its conversation reference. */
     type Carrying = Pick<
       TimelineEvent,
       "id" | "kind" | "redirection" | "release" | "surface"
@@ -622,7 +621,6 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     };
 
     for (const record of records) {
-      // Loading, then the conversation itself.
       let release: (response: Response) => void = () => {};
       const { client } = telemetryHarness((url) => {
         if (isTimeline(url)) return Response.json(served);
