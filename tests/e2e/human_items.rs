@@ -3977,6 +3977,7 @@ fn without_a_human_items_view_the_poller_sweeps_nothing() {
         None,
     );
     for run in ["after-due", "and-after-that"] {
+        // llmlint: ignore[tests_mirror_real_usage] the run is not the subject: a row the sidebar is sent for it is the proof the poller ticked, and a run launched through the engine would start a driver that sweeps human items itself, which is exactly what this journey must rule out.
         fixture_run::write(&world.root, run);
         loop {
             let frame = sidebar
@@ -4012,6 +4013,7 @@ fn a_refused_expiry_sweep_is_said_and_made_again_once_the_store_reads() {
 
     // A directory where the engine opens its index lock refuses every read and
     // sweep; the journal itself is untouched, so the view is not read again.
+    // llmlint: ignore[tests_mirror_real_usage] no public interface makes the engine refuse a sweep, and the refusal and its recovery are the subject; the lock path is the one `an_open_view_rides_out_a_journal_it_cannot_read_and_catches_up_on_the_same_stream` swaps for a refused read, and everything after it is read through the server's own stream.
     let lock = world.root.join("human-items").join("index.lock");
     let deadline = Instant::now() + PATIENCE;
     while std::fs::remove_file(&lock)

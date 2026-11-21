@@ -419,28 +419,32 @@ function check(
   };
 }
 
-test("a check's interval reads in its largest whole unit, and one it leaves out reads as the engine's own default", async ({
+test("a check's interval reads in its largest whole unit, one it leaves out reads as the engine's own default, and an item with a time and a check names both and pairs the check's outcome with the check", async ({
   page,
 }) => {
   const facts = await serveWorld("expiry");
   const pending = "process.stdout.write(JSON.stringify({ expired: false }));\n";
+  const at = new Date(Date.now() + 3_600_000).toISOString();
   const unstated = {
     title: "Rotate the staging certificates once the new issuer is trusted",
-    condition: check(facts, "unstated", pending, {
-      interval_seconds: undefined,
-    }),
+    expiry: [
+      check(facts, "unstated", pending, { interval_seconds: undefined }),
+    ],
   };
-  const hours = {
+  const both = {
     title: "Retire the old status page once its traffic stops",
-    condition: check(facts, "hours", pending, { interval_seconds: 7200 }),
+    expiry: [
+      { when: "time", at },
+      check(facts, "hours", pending, { interval_seconds: 7200 }),
+    ],
   };
-  const ids = [unstated, hours].map((item, index) =>
+  const ids = [unstated, both].map((item, index) =>
     raise(facts, {
       dedup_key: `interval-${index}`,
       kind: "task",
       title: item.title,
       body: "Waiting on a check.",
-      expiry: [item.condition],
+      expiry: item.expiry,
     }),
   );
   // The engine keeps its default to itself; its own words for the item are the
@@ -448,11 +452,7 @@ test("a check's interval reads in its largest whole unit, and one it leaves out 
   const shown = execFileSync(
     facts.engine,
     ["human-items", "show", ids[0] ?? ""],
-    {
-      cwd: facts.cwd,
-      env: worldEnv(facts),
-      encoding: "utf8",
-    },
+    { cwd: facts.cwd, env: worldEnv(facts), encoding: "utf8" },
   );
   expect(shown).toContain("(every 60 s,");
 
@@ -460,7 +460,24 @@ test("a check's interval reads in its largest whole unit, and one it leaves out 
   await expect(card(page, unstated.title)).toContainText(
     "checked every minute",
   );
-  await expect(card(page, hours.title)).toContainText("checked every 2 hours");
+  const bothCard = card(page, both.title);
+  await expect(bothCard).toContainText(
+    `Expires at ${clockOf(at)}, or when its check ${process.execPath} `,
+  );
+  await expect(bothCard).toContainText("checked every 2 hours");
+
+  await bothCard
+    .getByRole("button", { name: `Details: ${both.title}` })
+    .click();
+  const conditions = detailPane(page)
+    .getByRole("region", { name: "Expiry" })
+    .getByRole("listitem");
+  await expect(conditions).toHaveCount(2);
+  await expect(conditions.nth(1)).toContainText("Last check not yet", {
+    timeout: HANG,
+  });
+  await expect(conditions.nth(0)).toContainText(`At ${clockOf(at)}`);
+  await expect(conditions.nth(0)).not.toContainText("Last check");
 });
 
 /** The failing check's error: several lines, as `df` prints its complaint. */
