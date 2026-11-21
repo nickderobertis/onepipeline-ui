@@ -403,6 +403,42 @@ impl World {
             .to_owned()
     }
 
+    /// End the detached driver an attached `start` hands `run` to as it returns,
+    /// leaving the run waiting on its decisions with nothing driving it — the
+    /// state a driver lost to its host leaves behind. The engine's retained
+    /// driver goes on raising and re-projecting the items a decision releases in
+    /// its own time, so a journey pinning the journal's exact sequence numbers
+    /// lets it go first. `SIGKILL`, so it journals nothing on its way out and
+    /// the journal is the one a lost driver leaves.
+    fn let_go_of(&self, run: &str) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let pid = loop {
+            if let Some(adopted) = self.events_of(run, "driver-adopted").last() {
+                break adopted["payload"]["pid"]
+                    .as_i64()
+                    .and_then(|pid| i32::try_from(pid).ok())
+                    .expect("a driver pid");
+            }
+            assert!(
+                Instant::now() < deadline,
+                "nothing took {run} over from the attached start"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        // SAFETY: the pid is the one this world's own engine journalled for
+        // the driver it retained; neither call passes memory to libc.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the driver of {run} outlived SIGKILL"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     /// The run journal's records of `kind`.
     fn events_of(&self, run: &str, kind: &str) -> Vec<Value> {
         std::fs::read_to_string(self.root.join(run).join("events.jsonl"))
@@ -1497,14 +1533,26 @@ fn a_run_stopped_or_settled_retires_only_its_own_holds_and_tells_their_owner() {
         );
         assert_eq!(response.status, 200, "{}", response.body);
     };
+    // The driver `start --attach` retains goes on driving after each decision,
+    // so a later step's item is raised by that driver in its own time rather
+    // than by an `adopt` here, which the engine refuses while it is active.
     let gate = |node: &str| {
-        id_of(
-            world
+        let key = format!("run:{settled}#{node}");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Some(view) = world
                 .listed(&["--run", &settled])
                 .iter()
-                .find(|v| v["item"]["dedup_key"] == format!("run:{settled}#{node}"))
-                .expect("the step's item"),
-        )
+                .find(|v| v["item"]["dedup_key"] == key)
+            {
+                break id_of(view);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the retained driver never raised {key}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
     };
     complete(&host);
     complete(&gate("notes"));
@@ -1519,14 +1567,26 @@ fn a_run_stopped_or_settled_retires_only_its_own_holds_and_tells_their_owner() {
         ),
     );
     complete(&gate("sign"));
-    world.ok(Some(owner), &["adopt", &settled, "--attach"]);
     complete(&gate("ship"));
-    world.ok(Some(owner), &["adopt", &settled, "--attach"]);
+    world.ok(
+        Some(owner),
+        &["watch", &settled, "--until", "settled", "--timeout", "60"],
+    );
     assert!(
         world.root.join(&settled).join("result.json").is_file(),
         "the run settled"
     );
-    assert_eq!(world.stored(&settles)["state"], "dismissed");
+    // The driver retires the run's holds as it lets go of the settled run,
+    // which may be just after the watch saw it settle.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while world.stored(&settles)["state"] != "dismissed" {
+        assert!(
+            Instant::now() < deadline,
+            "the settled run never retired its hold: {}",
+            world.stored(&settles)
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert_eq!(
         world.stored(&settles)["resolution"]["reason"],
         "the run ended"
@@ -2795,6 +2855,7 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
     let owner = "claude-code-supervising-session";
     let plan = release_plan(&world, "golden");
     let run = world.start(owner, &plan);
+    world.let_go_of(&run);
     let canary = id_of(
         world
             .listed(&[])

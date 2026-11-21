@@ -888,3 +888,17 @@ settlements rather than as carrying no metadata. A patch move within 0.115, so t
 re-exported engine types do not change; it serves nothing new. Its oneagentgraph,
 onejudge, oneharness-core, onemessagebus and onevcs requirements are the ones 0.115.0
 resolved.
+
+0.116.0 is the engine that links onevcs 0.68.0, whose adoption rules let a plan's
+release wait name only what the consuming host installs: start, plan checks and live
+edits refuse an `uninstalled` or `default-taken` wait with a pointer to `consumes`. It
+also redoes a changed completed task and its eligible completed dependents by default
+(`--keep-changed` opts out; launch-config schema 15), keeps a retained driver going
+after a reply, attestation or live edit rather than needing an `adopt`, hands a
+registered check the project id, and adds `unpublished --project <ID> --discard
+[--dry-run]`. This crate moves to it so that a host can adopt those planning and
+follow-up rules together with a read API linking the same engine; it serves the
+journal, decisions and results those write through the linked SDK as it finds them, and
+calls none of the new verbs. The move is announced as a break: the re-exported engine
+types change. Its oneagentgraph, onejudge, oneharness-core, onemessagebus and
+onetaskgraph requirements are the ones 0.115.1 resolved.
