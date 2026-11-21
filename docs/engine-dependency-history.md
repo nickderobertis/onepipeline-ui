@@ -938,3 +938,15 @@ read API linking the same ones, and the read API's own reads of Linear-homed pla
 through the same store. A patch move within 0.117, so the re-exported engine types do not
 change; it serves nothing new. Its oneagentgraph, onejudge, oneharness-core,
 onemessagebus and onevcs requirements are the ones 0.117.0 resolved.
+
+0.117.3 is the engine whose run-end hook fires for the ending a settle reaches after the
+run's driver exited: a run a reply, attestation or live edit settles done once its driver
+has let go fires the success hook that ending owes, and a `run-hook-fired` judged on a
+graph an edit ahead of it had already carried to another ending no longer stands as the
+hook's marker (checkpoint schema 16, which this crate reads none of). This crate moves to
+it so that a host holding its engine pin equal to the one this read API links can adopt
+the release whose follow-up runs launch from a run settled after its driver exited. The
+move is announced as a break: it is the release that carries this crate from the
+onepipeline 0.116 announced at v0.86.0 to onepipeline 0.117, whose re-exported engine and
+human-item types change (0.117.0 above). Its oneagentgraph, onejudge, oneharness-core,
+onemessagebus, onetaskgraph and onevcs requirements are the ones 0.117.2 resolved.
