@@ -13344,13 +13344,27 @@ const DRIVER_PATIENCE: Duration = Duration::from_secs(60);
 
 /// Wait until `condition` holds, or fail the journey naming what never happened.
 #[cfg(unix)]
-fn eventually(what: &str, mut condition: impl FnMut() -> bool) {
+fn eventually(what: &str, condition: impl FnMut() -> bool) {
+    eventually_explaining(what, condition, String::new);
+}
+
+/// [`eventually`], whose failure also says what `explain` reads of the records
+/// the condition was waiting on, so a journey that fails on a host nobody here
+/// can reproduce it on says which part of its condition never held.
+#[cfg(unix)]
+fn eventually_explaining(
+    what: &str,
+    mut condition: impl FnMut() -> bool,
+    explain: impl FnOnce() -> String,
+) {
     let deadline = std::time::Instant::now() + DRIVER_PATIENCE;
     while !condition() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "{what} never happened within {DRIVER_PATIENCE:?}"
-        );
+        if std::time::Instant::now() >= deadline {
+            panic!(
+                "{what} never happened within {DRIVER_PATIENCE:?}{}",
+                explain()
+            );
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
 }
@@ -20218,9 +20232,10 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
             .collect()
     };
     let handed = handed_off(&root, run, 1);
+    let handed_pid = handed.0;
     // The board refuses that projection as it refused the launch's, and the
     // driver journals the refusal as a finding after recording the attempt.
-    eventually(
+    eventually_explaining(
         "the driver the launch handed the run to projected it",
         || {
             let journal = records("events.jsonl");
@@ -20244,6 +20259,38 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
                 && journal[adopted..]
                     .iter()
                     .any(|record| record["kind"] == "planner-surface-queued")
+        },
+        || {
+            let journal: Vec<String> = records("events.jsonl")
+                .iter()
+                .map(|record| {
+                    format!(
+                        "{} {} {}",
+                        record["ts"].as_str().unwrap_or("-"),
+                        record["kind"].as_str().unwrap_or("-"),
+                        record["payload"]["pid"]
+                    )
+                })
+                .collect();
+            let projections: Vec<String> = records(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE)
+                .iter()
+                .map(|projection| {
+                    format!(
+                        "{} {} {} {}",
+                        projection["at"].as_str().unwrap_or("-"),
+                        projection["outcome"].as_str().unwrap_or("-"),
+                        projection["kind"].as_str().unwrap_or("-"),
+                        projection["reason"].as_str().unwrap_or("-"),
+                    )
+                })
+                .collect();
+            let log = fs::read_to_string(root.join(run).join("driver.log")).unwrap_or_default();
+            format!(
+                "\nthe handed driver {handed_pid} is {}\njournal:\n{}\nprojections:\n{}\ndriver.log:\n{log}",
+                if process_is_live(handed_pid) { "live" } else { "gone" },
+                journal.join("\n"),
+                projections.join("\n"),
+            )
         },
     );
     driven_past(&root, run, &[]);
