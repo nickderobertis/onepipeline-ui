@@ -928,3 +928,13 @@ view is held, retiring an item on a page nothing else reads. The move is announc
 break: the re-exported human-item types gain fields and variants. Its oneagentgraph,
 onejudge, oneharness-core, onemessagebus, onetaskgraph and onevcs requirements are the
 ones 0.116.0 resolved.
+
+0.117.2 is the engine that links onetaskgraph 0.14.20, whose `linear` plugin's batched
+issue reads accept an issue's key (`TEAM-101`) as well as its uuid: `show-many`, batched
+update and comment read-backs, and a copy's read-ahead return the issue asked for by key
+rather than refusing Linear's uuid answer as another item's. This crate moves to it, and
+to that store release, so that a host can adopt the engine and store pins together with a
+read API linking the same ones, and the read API's own reads of Linear-homed plans go
+through the same store. A patch move within 0.117, so the re-exported engine types do not
+change; it serves nothing new. Its oneagentgraph, onejudge, oneharness-core,
+onemessagebus and onevcs requirements are the ones 0.117.0 resolved.
