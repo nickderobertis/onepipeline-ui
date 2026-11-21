@@ -52,6 +52,7 @@ export function SendBar({
       {count > 0 && (
         <div className="human-items-send-bar">
           <button
+            aria-busy={sending}
             className="human-items-send-action"
             data-primary="true"
             disabled={sending}

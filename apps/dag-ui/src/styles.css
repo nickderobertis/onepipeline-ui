@@ -2384,8 +2384,10 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   border-bottom: 1px solid var(--border);
 }
 
-/* The Filters button is the phone's; wider screens show what it folds. */
-.human-items-filters-toggle {
+/* The Filters button is the phone's, and Sort beside it; wider screens show
+   what it folds, Sort among it. */
+.human-items-filters-toggle,
+.human-items-sort-toggle {
   display: none;
 }
 
@@ -2518,7 +2520,9 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 
 .human-item-action,
+.human-item-detail-reopen,
 .human-item-tracker {
+  position: relative;
   display: inline-flex;
   align-items: center;
   box-sizing: border-box;
@@ -2530,6 +2534,47 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   background: var(--background);
   font-size: 11.5px;
   white-space: nowrap;
+}
+
+/* A write on its way: its control reads as pending, and its item's others wait. */
+.human-item-action:disabled,
+.human-item-detail-reopen:disabled {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+/* When the item was raised, on its card; the exact moment on hover or a long press. */
+.human-item-raised {
+  position: relative;
+  white-space: nowrap;
+}
+
+.human-item-raised-tip {
+  position: absolute;
+  z-index: 1;
+  top: calc(100% + 4px);
+  left: 0;
+  width: max-content;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--popover);
+  color: var(--popover-foreground);
+}
+
+/* The reason or comment saved on resolving an item. */
+.human-item-note {
+  margin: 2px 0 0;
+  padding: 2px 8px;
+  border-left: 3px solid var(--border);
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 17px;
+  overflow-wrap: anywhere;
+}
+
+.human-item-note-label {
+  color: var(--muted-foreground);
 }
 
 /* A long tracker reference is cut in its chip, whole in its `title` and in the
@@ -2630,7 +2675,10 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   line-height: 17px;
 }
 
-/* An answer box rests one line tall and grows with what is written. */
+/* An answer box rests one line tall and grows with what is written. On a card it
+   sits apart from what is above it by the card's own 5px padding and no more:
+   the surface's 1px gap and its margin below make that, the choices' own 2px
+   bottom margin counting towards it where they are what is above. */
 .human-item-answer {
   box-sizing: border-box;
   width: 100%;
@@ -2646,6 +2694,17 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   line-height: 18px;
   resize: none;
   field-sizing: content;
+}
+
+.human-item-card > .otg-card__surface > .human-item-answer {
+  margin-top: 4px;
+}
+
+.human-item-card
+  > .otg-card__surface
+  > .human-item-choices
+  + .human-item-answer {
+  margin-top: 2px;
 }
 
 .human-item-answer[aria-busy="true"] {
@@ -2918,6 +2977,16 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   overflow-wrap: anywhere;
 }
 
+/* The reason or comment just saved, quoted under the line that says so. */
+.human-items-toast-saved {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid currentColor;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+
 .human-items-toast-close {
   display: grid;
   grid-column: 2;
@@ -3039,6 +3108,37 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     min-height: 44px;
     margin: 0 10px;
     font-size: 13px;
+  }
+
+  /* Filters and Sort share one row, top-aligned; the filters unfold below it. */
+  .human-items-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .human-items-controls > .human-items-filters {
+    flex-basis: 100%;
+  }
+
+  /* Sort stays out beside Filters, drawn as that button is, one tap from its
+     choices; the folded filters do not repeat it. */
+  .human-items-sort-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    margin: 0 10px 0 0;
+    padding: 0;
+    font: inherit;
+    font-size: 13px;
+    color: inherit;
+    appearance: none;
+    cursor: pointer;
+  }
+
+  .human-items-filters .human-items-sort-label,
+  .human-items-filters .human-items-sort-select {
+    display: none;
   }
 
   .human-items-filters-count {

@@ -10,16 +10,37 @@ import type {
   HumanItemsView,
   LiveHumanItems,
 } from "../../lib/live-human-items";
-import { type FilterChoice, NO_FILTER, toFilter } from "./human-items-model";
+import {
+  type FilterChoice,
+  filterChoiceOf,
+  NO_FILTER,
+  toFilter,
+} from "./human-items-model";
 import { useAnswerDrafts } from "./useAnswerDrafts";
+import { useRemembered } from "./useRemembered";
+
+/** Where this browser remembers the filters Action items was last read under. */
+export const FILTERS_KEY = "onepipeline-ui.human-items.filters";
+
+function rememberedFilters(stored: string): FilterChoice | undefined {
+  try {
+    return filterChoiceOf(JSON.parse(stored));
+  } catch {
+    // Text that is not JSON is no choice made.
+    return undefined;
+  }
+}
 
 /** A write a reader can make on an item, as the route names it. */
 export type HumanItemWrite =
   | { readonly action: "complete" }
-  | { readonly action: "dismiss"; readonly reason?: string };
+  | { readonly action: "dismiss"; readonly reason?: string }
+  | { readonly action: "reopen" };
 
 /** Where one item's last write stands. */
 export interface WriteState {
+  /** The write still on its way, whose control reads as pending meanwhile. */
+  readonly pending?: HumanItemWrite["action"];
   /** The engine's refusal of the last write, in its own words. */
   readonly error?: string;
 }
@@ -30,6 +51,8 @@ export interface FollowUp {
   readonly phase: "sending" | "done" | "failed";
   /** Why it failed, in the engine's words or the transport's. */
   readonly error?: string;
+  /** The reason or comment the engine now holds, once a note is saved. */
+  readonly saved?: string;
 }
 
 /**
@@ -60,14 +83,22 @@ interface Settled {
 }
 
 /** A write out, and where its item stood in the list when it was sent. */
-interface Hidden {
+interface Held {
   readonly view: HumanItemView;
   readonly at: number;
 }
 
-/** What the page holds apart from what the server pushes: its own selection. */
+/**
+ * What the page holds apart from what the server pushes: its own selection, and
+ * the filters, which this browser remembers across visits and reloads.
+ */
 export function useHumanItemsSelection(active: boolean) {
-  const [choice, setChoice] = useState<FilterChoice>(NO_FILTER);
+  const [choice, setChoice] = useRemembered<FilterChoice>(
+    FILTERS_KEY,
+    rememberedFilters,
+    NO_FILTER,
+    JSON.stringify,
+  );
   const [selectedId, setSelectedId] = useState<string>();
   const filterKey = JSON.stringify(toFilter(choice));
   // biome-ignore lint/correctness/useExhaustiveDependencies: `filterKey` is the filter's value, so a choice rebuilt with the same selectors is not a new subscription.
@@ -80,11 +111,9 @@ export function useHumanItemsSelection(active: boolean) {
       ...(selectedId === undefined ? {} : { item: selectedId }),
     };
   }, [active, filterKey, selectedId]);
-  // Leaving the page leaves its filters and selection behind with it.
+  // Leaving the page leaves its selection behind; the filters are remembered.
   useEffect(() => {
-    if (active) return;
-    setChoice(NO_FILTER);
-    setSelectedId(undefined);
+    if (!active) setSelectedId(undefined);
   }, [active]);
   return { choice, setChoice, selectedId, setSelectedId, view };
 }
@@ -94,9 +123,9 @@ export function useHumanItemsSelection(active: boolean) {
  * holds them, and the writes a reader makes through the client.
  *
  * Nothing here reads: every change, this page's own among them, arrives on the
- * stream. Complete and Dismiss act at once: the card leaves as the write is sent
- * and a toast says so; a failure puts the card back where it was, with the
- * reason. Answers are drafted and go out together ({@link useAnswerDrafts}),
+ * stream. Complete, Dismiss and Reopen act at once and a toast says so as the
+ * write is sent; the card holds its place, its pressed control pending, until
+ * the receipt lands and it leaves, or a failure leaves it there with the reason. Answers are drafted and go out together ({@link useAnswerDrafts}),
  * each question staying until its receipt. A second
  * write to an item already being written is refused here, so a repeated press
  * sends nothing. What a toast offers afterwards — taking the write back, or a
@@ -116,12 +145,10 @@ export function useHumanItems(
     {},
   );
   const [toast, setToast] = useState<Toast>();
-  // Completed or dismissed here, receipt or not: gone from the list until a
-  // failure brings it back.
-  // Questions a batch is out for: each holds its place until its receipt, even
-  // if the stream says it was answered first.
-  const [sending, setSending] = useState<readonly Hidden[]>([]);
-  const [hidden, setHidden] = useState<Readonly<Record<string, Hidden>>>({});
+  // Questions a batch is out for, and items a write is out for: each holds its
+  // place until its receipt, even if the stream says it was resolved first.
+  const [sending, setSending] = useState<readonly Held[]>([]);
+  const [pending, setPending] = useState<Readonly<Record<string, Held>>>({});
   // What each accepted write's receipt says its item now is, until what the page
   // is shown of the server has caught up with it.
   const [settled, setSettled] = useState<Readonly<Record<string, Settled>>>({});
@@ -143,7 +170,8 @@ export function useHumanItems(
   const items = useMemo(() => {
     if (pushed === undefined) return undefined;
     const shown = pushed.flatMap((view) => {
-      if (hidden[view.item.id] !== undefined) return [];
+      const held = pending[view.item.id];
+      if (held !== undefined) return [held.view];
       const own = settled[view.item.id]?.view;
       if (own === undefined || !newer(own, view)) return [view];
       return own.item.state === listedState ? [own] : [];
@@ -158,10 +186,10 @@ export function useHumanItems(
         !has(view.item.id)
       )
         shown.splice(Math.min(at, shown.length), 0, view);
-    for (const { view, at } of sending)
+    for (const { view, at } of [...sending, ...Object.values(pending)])
       if (!has(view.item.id)) shown.splice(Math.min(at, shown.length), 0, view);
     return shown;
-  }, [pushed, sending, settled, hidden, listedState, filterKey]);
+  }, [pushed, sending, settled, pending, listedState, filterKey]);
   // A receipt is let go once what the page shows has caught up with it: the
   // item is served as new as the receipt, or is gone and was not to be shown.
   useEffect(() => {
@@ -240,7 +268,12 @@ export function useHumanItems(
   );
 
   const write = useCallback(
-    (view: HumanItemView, change: HumanItemWrite) => {
+    (
+      view: HumanItemView,
+      change: HumanItemWrite,
+      /** Called once the engine accepted the write, as its card leaves. */
+      onAccepted?: () => void,
+    ) => {
       const { id, title } = view.item;
       if (inFlight.current.has(id)) return;
       inFlight.current.add(id);
@@ -250,13 +283,15 @@ export function useHumanItems(
         0,
         listed.current?.findIndex(({ item }) => item.id === id) ?? 0,
       );
-      setWrites((all) => ({ ...all, [id]: {} }));
-      setHidden((all) => ({ ...all, [id]: { view, at } }));
+      setWrites((all) => ({ ...all, [id]: { pending: change.action } }));
+      setPending((all) => ({ ...all, [id]: { view, at } }));
       setToast({ key, id, title, action: change.action, phase: "sending" });
       const sent: Promise<HumanItemReceipt> =
         change.action === "complete"
           ? client.completeHumanItem(id)
-          : client.dismissHumanItem(id, change.reason);
+          : change.action === "dismiss"
+            ? client.dismissHumanItem(id, change.reason)
+            : client.reopenHumanItem(id);
       resolutions.current.set(key, sent);
       sent
         .then(
@@ -266,7 +301,8 @@ export function useHumanItems(
               [id]: { view: receipt.item, at, filter },
             }));
             setWrites((all) => ({ ...all, [id]: {} }));
-            retire(id, "dismissed here");
+            if (change.action !== "reopen") retire(id, "dismissed here");
+            onAccepted?.();
             onToast(key, (held) => ({
               ...held,
               phase: "done",
@@ -289,7 +325,7 @@ export function useHumanItems(
         )
         .finally(() => {
           inFlight.current.delete(id);
-          setHidden(forget(id));
+          setPending(forget(id));
         });
     },
     [client, onToast, retire],
@@ -327,10 +363,16 @@ export function useHumanItems(
                 ...all,
                 [id]: { view: after.item, at: all[id]?.at ?? 0, filter },
               }));
+              const saved =
+                kind === "note" ? noted(after.item.item) : undefined;
               onToast(key, (current) => ({
                 ...current,
                 reopen: after.item.reopen,
-                followUp: { kind, phase: "done" },
+                followUp: {
+                  kind,
+                  phase: "done",
+                  ...(saved === undefined ? {} : { saved }),
+                },
               }));
             },
             (error: unknown) =>
@@ -382,7 +424,7 @@ export function useHumanItems(
  * nothing to forget leaves the state unchanged and React skips the re-render.
  */
 function forget(id: string) {
-  return (all: Readonly<Record<string, Hidden>>) => {
+  return (all: Readonly<Record<string, Held>>) => {
     if (all[id] === undefined) return all;
     return Object.fromEntries(
       Object.entries(all).filter(([held]) => held !== id),
@@ -396,6 +438,16 @@ function newer(
   view: { readonly item: HumanItemView["item"] },
 ): boolean {
   return Date.parse(own.item.updated_at) > Date.parse(view.item.updated_at);
+}
+
+/** The reason a dismissal or the comment a completion now carries, if any. */
+function noted(item: HumanItem): string | undefined {
+  const { resolution } = item;
+  if (resolution === null) return undefined;
+  return (
+    (item.state === "dismissed" ? resolution.reason : resolution.text) ??
+    undefined
+  );
 }
 
 function message(error: unknown): string {
