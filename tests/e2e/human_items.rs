@@ -1518,14 +1518,40 @@ fn a_run_stopped_or_settled_retires_only_its_own_holds_and_tells_their_owner() {
             json!({"scope": "work", "run": settled, "node": "notes"}),
         ),
     );
+    // Since onepipeline 0.116 the run's driver is retained past each decision
+    // and drives on by itself, refusing an `adopt` while it does, so the
+    // journey waits on that driver instead of re-adopting the run: through
+    // `watch` until the next step's decision is pending, then until the run
+    // settles. The settlement is written before the driver retires the run's
+    // holds on its way out, so the retirement is waited for on its own.
+    let watch_until = |until: &str, ending: i32| {
+        let output = world.cli(
+            Some(owner),
+            &["watch", &settled, "--until", until, "--timeout", "60"],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(ending),
+            "`watch --until {until}` ended otherwise: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
     complete(&gate("sign"));
-    world.ok(Some(owner), &["adopt", &settled, "--attach"]);
+    watch_until("surface", onepipeline::error::EXIT_SURFACE_WAITING);
     complete(&gate("ship"));
-    world.ok(Some(owner), &["adopt", &settled, "--attach"]);
+    watch_until("settled", 0);
     assert!(
         world.root.join(&settled).join("result.json").is_file(),
         "the run settled"
     );
+    let deadline = Instant::now() + PATIENCE;
+    while world.stored(&settles)["state"] == "open" {
+        assert!(
+            Instant::now() < deadline,
+            "the settled run's driver never retired its hold"
+        );
+        std::thread::sleep(Duration::from_millis(100));
+    }
     assert_eq!(world.stored(&settles)["state"], "dismissed");
     assert_eq!(
         world.stored(&settles)["resolution"]["reason"],
