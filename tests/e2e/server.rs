@@ -16000,20 +16000,26 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
         !process_is_live(pid)
     });
     drop(driver);
+    // The adoption returned on the action's decision again, and the driver it
+    // handed the run to writes back too; stopped, the run writes nothing more.
+    let_go_waiting(&root, run);
+    // Every write-back from here is refused naming that entry: the adoption's
+    // and, since onepipeline 0.116, the waiting driver's it hands the run to.
     let refusals: Vec<Value> = projections()[projected..]
         .iter()
         .filter(|record| record["outcome"] != json!("projected"))
         .cloned()
         .collect();
-    assert_eq!(refusals.len(), 1, "{refusals:?}");
-    let refusal = &refusals[0];
-    assert_eq!(refusal["class"], json!("refused"), "{refusal}");
-    assert_eq!(refusal["kind"], json!("config-setting"), "{refusal}");
-    let reason = refusal["reason"].as_str().expect("a refusal's reason");
-    assert!(
-        reason.contains("sources.followups.config.metadata_fields.0.paths"),
-        "{reason}"
-    );
+    assert!(!refusals.is_empty(), "no write-back was refused");
+    for refusal in &refusals {
+        assert_eq!(refusal["class"], json!("refused"), "{refusal}");
+        assert_eq!(refusal["kind"], json!("config-setting"), "{refusal}");
+        let reason = refusal["reason"].as_str().expect("a refusal's reason");
+        assert!(
+            reason.contains("sources.followups.config.metadata_fields.0.paths"),
+            "{reason}"
+        );
+    }
     serving.stop_on(Stop::Terminate);
 }
 // llmlint: ignore-end[expensive_tests_stay_behind_their_own_edge]
