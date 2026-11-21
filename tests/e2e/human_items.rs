@@ -389,8 +389,68 @@ impl World {
     }
 
     /// Launch `plan` as `session` with the engine's own `start`, driving it
-    /// until nothing more can happen without a person; answers the run id.
+    /// until nothing more can happen without a person, and leave it there with
+    /// nothing driving it; answers the run id.
+    ///
+    /// Since onepipeline 0.116 the attached launch hands the run to a retained
+    /// driver that waits on the decision and moves the run on the moment a person
+    /// makes it — raising the next steps' items while a journey is still reading
+    /// the queue it just answered. These journeys are about the queue, so the
+    /// world ends that driver, as the run stood before the engine retained one;
+    /// [`Self::start_driven`] keeps it for the journey about a run moving on.
     fn start(&self, session: &str, plan: &str) -> String {
+        let run = self.start_driven(session, plan);
+        self.let_go(&run);
+        run
+    }
+
+    /// End the retained driver `run`'s launch record names, once `ps` reads it
+    /// as the provisioned engine's `drive-run` of that run — the pid alone could
+    /// by now name anything. It installs no handler for SIGTERM and writes
+    /// nothing more; the run then reads as paused with nothing driving it.
+    fn let_go(&self, run: &str) {
+        let record: Value = serde_json::from_str(
+            &std::fs::read_to_string(self.root.join(run).join("launch.json"))
+                .expect("the launch record"),
+        )
+        .expect("the launch record parses");
+        let Some(pid) = record["pid"].as_u64().filter(|pid| *pid != 0) else {
+            return;
+        };
+        let pid = i32::try_from(pid).expect("a pid the kernel issued");
+        let drives = || {
+            Command::new("ps")
+                .args(["-o", "args=", "-p", &pid.to_string()])
+                .output()
+                .is_ok_and(|ps| {
+                    let args = String::from_utf8_lossy(&ps.stdout);
+                    let mut words = args.split_whitespace();
+                    words
+                        .next()
+                        .is_some_and(|program| program.ends_with("onepipeline"))
+                        && words.next() == Some("drive-run")
+                        && words.next() == Some(run)
+                })
+        };
+        if !drives() {
+            return;
+        }
+        // SAFETY: `kill` takes a pid and a signal and touches no memory of this
+        // process; the pid was just read as this run's own driver.
+        unsafe { libc::kill(pid, libc::SIGTERM) };
+        let deadline = Instant::now() + PATIENCE;
+        while drives() {
+            assert!(
+                Instant::now() < deadline,
+                "run {run}'s driver outlived SIGTERM"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    /// [`Self::start`], leaving the run with the driver the engine retained for
+    /// it, which moves it on as each decision is made.
+    fn start_driven(&self, session: &str, plan: &str) -> String {
         let printed = self.ok(Some(session), &["start", plan, "--attach"]);
         let last = printed
             .lines()
@@ -1418,7 +1478,7 @@ fn a_run_stopped_or_settled_retires_only_its_own_holds_and_tells_their_owner() {
             step("notes", "Write the release notes", &[]),
         ],
     );
-    let settled = world.start(owner, &settled_plan);
+    let settled = world.start_driven(owner, &settled_plan);
     let work = world.raise(
         owner,
         &input(
