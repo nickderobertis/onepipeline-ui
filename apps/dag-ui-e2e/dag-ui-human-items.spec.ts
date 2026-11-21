@@ -1164,13 +1164,40 @@ test("Tab moves straight between answer boxes, Enter only keeps a draft, Shift+E
   expect(stored(served, idOf(served, "export")).resolution?.text).toContain(
     "Keep it にほん",
   );
+  // Answering the region frees the steps that waited on it, and the run's
+  // driver raises their items as it gets to them — to the same owner, beside
+  // the three answers, as many as it has reached by now.
+  const told = watch(served, SUPERVISOR);
   expect(
-    watch(served, SUPERVISOR)
+    told
+      .filter(([kind]) => kind === "human-item-answered")
       .map(([, id]) => id)
       .sort(),
   ).toEqual([region, idOf(served, "export"), idOf(served, "cache")].sort());
+  const keyed = (id: string) =>
+    z
+      .object({
+        item: z.looseObject({
+          dedup_key: z.string(),
+          owner: z.looseObject({ run: z.string().nullable() }),
+        }),
+      })
+      .parse(JSON.parse(cli(served, ["human-items", "show", id, "--json"])))
+      .item;
+  const run = keyed(region).owner.run;
+  for (const [kind, id] of told.filter(
+    ([kind]) => kind !== "human-item-answered",
+  )) {
+    expect(kind).toBe("human-item-raised");
+    expect(FREED_BY_REGION.map((step) => `run:${run}#${step}`)).toContain(
+      keyed(id).dedup_key,
+    );
+  }
   expect(watch(served, OTHER)).toEqual([]);
 });
+
+/** The queue world's steps that wait on its region question alone. */
+const FREED_BY_REGION = ["build", "lint", "package", "publish"];
 
 test("card actions are a focus group of their own after the answer boxes, operable by keyboard", async ({
   page,
