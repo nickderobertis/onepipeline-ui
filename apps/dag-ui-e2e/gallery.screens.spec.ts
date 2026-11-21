@@ -392,6 +392,27 @@ async function openRefusals(page: Page): Promise<Locator> {
   return events;
 }
 
+/**
+ * Leave `region`'s scrollbar at rest: hidden, as the package's scroll area leaves it
+ * once the pointer has gone.
+ *
+ * The scroll area shows its bar while the pointer is over it and takes it away a
+ * moment after the pointer leaves. A detail that opens under the pointer that clicked
+ * its row is over it or not depending on whether the browser has re-hit-tested that
+ * stationary pointer yet, so two captures of one build drew the bar in one and not
+ * the other. Entering and leaving on purpose, then waiting for the bar to go, makes
+ * that the same every time.
+ */
+async function restScrollbars(page: Page, region: Locator): Promise<void> {
+  await region.hover({ position: { x: 8, y: 8 } });
+  await parkPointer(page);
+  await expect(
+    // llmlint: ignore[e2e_uses_accessible_selectors] the scroll area's bar is decoration with no role or name; it is waited away, never selected or asserted as content.
+    region.locator('[data-slot="scroll-area-scrollbar"]'),
+    "the scroll area's bar is at rest",
+  ).toHaveCount(0);
+}
+
 const resultToast = (page: Page): Locator =>
   page.getByRole("region", { name: "Action result" });
 
@@ -865,11 +886,13 @@ const SURFACES: readonly Surface[] = [
         .getByRole("article", { name: /^amend of node 'review': / })
         .getByRole("button")
         .click();
+      const detail = page.getByRole("region", {
+        name: "Timeline item detail",
+      });
       await expect(
-        page
-          .getByRole("region", { name: "Timeline item detail" })
-          .getByRole("figure", { name: "Complete refusal" }),
+        detail.getByRole("figure", { name: "Complete refusal" }),
       ).toBeVisible();
+      await restScrollbars(page, detail);
     },
   },
   {
