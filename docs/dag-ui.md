@@ -676,6 +676,8 @@ being photographed.
 | `32-action-items-reopen-unavailable` | Reopen greyed for a review with no undo, its question mark pressed and the reason showing |
 | `34-action-items-history` | an item's history in the detail: raised and completed by the manager, completed and noted by you, every time as an age |
 | `35-action-items-dismissed-reason` | a dismissed item under State: Dismissed, the reason saved with it on its card beside Reopen |
+| `36-action-items-expired` | items the engine expired under State: Expired, each in the expired treatment with its reason and the condition that held, beside Reopen |
+| `37-action-items-failing-check` | the open view: an item whose expiry check is failing, its failure on one line, and one that expires at a time |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the

@@ -28,8 +28,13 @@ import {
   blockedGroups,
   blockedSummary,
   changedFilters,
+  checkOutcomeWords,
   DEFAULT_GROUP_BY,
+  expiredBecause,
+  expiryConditions,
+  expiryLine,
   type FilterChoice,
+  failingChecks,
   GROUP_CHOICES,
   GROUP_OPTIONS,
   type GroupBy,
@@ -522,6 +527,10 @@ function Badges({
   const { item } = view;
   return (
     <>
+      {/* An expired card says so once, here. */}
+      {item.state === "expired" && (
+        <span className="human-item-expired-badge">{stateLabel(item)}</span>
+      )}
       {groupBy !== "priority" && (
         <span className="human-item-priority" data-priority={item.priority}>
           {priorityLabel(item)}
@@ -556,10 +565,12 @@ function HumanItemCard({
 }) {
   const { item } = view;
   const open = item.state === "open";
+  const expired = item.state === "expired";
   const blocked = blockedSummary(view);
   const meta: readonly { readonly key: string; readonly part: ReactNode }[] = [
     { key: "raised", part: <RaisedAt at={item.created_at} /> },
-    ...(open ? [] : [{ key: "state", part: stateLabel(item) }]),
+    // An expired card's badge already says so.
+    ...(open || expired ? [] : [{ key: "state", part: stateLabel(item) }]),
     ...(blocked ? [{ key: "blocked", part: blocked }] : []),
     ...(groupBy === "source"
       ? []
@@ -582,6 +593,7 @@ function HumanItemCard({
       className="human-item-card"
       clamp={CARD_BODY_LINES}
       data-blocking={isBlocking(item)}
+      data-expired={expired}
       data-item-id={item.id}
       data-selected={selected}
       meta={meta.map(({ key, part }, index) => (
@@ -619,6 +631,7 @@ function HumanItemCard({
       )}
       <AnsweredBlock view={view} />
       {note && <SavedNote label={note.label} text={note.text} />}
+      <CardExpiry view={view} />
       <RefusalNote reason={answering.refusals[item.id]} />
       <WriteStatus state={state} />
     </TaskCard>
@@ -892,6 +905,73 @@ function AnswerBox({
   );
 }
 
+/**
+ * What a card says of expiry. An open item: what it will expire on, and each check
+ * whose last run failed, in the engine's words on one line — the detail pane holds
+ * the whole of it. An expired item: the reason its expiry recorded, and the
+ * condition that held.
+ */
+function CardExpiry({ view }: { readonly view: HumanItemView }) {
+  const because = expiredBecause(view.item);
+  if (because !== undefined)
+    return (
+      <p className="human-item-expiry-reason">
+        {because.reason}
+        {because.held !== "" && (
+          <span className="human-item-expiry-held"> · {because.held}</span>
+        )}
+      </p>
+    );
+  const line = expiryLine(view.item);
+  return (
+    <>
+      {line !== undefined && <p className="human-item-expiry">{line}</p>}
+      {failingChecks(view).map((check) => (
+        <p
+          className="human-item-status human-item-check-failed"
+          data-failed="true"
+          key={check.condition}
+          title={check.detail ?? undefined}
+        >
+          Check {checkOutcomeWords(check)}
+        </p>
+      ))}
+    </>
+  );
+}
+
+/**
+ * An open item's conditions in the detail pane, each with what it expires on and,
+ * for a check that has run, its last outcome in full.
+ */
+function DetailExpiry({ view }: { readonly view: HumanItemView }) {
+  if (view.item.state !== "open") return null;
+  const conditions = expiryConditions(view);
+  if (conditions.length === 0) return null;
+  return (
+    <section aria-label="Expiry" className="human-item-detail-expiry">
+      <h3>Expiry</h3>
+      <ul>
+        {conditions.map(({ key, words, last }) => (
+          <li key={key}>
+            {words}
+            {last !== undefined && (
+              <p
+                className="human-item-check-detail"
+                data-failed={last.outcome === "failed"}
+              >
+                Last check {checkOutcomeWords(last)}
+                {" · "}
+                <Timestamp at={last.last_run_at} relative />
+              </p>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** What an answered question was answered with: untrusted, as a body is. */
 function AnsweredBlock({ view }: { readonly view: HumanItemView }) {
   const { item } = view;
@@ -1033,6 +1113,7 @@ function DetailPane({
         />
       )}
       <AnsweredBlock view={shown} />
+      <DetailExpiry view={shown} />
       <RefusalNote reason={answering.refusals[item.id]} />
       <div className="human-item-detail-actions">
         {open && item.kind === "task" && (
