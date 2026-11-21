@@ -7127,7 +7127,7 @@ pub(crate) fn may_belong_to_surface(event: &Envelope) -> bool {
 }
 
 /// The surface id a record names, on the kinds that name one.
-fn surface_id(event: &Envelope) -> Option<u64> {
+pub(crate) fn surface_id(event: &Envelope) -> Option<u64> {
     names_surface(event)
         .then(|| event.payload.get("surface").and_then(Value::as_u64))
         .flatten()
@@ -7694,6 +7694,13 @@ fn node_span(view: &Run<'_>, node: &str, parent: Option<&str>, lens: &Lens<'_>) 
         .enumerate()
         .filter(|(_, event)| event.labels.node.as_deref() == Some(node))
         .collect();
+    // The node's own timeline lists, beside its refused edits, the records the
+    // run raised for each of them, which is what says whether a refusal was read.
+    let listed = if parent.is_none() {
+        raised_for_refusals(view, &events)
+    } else {
+        events.clone()
+    };
     let started = events
         .first()
         .map_or_else(now_rfc3339, |(_, event)| event.ts.clone());
@@ -7723,8 +7730,43 @@ fn node_span(view: &Run<'_>, node: &str, parent: Option<&str>, lens: &Lens<'_>) 
     {
         span.insert("status".into(), json!(status_word(status)));
     }
-    lens.fill(&mut span, &events);
+    lens.fill(&mut span, &listed);
     Value::Object(span)
+}
+
+/// `events`, a node's records, with every record of the run that names no node and
+/// records, as `rejection`, one of those records' refused edits as the one it was
+/// raised for: the reconciler's surface about a refusal, journalled at no node.
+/// Nothing is attributed to the node that does not name one of its refusals so.
+fn raised_for_refusals<'a>(
+    view: &Run<'a>,
+    events: &[(usize, &'a Envelope)],
+) -> Vec<(usize, &'a Envelope)> {
+    let refusals: HashSet<(&str, u64)> = events
+        .iter()
+        .filter(|(_, event)| is_refused_edit(event))
+        .map(|(_, event)| (event.stream.as_str(), event.seq))
+        .collect();
+    if refusals.is_empty() {
+        return events.to_vec();
+    }
+    let mut listed: Vec<(usize, &Envelope)> = events.to_vec();
+    listed.extend(view.events.iter().enumerate().filter(|(_, event)| {
+        event.labels.node.is_none()
+            && rejection_of(event).is_some_and(|refusal| refusals.contains(&refusal))
+    }));
+    listed.sort_by_key(|(index, _)| *index);
+    listed
+}
+
+/// The refused edit a record says it was raised for: its `rejection`, the
+/// refusal's stream and seq, as the reconciler's surface records it.
+pub(crate) fn rejection_of(event: &Envelope) -> Option<(&str, u64)> {
+    let rejection = event.payload.get("rejection")?;
+    Some((
+        rejection.get("stream")?.as_str()?,
+        rejection.get("seq")?.as_u64()?,
+    ))
 }
 
 /// The agent-graph sessions a slice of a run's events relayed, each with its own

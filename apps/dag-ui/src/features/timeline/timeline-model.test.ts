@@ -355,6 +355,20 @@ describe("one node's slice of the run timeline", () => {
     expect(typeCounts(rows).get("edit")).toBe(1);
     expect(typeCounts(rows).get("surface")).toBeUndefined();
 
+    // A surface nobody has read says so on the refusal's row.
+    const unread = eventList(
+      nodeWith([
+        refusal,
+        {
+          ...surface("planner-surface-queued", "host.5"),
+          surface_state: { id: 7, kind: "edit-rejected" },
+        },
+      ]),
+    );
+    expect(unread.map((listedRow) => listedRow.status)).toEqual([
+      "not applied · unread",
+    ]);
+
     // A surface whose refusal the list does not hold is a surface like any other,
     // and a refusal written before summaries reads as it always did.
     const apart = eventList(

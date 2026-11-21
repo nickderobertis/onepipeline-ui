@@ -23457,7 +23457,8 @@ fn write_refusals_run(root: &Path) -> String {
 /// A refused edit as onepipeline 0.116.1 records it, served under timeline schema
 /// 17: its complete refusal opens through the artifact route by the kept file's
 /// name, decoded and whole, every line kept; the record is listed on the run's own
-/// span whatever node it names, and on that node's timeline by its label; and a
+/// span whatever node it names, and on that node's timeline by its label, beside
+/// the surface raised for it at no node that names it as its `rejection`; and a
 /// name the run never recorded, a kept file gone, or one that is not a JSON string
 /// is `404`, never a body.
 #[test]
@@ -23565,6 +23566,62 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
         .collect();
     assert_eq!(on_node.len(), 1, "{on_node:#?}");
     assert_eq!(on_node[0]["record_id"], hook["record_id"]);
+    // Beside it, the surface the reconciler raised for it at no node, which names
+    // the refusal as the one it was raised for, and with it whether it was read;
+    // no record the run made at no node that names no refusal of this node's.
+    let at_no_node = |spans: &Value| -> Vec<Value> {
+        spans
+            .as_array()
+            .expect("the spans")
+            .iter()
+            .flat_map(|span| span["events"].as_array().into_iter().flatten())
+            .filter(|event| event.get("node_id").is_none())
+            .cloned()
+            .collect()
+    };
+    let raised = at_no_node(&node["spans"]);
+    assert_eq!(raised.len(), 1, "{raised:#?}");
+    assert_eq!(raised[0]["kind"], json!("planner-surface-queued"));
+    assert_eq!(
+        raised[0]["fields"]["rejection"],
+        json!({"stream": hook["stream"], "seq": hook["seq"]})
+    );
+    assert!(
+        raised[0]["surface_state"]["read_at"].is_string(),
+        "{:#}",
+        raised[0]
+    );
+    // The refusal whose output was cut was raised a surface nobody read.
+    let ship = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline?scope=node&node=ship"),
+    )
+    .json();
+    let unread: Vec<Value> = at_no_node(&ship["spans"])
+        .into_iter()
+        .filter(|event| event["fields"]["rejection"]["seq"] == cut["seq"])
+        .collect();
+    assert_eq!(unread.len(), 1, "{:#}", ship["spans"]);
+    assert!(
+        unread[0]["surface_state"].get("read_at").is_none(),
+        "{:#}",
+        unread[0]
+    );
+    // The node's pages list it too.
+    let paged = http::get(
+        serving.address,
+        &format!("/api/v2/runs/{run}/timeline/events?scope=node&node=review&limit=500"),
+    );
+    assert_eq!(paged.status, 200, "{}", paged.body);
+    let paged: Vec<Value> = paged.json()["rows"]
+        .as_array()
+        .expect("the rows")
+        .iter()
+        .filter(|row| row["kind"] == "planner-surface-queued")
+        .cloned()
+        .collect();
+    assert_eq!(paged.len(), 1, "{paged:#?}");
+    assert_eq!(paged[0]["record_id"], raised[0]["record_id"]);
     // A kept refusal is the refusal's text, never evidence the node verified.
     let verifying: Vec<&Value> = node["spans"]
         .as_array()

@@ -843,6 +843,7 @@ function joinRefusals(
       const raised = surfaceRows.get(row.id);
       if (raised === undefined) return [{ ...row, children }];
       const read = raised.event.surface_state?.read_at;
+      const applied = row.status ?? "not applied";
       return [
         {
           ...row,
@@ -853,11 +854,8 @@ function joinRefusals(
             ...(raised.aliases ?? []),
           ],
           ...(read === undefined
-            ? {}
-            : {
-                status: `${row.status ?? "not applied"} · read`,
-                statusAt: read,
-              }),
+            ? { status: `${applied} · unread` }
+            : { status: `${applied} · read`, statusAt: read }),
         },
       ];
     });

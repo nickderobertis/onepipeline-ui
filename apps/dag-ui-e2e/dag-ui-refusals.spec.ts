@@ -1,6 +1,9 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
 import { type FixtureServer, startFixtureServer } from "./fixture-server";
+import { appendRecords } from "./load/journal";
 
 /**
  * The edits a run refused, read as the ordinary events they are, in the browser
@@ -105,6 +108,34 @@ async function stated(page: Page): Promise<Record<string, string>> {
   // llmlint: ignore-end[e2e_uses_accessible_selectors]
 }
 
+/** The three refusals the journey reads, by row name, and whether each was read. */
+const HOOK = () => [`${HOOK_SUMMARY()} · by planner`, "read"] as const;
+const MONITOR = () => [`${MONITOR_SUMMARY} · by monitor`, "read"] as const;
+const CUT = () => [`${CUT_SUMMARY} · by planner`, "unread"] as const;
+
+/**
+ * Each of `refusals` is one row of `list` whose status says whether the planner
+ * read the surface the reconciler raised for it, and no surface raised for a
+ * refusal is a row of its own: joining the two records keeps the surface's state.
+ */
+async function readState(
+  list: Locator,
+  refusals: readonly (() => readonly [string, "read" | "unread"])[] = [
+    HOOK,
+    MONITOR,
+    CUT,
+  ],
+): Promise<void> {
+  for (const refusal of refusals) {
+    const [name, state] = refusal();
+    const refused = row(list, name);
+    await expect(refused).toHaveCount(1);
+    await expect(refused).toContainText(`not applied · ${state}`);
+  }
+  await expect(row(list, /reconciler: rejected/u)).toHaveCount(0);
+  await expect(row(list, /^edit-rejected: /u)).toHaveCount(0);
+}
+
 test("the graph draws no box of refusals, and Overall lists each refusal once, attributed and not applied", async ({
   page,
 }) => {
@@ -125,16 +156,8 @@ test("the graph draws no box of refusals, and Overall lists each refusal once, a
     await expect(refused).toHaveCount(1);
     await expect(refused).toContainText(" · not applied");
   }
-  // The two the planner read carry that on the refusal's own row.
-  await expect(row(events, `${HOOK_SUMMARY()} · by planner`)).toContainText(
-    "not applied · read",
-  );
-  await expect(row(events, `${CUT_SUMMARY} · by planner`)).not.toContainText(
-    "· read",
-  );
-  // No second row for any surface the reconciler raised for a listed refusal.
-  await expect(row(events, /reconciler: rejected/u)).toHaveCount(0);
-  await expect(row(events, /^edit-rejected: /u)).toHaveCount(0);
+  // Each refusal's row carries whether the surface raised for it was read.
+  await readState(events);
   // The older-shaped record still reads as it always did.
   await expect(row(events, "edit-rejected · by planner")).toHaveCount(1);
   await expect(row(events, "edit-rejected · by planner")).toContainText(
@@ -149,13 +172,82 @@ test("the graph draws no box of refusals, and Overall lists each refusal once, a
   ).toHaveCount(7);
 });
 
-test("a node's event list shows the refusal naming it", async ({ page }) => {
+test("a node's event list shows the refusal naming it, once, with its surface's read state", async ({
+  page,
+}) => {
   const build = await openNode(page, "build");
   await expect(row(build, `${MONITOR_SUMMARY} · by monitor`)).toHaveCount(1);
+  await readState(build, [MONITOR]);
   const review = await openNode(page, "review");
   await expect(row(review, `${HOOK_SUMMARY()} · by planner`)).toHaveCount(1);
   await expect(row(review, `${MONITOR_SUMMARY} · by monitor`)).toHaveCount(0);
+  await readState(review, [HOOK]);
+  const ship = await openNode(page, "ship");
+  await readState(ship, [CUT]);
 });
+
+/**
+ * The planner reading the surface the reconciler raised for the refusal summarised
+ * `summary`: the engine's `planner-surfaced`, carrying the queued record's own
+ * surface fields, appended to the run's journal through the fixture writer.
+ */
+function readSurfaceOf(summary: string): void {
+  if (server === undefined) throw new Error("the fixture server is not up");
+  const journal = join(server.workspace, "runs", facts.run, "events.jsonl");
+  const records = readFileSync(journal, "utf8")
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => journalRecord.parse(JSON.parse(line)));
+  const refusal = records.find(
+    (record) =>
+      record.kind === "edit-rejected" && record.payload.summary === summary,
+  );
+  const queued = records.find(
+    (record) =>
+      record.kind === "planner-surface-queued" &&
+      refusal !== undefined &&
+      record.payload.rejection?.stream === refusal.stream &&
+      record.payload.rejection.seq === refusal.seq,
+  );
+  if (queued === undefined)
+    throw new Error(`no surface was raised for ${summary}`);
+  // The surfaced record carries the surface's own fields, not the link to the
+  // refusal the queued one recorded.
+  const surface = Object.fromEntries(
+    Object.entries(queued.payload).filter(([key]) => key !== "rejection"),
+  );
+  appendRecords(journal, [
+    {
+      ...queued,
+      // After the record it follows, as a writer appending to a journal stamps
+      // it: the corpus is stamped ahead of this host's clock.
+      ts: new Date(
+        Math.max(Date.now(), Date.parse(records.at(-1)?.ts ?? "") + 1),
+      ).toISOString(),
+      seq: records.length,
+      kind: "planner-surfaced",
+      payload: { ...surface, queued_at: queued.ts },
+      artifacts: [],
+    },
+  ]);
+}
+
+const journalRecord = z
+  .object({
+    ts: z.string(),
+    stream: z.string(),
+    seq: z.number().int(),
+    kind: z.string(),
+    payload: z
+      .object({
+        summary: z.string().optional(),
+        rejection: z
+          .object({ stream: z.string(), seq: z.number().int() })
+          .optional(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
 
 test("each refusal's detail states who, what and where, and the complete refusal fetched through the server, every line kept", async ({
   page,
@@ -240,4 +332,23 @@ test("each refusal's detail states who, what and where, and the complete refusal
   await expect(
     detail(page).getByRole("figure", { name: "Complete refusal" }),
   ).toHaveCount(0);
+});
+
+// Last in the file: it reads the one unread surface, which every journey above
+// holds unread.
+test("a refusal's row in its node's list turns read when its surface is read, without a reload", async ({
+  page,
+}) => {
+  const ship = await openNode(page, "ship");
+  const amend = `${SHIP_AMEND} · by planner`;
+  await readState(ship, [CUT, () => [amend, "unread"] as const]);
+  // The corpus was written with no append receipt, so the server reads the first
+  // record appended after it as a rewritten journal, whole; the second is read as
+  // the append it is, which only the record's own refresh can carry to the list.
+  readSurfaceOf(SHIP_AMEND);
+  await readState(ship, [CUT, () => [amend, "read"] as const]);
+  readSurfaceOf(CUT_SUMMARY);
+  await readState(ship, [() => [CUT()[0], "read"] as const]);
+  const events = await openOverall(page);
+  await readState(events, [HOOK, MONITOR, () => [CUT()[0], "read"] as const]);
 });

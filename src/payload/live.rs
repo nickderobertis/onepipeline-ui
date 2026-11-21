@@ -124,6 +124,12 @@ pub(crate) struct Indexed {
     /// What each surface came to, over every record indexed: a record that
     /// moves a surface touches every owner holding a record of it.
     pub(crate) surfaces: SurfaceStates,
+    /// The node each refused edit indexed names, by the refusal's stream and seq.
+    refusal_nodes: HashMap<(usize, u64), String>,
+    /// The node of the refusal each surface was raised for, by surface id: a
+    /// record that moves one of these surfaces touches that node's own timeline,
+    /// which lists the surface beside the refusal.
+    raised_for: HashMap<u64, String>,
 }
 // llmlint: ignore-end[invalid_states_unrepresentable]
 
@@ -377,6 +383,7 @@ impl Indexed {
                 self.run.push(index);
                 touched.run = true;
                 touched.every_node |= event.kind.0 == super::vcs::RELEASE_OBSERVED;
+                self.index_raised_for_refusal(index, event, touched);
             }
             Some(node) => {
                 // A refused edit is the run's as well as its node's: the run's own
@@ -384,6 +391,9 @@ impl Indexed {
                 if super::is_refused_edit(event) {
                     self.run.push(index);
                     touched.run = true;
+                    let stream = self.stream_of(event);
+                    self.refusal_nodes
+                        .insert((stream, event.seq), node.to_owned());
                 }
                 // Looked up before it is keyed, so a node already met costs no
                 // allocation: a long run's records are nearly all of a few nodes.
@@ -401,6 +411,35 @@ impl Indexed {
                     touched.nodes.insert(node.to_owned());
                 }
             }
+        }
+    }
+
+    /// A record at `index` that names no node, as the node whose refused edit it
+    /// names as the one it was raised for reads it: one of that node's records,
+    /// which its own timeline lists beside the refusal. A later record moving the
+    /// same surface touches that node too, since the node's list reads the
+    /// surface's state.
+    fn index_raised_for_refusal(&mut self, index: usize, event: &Envelope, touched: &mut Touched) {
+        let surface = super::surface_id(event);
+        if let Some((stream, seq)) = super::rejection_of(event) {
+            let refused = self
+                .streams
+                .get(stream)
+                .and_then(|stream| self.refusal_nodes.get(&(*stream, seq)))
+                .cloned();
+            if let Some(node) = refused {
+                if let Some(at) = self.node_at.get(&node) {
+                    self.nodes[*at].1.push(index);
+                }
+                if let Some(surface) = surface {
+                    self.raised_for.insert(surface, node.clone());
+                }
+                touched.nodes.insert(node);
+                return;
+            }
+        }
+        if let Some(node) = surface.and_then(|surface| self.raised_for.get(&surface)) {
+            touched.nodes.insert(node.clone());
         }
     }
 
