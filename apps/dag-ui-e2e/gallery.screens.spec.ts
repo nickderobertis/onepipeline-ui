@@ -844,7 +844,7 @@ const SURFACES: readonly Surface[] = [
       pointAtPlot(page, page.getByRole("region", { name: "Graph timeline" })),
   },
   {
-    name: "36-conversation-item",
+    name: "38-conversation-item",
     title: "A conversation item, opened at that item in its conversation",
     open: async (page) => {
       await openCorpus(
@@ -867,7 +867,7 @@ const SURFACES: readonly Surface[] = [
     },
   },
   {
-    name: "37-refusal-rows",
+    name: "39-refusal-rows",
     title: "Refused edits as rows of the run's event list",
     open: async (page) => {
       const events = await openRefusals(page);
@@ -878,7 +878,7 @@ const SURFACES: readonly Surface[] = [
     },
   },
   {
-    name: "38-refusal-detail",
+    name: "40-refusal-detail",
     title: "A refused edit's detail, its complete refusal read whole",
     open: async (page) => {
       const events = await openRefusals(page);
@@ -1088,6 +1088,37 @@ const SURFACES: readonly Surface[] = [
       await expect(list.getByRole("article")).toContainText(
         "Reason: Duplicate of the release-notes review",
       );
+    },
+  },
+  {
+    name: "36-action-items-expired",
+    title:
+      "Action items: items the engine expired, under State: Expired, each with why",
+    open: async (page) => {
+      const list = await openActionItems(page, "expiry-gallery");
+      const folded = page.getByRole("button", { name: /^Filters/u });
+      if (await folded.isVisible()) await folded.click();
+      await page
+        .getByRole("group", { name: "Filter action items" })
+        .getByLabel("State", { exact: true })
+        .selectOption("expired");
+      if (await folded.isVisible()) await folded.click();
+      await expect(list.getByRole("article")).toHaveCount(2);
+      await expect(list.getByText(/^The disk has space again/u)).toBeVisible();
+      await settleReads(page);
+    },
+  },
+  {
+    name: "37-action-items-failing-check",
+    title:
+      "Action items: an open item whose expiry check is failing, and one that expires at a time",
+    open: async (page) => {
+      const list = await openActionItems(page, "expiry-gallery");
+      await expect(list.getByRole("article")).toHaveCount(2);
+      await expect(
+        list.getByText(/^Check failed: the check exited with status 1/u),
+      ).toBeVisible();
+      await expect(list.getByText(/^Expires at /u)).toBeVisible();
     },
   },
 ];

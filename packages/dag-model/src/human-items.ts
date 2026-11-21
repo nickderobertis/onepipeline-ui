@@ -4,8 +4,10 @@ import {
   HUMAN_ITEM_PRIORITIES,
   type HumanItem,
   type HumanItemBatchReceipt,
+  type HumanItemCheckStatus,
   type HumanItemChoice,
   type HumanItemDetail,
+  type HumanItemExpiryCondition,
   type HumanItemFilter,
   type HumanItemHistoryEntry,
   type HumanItemReceipt,
@@ -63,6 +65,55 @@ const block = z.discriminatedUnion("scope", [
  */
 const provenance = z.enum(["manager", "user"]);
 
+/**
+ * One condition under which an open item stops mattering, tagged by `when`, as
+ * the engine bounds it. A time names exactly one of `at` and `after_seconds`; a
+ * stored item always holds `at`, which the item's own rule below says.
+ */
+const expiryCondition: z.ZodType<HumanItemExpiryCondition> = z
+  .discriminatedUnion("when", [
+    z.strictObject({
+      when: z.literal("time"),
+      at: z.iso.datetime({ offset: true }).optional(),
+      after_seconds: z.number().int().min(1).optional(),
+      reason: prose.optional(),
+    }),
+    z.strictObject({
+      when: z.literal("run"),
+      run: prose,
+      on: z.enum(["settled", "ended"]),
+      reason: prose.optional(),
+    }),
+    z.strictObject({
+      when: z.literal("node"),
+      run: prose,
+      node: prose,
+      reason: prose.optional(),
+    }),
+    z.strictObject({
+      when: z.literal("check"),
+      command: z.array(z.string()).min(1),
+      cwd: z
+        .string()
+        .regex(/^(\/|\\|[A-Za-z]:[\\/])/u)
+        .optional(),
+      timeout_seconds: z.number().int().min(1).max(60).optional(),
+      interval_seconds: z.number().int().min(10).max(86400).optional(),
+      reason: prose.optional(),
+    }),
+  ])
+  .superRefine((condition, context) => {
+    const problem =
+      condition.when === "time" &&
+      (condition.at === undefined) === (condition.after_seconds === undefined)
+        ? "a time names exactly one of at and after_seconds"
+        : condition.when === "check" && !/\S/u.test(condition.command[0] ?? "")
+          ? "a check's program is not blank"
+          : undefined;
+    if (problem !== undefined)
+      context.addIssue({ code: "custom", message: problem });
+  });
+
 const resolution = z.strictObject({
   actor: z.string(),
   on_behalf_of: nullableString,
@@ -70,6 +121,8 @@ const resolution = z.strictObject({
   choice: nullableString.optional(),
   reason: nullableString,
   provenance: provenance.optional(),
+  // Only an expired item's names the condition that held, as the item stored it.
+  condition: expiryCondition.nullable().optional(),
 });
 
 /** One answer a question offers, as the engine bounds it. */
@@ -83,11 +136,66 @@ const choice: z.ZodType<HumanItemChoice> = z.strictObject({
 });
 
 /**
+ * Whether two conditions are the one condition: the engine compares a stored
+ * condition with the one an expiry names field by field.
+ */
+function sameCondition(
+  a: HumanItemExpiryCondition,
+  b: HumanItemExpiryCondition,
+): boolean {
+  const fields = (condition: HumanItemExpiryCondition) =>
+    JSON.stringify(
+      Object.entries(condition).sort(([x], [y]) => (x < y ? -1 : 1)),
+    );
+  return fields(a) === fields(b);
+}
+
+/**
+ * Whether an expired item's resolution is the engine's own retirement: no
+ * person's words, a reason, and one of the item's own conditions as the one that
+ * held — and whether only an expired item's names one; and whether every stored
+ * condition is resolved, a time to its `at` and a check to its `cwd`.
+ */
+function expiryProblem(item: {
+  state: string;
+  resolution: z.infer<typeof resolution> | null;
+  expiry?: readonly HumanItemExpiryCondition[] | undefined;
+}): string | undefined {
+  const conditions = item.expiry ?? [];
+  if (
+    conditions.some(
+      (condition) =>
+        (condition.when === "time" && condition.after_seconds !== undefined) ||
+        (condition.when === "check" && condition.cwd === undefined),
+    )
+  )
+    return "a stored condition holds its time's at and its check's cwd";
+  const settled = item.resolution;
+  const held = settled?.condition ?? undefined;
+  if (item.state !== "expired")
+    return held === undefined
+      ? undefined
+      : "only an expired item's resolution names the condition that held";
+  if (settled === null) return undefined;
+  return settled.actor === "engine" &&
+    settled.on_behalf_of === null &&
+    settled.text === null &&
+    (settled.choice ?? null) === null &&
+    (settled.provenance ?? "manager") === "manager" &&
+    settled.reason !== null &&
+    /\S/u.test(settled.reason) &&
+    held !== undefined &&
+    conditions.some((condition) => sameCondition(condition, held))
+    ? undefined
+    : "an expiry is the engine's, with a reason and one of the item's conditions";
+}
+
+/**
  * Whether `item`'s kind, state, resolution and approval agree, as the engine's
  * own decoder rules: an open item has no resolution and a resolved one has one;
  * a task is completed and a question answered, never the reverse; an answer
  * carries a choice the question offers, text, or both, and no reason, a completion no reason and any comment not blank,
- * a dismissal no text; and
+ * a dismissal no text; an expiry is the engine's own; and
  * only a task carries an approval reference.
  */
 function lifecycleProblem(item: {
@@ -96,7 +204,10 @@ function lifecycleProblem(item: {
   approval: unknown;
   resolution: z.infer<typeof resolution> | null;
   choices?: readonly HumanItemChoice[] | undefined;
+  expiry?: readonly HumanItemExpiryCondition[] | undefined;
 }): string | undefined {
+  const expired = expiryProblem(item);
+  if (expired !== undefined) return expired;
   const { kind, state, resolution: settled } = item;
   const offered = item.choices ?? [];
   if (kind === "task" && offered.length > 0)
@@ -128,6 +239,7 @@ function lifecycleProblem(item: {
       settled.reason === null
       ? undefined
       : "a completion is a task's, with no reason and any comment not blank";
+  if (state === "expired") return undefined;
   return settled.text === null ? undefined : "a dismissal carries no text";
 }
 
@@ -146,9 +258,10 @@ export const humanItemSchema: z.ZodType<HumanItem> = z
     approval: z
       .strictObject({ board_copy: z.string(), key: z.string() })
       .nullable(),
-    state: z.enum(["open", "answered", "completed", "dismissed"]),
+    state: z.enum(["open", "answered", "completed", "dismissed", "expired"]),
     resolution: resolution.nullable(),
     tracker: z.strictObject({ task: z.string(), url: z.url() }).nullable(),
+    expiry: z.array(expiryCondition).max(8).optional(),
     created_at: z.string(),
     updated_at: z.string(),
   })
@@ -236,7 +349,9 @@ function reopenProblem(
     item.state === "open" ||
     item.state === "answered" ||
     standsForStep(item) ||
-    item.resolution?.actor === "engine";
+    // The engine retired an expired item, and reopening it takes back no
+    // person's resolution; any other the engine resolved cannot be.
+    (item.state !== "expired" && item.resolution?.actor === "engine");
   if (refused)
     return available ? "this item's state cannot be reopened" : undefined;
   return available || (item.state === "completed" && item.approval !== null)
@@ -244,10 +359,50 @@ function reopenProblem(
     : "nothing about this item's state refuses a reopen";
 }
 
+/**
+ * The last run of one of an item's check conditions, in the result protocol's
+ * words: it held, not yet, or it failed — and only a failure carries a detail.
+ */
+const checkStatus: z.ZodType<HumanItemCheckStatus> = z
+  .strictObject({
+    condition: z.number().int().nonnegative(),
+    last_run_at: prose,
+    outcome: z.enum(["holds", "not-yet", "failed"]),
+    detail: nullableString,
+  })
+  .superRefine(({ outcome, detail }, context) => {
+    if ((outcome === "failed") !== (detail !== null))
+      context.addIssue({
+        code: "custom",
+        message: "a check carries a detail exactly when it failed",
+      });
+  });
+
+/** Whether each check names one of the item's own check conditions. */
+function checksProblem(
+  item: HumanItem,
+  checks: readonly HumanItemCheckStatus[] | undefined,
+): string | undefined {
+  const conditions = item.expiry ?? [];
+  return (checks ?? []).every(
+    ({ condition }) => conditions[condition]?.when === "check",
+  )
+    ? undefined
+    : "a check names one of the item's check conditions";
+}
+
 export const humanItemViewSchema: z.ZodType<HumanItemView> = z
-  .strictObject({ item: humanItemSchema, blocked, reopen })
-  .superRefine(({ item, blocked: impact, reopen: answer }, context) => {
-    const problem = impactProblem(item, impact) ?? reopenProblem(item, answer);
+  .strictObject({
+    item: humanItemSchema,
+    blocked,
+    reopen,
+    checks: z.array(checkStatus).optional(),
+  })
+  .superRefine(({ item, blocked: impact, reopen: answer, checks }, context) => {
+    const problem =
+      impactProblem(item, impact) ??
+      reopenProblem(item, answer) ??
+      checksProblem(item, checks);
     if (problem !== undefined)
       context.addIssue({ code: "custom", message: problem });
   });
@@ -294,6 +449,7 @@ const historyEntry: z.ZodType<HumanItemHistoryEntry> = z.strictObject({
     "human-item-auto-resolved",
     "human-item-reopened",
     "human-item-noted",
+    "human-item-expired",
   ]),
   // An RFC 3339 instant, which the page shows as an age; never shown as served.
   at: z.iso.datetime({ offset: true }),
@@ -310,11 +466,13 @@ export const humanItemDetailSchema: z.ZodType<HumanItemDetail> = z
     reopen,
     // Oldest first, as the engine served it; the browser derives none of it.
     history: z.array(historyEntry).optional(),
+    checks: z.array(checkStatus).optional(),
   })
   .superRefine((detail, context) => {
     const problem =
       impactProblem(detail.item, detail.blocked) ??
       reopenProblem(detail.item, detail.reopen) ??
+      checksProblem(detail.item, detail.checks) ??
       nodesProblem(detail);
     if (problem !== undefined)
       context.addIssue({ code: "custom", message: problem });
@@ -355,7 +513,7 @@ export const humanItemFilterSchema: z.ZodType<HumanItemFilter> = z.strictObject(
     blocking: z.boolean().nullable().optional(),
     priority: z.enum(HUMAN_ITEM_PRIORITIES).nullable().optional(),
     state: z
-      .enum(["open", "answered", "completed", "dismissed"])
+      .enum(["open", "answered", "completed", "dismissed", "expired"])
       .nullable()
       .optional(),
     session: z.string().nullable().optional(),

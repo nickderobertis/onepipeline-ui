@@ -915,3 +915,16 @@ named on the wire by its file name and served whole by the artifact route, and t
 own span lists every refusal whatever node it names. A patch move within 0.116, so the
 re-exported engine types do not change. Its oneagentgraph, onejudge, oneharness-core,
 onemessagebus, onetaskgraph and onevcs requirements are the ones 0.116.0 resolved.
+
+0.117.0 is the engine whose human items expire: an asker declares time, run, node and
+check conditions on an item, and the engine retires an open item as `expired` once one
+holds, recording the condition and its reason. `HumanItemState` gains `expired`, the
+event action `human-item-expired`, `HumanItem` its `expiry`, `HumanItemResolution` its
+`condition`, and `HumanItemView` and `HumanItemDetail` their `checks`; `query` and `show`
+sweep before they answer, and `HumanItems::expire_due` is the sweep. This crate moves to
+it so that Action items shows, filters and reopens expired items and an open item's
+failing check, and so that its live loop sweeps on its own cadence while an Action items
+view is held, retiring an item on a page nothing else reads. The move is announced as a
+break: the re-exported human-item types gain fields and variants. Its oneagentgraph,
+onejudge, oneharness-core, onemessagebus, onetaskgraph and onevcs requirements are the
+ones 0.116.0 resolved.

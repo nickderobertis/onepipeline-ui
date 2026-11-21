@@ -232,6 +232,7 @@ const OWN_SERVERS = [
   "**/dag-ui-human-items.spec.ts",
   "**/dag-ui-update-settings.spec.ts",
   "**/dag-ui-attest.spec.ts",
+  "**/dag-ui-human-items-expiry.spec.ts",
   "**/dag-ui-event-list.spec.ts",
   "**/dag-ui-event-details.spec.ts",
 ];

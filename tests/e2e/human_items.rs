@@ -507,6 +507,23 @@ impl World {
         }
     }
 
+    /// A server over this world's runs root, acting as `session`, whose log the
+    /// journey reads.
+    fn serve_logged(&self, session: &str) -> Serving {
+        let (served, _) = self.workspace_view();
+        let environment = self.environment();
+        let environment: Vec<(&str, &str)> = environment
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        Serving::start_in_as_with_env_removing_logged(
+            served,
+            session,
+            &environment,
+            &Self::foreign(),
+        )
+    }
+
     /// A server over this world's runs root, acting as `session`, whose poll
     /// never comes round again once a journey is under way: what such a server
     /// shows of a later write it read for some other reason.
@@ -3850,4 +3867,222 @@ fn a_host_that_has_not_enabled_human_items_refuses_the_view() {
         "human-items unavailable against live state"
     );
     subscribe(&server, &json!({ "view": { "type": "sidebar" } }));
+}
+
+/// The instant `seconds` from now, as the RFC 3339 a time condition names.
+fn instant_from_now(seconds: i64) -> String {
+    (time::OffsetDateTime::now_utc() + time::Duration::seconds(seconds))
+        .format(&time::format_description::well_known::Rfc3339)
+        .expect("an RFC 3339 instant")
+}
+
+/// Wait until the wall clock is past `at`, an instant a time condition names: the
+/// condition under test coming due, never a bound on how long anything takes.
+fn wait_past(at: &str) {
+    let at = time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339)
+        .expect("an RFC 3339 instant");
+    while time::OffsetDateTime::now_utc() <= at + time::Duration::seconds(1) {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// An item raised through the real CLI that expires at `at`.
+fn raised_expiring(world: &World, dedup: &str, at: &str) -> String {
+    let session = "manager-of-items";
+    let mut raised = input(
+        session,
+        dedup,
+        "task",
+        "medium",
+        json!({"scope": "nothing"}),
+    );
+    raised["expiry"] = json!([{ "when": "time", "at": at }]);
+    world.raise(session, &raised)
+}
+
+/// The human-item journal's records, read from the file itself: no read that
+/// sweeps expiry is made to look.
+fn journal_records(world: &World) -> Vec<Value> {
+    std::fs::read_to_string(world.root.join(onepipeline::human_items::JOURNAL_PATH))
+        .unwrap_or_default()
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("a journal record"))
+        .collect()
+}
+
+/// Whether `record` is the engine's expiry of item `id`.
+fn expires(record: &Value, id: &str) -> bool {
+    record.to_string().contains("\"human-item-expired\"") && record.to_string().contains(id)
+}
+
+/// With an Action items view held and nothing writing the journal, the poller
+/// sweeps a time condition that came due and patches the item out of the open
+/// view; the only record added is the engine's expiry, which this server wrote.
+#[test]
+fn a_held_human_items_view_sweeps_a_due_expiry_and_patches_it_out() {
+    let world = World::new();
+    let at = instant_from_now(3);
+    let id = raised_expiring(&world, "expiring", &at);
+    let server = world.serve(Some("manager-of-items"));
+    let mut tab = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
+    assert_eq!(
+        ids(tab.state["visible"]["items"].as_array().expect("items")),
+        std::slice::from_ref(&id)
+    );
+    let before = journal_records(&world);
+    assert!(!before.iter().any(|record| expires(record, &id)));
+
+    // No route is asked and no CLI runs: a read of either would sweep it itself.
+    while tab.state["visible"]["items"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty())
+    {
+        assert!(
+            tab.receive(PATIENCE).is_some(),
+            "the stream went quiet with {id} still open: {}",
+            tab.state["visible"]
+        );
+    }
+    let after = journal_records(&world);
+    assert_eq!(after[..before.len()], before[..], "the journal only grew");
+    let added = &after[before.len()..];
+    assert_eq!(added.len(), 1, "{added:?}");
+    assert!(expires(&added[0], &id), "{added:?}");
+
+    // What the tab now holds is what the routes answer.
+    tab.until_current(&server);
+    let expired = items(&http::get(server.address, "/api/human-items?state=expired"));
+    assert_eq!(ids(&expired), [id]);
+    assert_eq!(
+        expired[0]["item"]["resolution"]["condition"],
+        json!({ "when": "time", "at": at })
+    );
+}
+
+/// A tab holding only State Expired is swept for too: the item due is in no view a
+/// tab holds, so only a poller that sweeps for a view of any state but open moves
+/// it into the one that is.
+#[test]
+fn a_held_expired_view_alone_is_swept_and_gains_the_item_that_came_due() {
+    let world = World::new();
+    let at = instant_from_now(3);
+    let id = raised_expiring(&world, "into-expired", &at);
+    let server = world.serve(Some("manager-of-items"));
+    let mut tab = HumanItemsTab::open(
+        &server,
+        json!({ "type": "human-items", "filter": { "state": "expired" } }),
+    );
+    assert_eq!(tab.state["visible"]["items"], json!([]));
+
+    // No route is asked and no CLI runs: a read of either would sweep it itself.
+    while tab.state["visible"]["items"]
+        .as_array()
+        .is_some_and(Vec::is_empty)
+    {
+        assert!(
+            tab.receive(PATIENCE).is_some(),
+            "the stream went quiet with {id} not yet expired: {}",
+            tab.state["visible"]
+        );
+    }
+    assert_eq!(
+        ids(tab.state["visible"]["items"].as_array().expect("items")),
+        std::slice::from_ref(&id)
+    );
+    assert!(journal_records(&world)
+        .iter()
+        .any(|record| expires(record, &id)));
+}
+
+/// Without an Action items view, the poller sweeps nothing: the server starts
+/// once the item is due, so the first poll of a server that swept regardless
+/// would sweep it, and the rows sent for two runs written afterwards prove those
+/// polls ran. The journal holds no expiry.
+#[test]
+fn without_a_human_items_view_the_poller_sweeps_nothing() {
+    let world = World::new();
+    let at = instant_from_now(2);
+    let id = raised_expiring(&world, "unwatched", &at);
+    wait_past(&at);
+    let server = world.serve(Some("manager-of-items"));
+    let mut sidebar = http::stream(
+        server.address,
+        &format!(
+            "/api/v2/events?subscription={}",
+            subscribe(&server, &json!({ "view": { "type": "sidebar" } }))["subscription"]
+                .as_str()
+                .expect("an id")
+        ),
+        None,
+    );
+    for run in ["after-due", "and-after-that"] {
+        // llmlint: ignore[tests_mirror_real_usage] the run is not the subject: a row the sidebar is sent for it is the proof the poller ticked, and a run launched through the engine would start a driver that sweeps human items itself, which is exactly what this journey must rule out.
+        fixture_run::write(&world.root, run);
+        loop {
+            let frame = sidebar
+                .frame_within(PATIENCE)
+                .unwrap_or_else(|| panic!("no row was sent for {run}"));
+            if frame.event == "run.changed" && frame.data.contains(run) {
+                break;
+            }
+        }
+    }
+    assert!(
+        !journal_records(&world)
+            .iter()
+            .any(|record| expires(record, &id)),
+        "a server no tab of which shows human items swept them"
+    );
+}
+
+/// A sweep the engine refuses is said, and the next one due is made: once the
+/// store reads again the item comes due, is expired and leaves the open view on
+/// the same stream.
+#[test]
+fn a_refused_expiry_sweep_is_said_and_made_again_once_the_store_reads() {
+    let world = World::new();
+    let at = instant_from_now(2);
+    let id = raised_expiring(&world, "refused-sweep", &at);
+    let server = world.serve_logged("manager-of-items");
+    let mut tab = HumanItemsTab::open(&server, json!({ "type": "human-items" }));
+    assert_eq!(
+        ids(tab.state["visible"]["items"].as_array().expect("items")),
+        std::slice::from_ref(&id)
+    );
+
+    // A directory where the engine opens its index lock refuses every read and
+    // sweep; the journal itself is untouched, so the view is not read again.
+    // llmlint: ignore-block[tests_mirror_real_usage] no public interface makes the engine refuse a sweep, and the refusal and its recovery are the subject; the lock path is the one `an_open_view_rides_out_a_journal_it_cannot_read_and_catches_up_on_the_same_stream` swaps for a refused read, and everything after it is read through the server's own stream.
+    let lock = world.root.join("human-items").join("index.lock");
+    let deadline = Instant::now() + PATIENCE;
+    while std::fs::remove_file(&lock)
+        .and_then(|()| std::fs::create_dir(&lock))
+        .is_err()
+    {
+        assert!(Instant::now() < deadline, "a poll kept the index lock");
+    }
+    wait_past(&at);
+    server.wait_until_said("human items could not be swept for expiry");
+    assert!(
+        !journal_records(&world)
+            .iter()
+            .any(|record| expires(record, &id)),
+        "a refused sweep wrote nothing"
+    );
+
+    std::fs::remove_dir(&lock).expect("give the lock back");
+    // llmlint: ignore-end[tests_mirror_real_usage]
+    while tab.state["visible"]["items"]
+        .as_array()
+        .is_some_and(|items| !items.is_empty())
+    {
+        assert!(
+            tab.receive(PATIENCE).is_some(),
+            "the stream went quiet with {id} still open: {}",
+            tab.state["visible"]
+        );
+    }
+    assert!(journal_records(&world)
+        .iter()
+        .any(|record| expires(record, &id)));
 }

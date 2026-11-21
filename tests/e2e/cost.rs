@@ -33,6 +33,7 @@ use serde_json::json;
 use crate::cost_support::{Counts, Traced, TRACED_POLL_MS};
 use crate::fixture_run;
 use crate::http;
+use crate::sibling;
 
 /// A run id of a fixed width, so two stores' runs sort the same way and their
 /// summary documents are the same size.
@@ -804,7 +805,10 @@ fn now() -> f64 {
         .as_secs_f64()
 }
 
-/// A traced server with human items on over an empty journal, and that journal.
+/// A traced server with human items on, and their journal, which holds one open
+/// item raised through the engine's CLI that expires an hour from now: an item a
+/// held view shows whose expiry no sweep could act on before then, so a poller
+/// that swept it anyway would read the journal on a tick that changed nothing.
 fn serving_human_items() -> (Traced, std::path::PathBuf) {
     let (workspace, runs) = fixture_run::workspace();
     let journal = runs.join(onepipeline::human_items::JOURNAL_PATH);
@@ -818,6 +822,40 @@ fn serving_human_items() -> (Traced, std::path::PathBuf) {
         "human_items:\n  enabled: true\n",
     )
     .expect("the human-items configuration");
+    let raise = workspace.path().join("raise.json");
+    std::fs::write(
+        &raise,
+        json!({
+            "schema_version": 1,
+            "dedup_key": "an-hour-out",
+            "kind": "task",
+            "title": "Settle what is due in an hour",
+            "body": "Nothing the poller can sweep before then.",
+            "priority": "medium",
+            "owner": {"session": "cost-owner", "run": null, "plan": null},
+            "block": {"scope": "nothing"},
+            "approval": null,
+            "expiry": [{"when": "time", "after_seconds": 3600}],
+        })
+        .to_string(),
+    )
+    .expect("the raise input");
+    let raised = sibling::run_with_env(
+        &runs,
+        Some("cost-owner"),
+        &[
+            "human-items",
+            "raise",
+            "--input",
+            raise.to_str().expect("utf-8"),
+        ],
+        &[("XDG_CONFIG_HOME", config.to_str().expect("utf-8"))],
+    );
+    assert!(
+        raised.status.success(),
+        "the item an hour out was not raised: {}",
+        String::from_utf8_lossy(&raised.stderr)
+    );
     let serving = Traced::start_with_environment(
         workspace,
         TRACED_POLL_MS,

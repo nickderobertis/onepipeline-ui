@@ -2518,7 +2518,8 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 
 .human-item-priority,
 .human-item-kind,
-.human-item-blocking {
+.human-item-blocking,
+.human-item-expired-badge {
   flex: none;
   padding: 0 6px;
   border: 1px solid var(--border);
@@ -2541,6 +2542,66 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 
 .human-item-kind {
   color: var(--muted-foreground);
+}
+
+/* An expired card is told from an open one at a glance: its badge in the info
+   colour, a muted surface with an info edge, and its title and body dimmed. They
+   are dimmed by opacity, because the title's colour is set by a rule of its own;
+   each stays at AA contrast on the muted surface in both palettes. */
+.human-item-expired-badge {
+  border-color: var(--info);
+  background: var(--info-surface);
+  color: var(--info);
+  font-weight: 600;
+}
+
+.human-item-card[data-expired="true"] > .otg-card__surface {
+  box-shadow: inset 3px 0 var(--info);
+  background: var(--muted);
+}
+
+.human-item-card[data-expired="true"] .otg-card__title {
+  opacity: 0.75;
+}
+
+.human-item-card[data-expired="true"] .otg-markdown {
+  opacity: 0.9;
+}
+
+/* What an open item expires on, and why an expired one did: quiet lines. */
+.human-item-expiry,
+.human-item-expiry-reason {
+  margin: 2px 0 0;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
+/* A failing check is one line on its card, whatever its stderr; the detail pane
+   shows all of it. */
+.human-item-check-failed {
+  overflow: hidden;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.human-item-detail-expiry ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.human-item-check-detail {
+  margin: 2px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.human-item-check-detail[data-failed="true"] {
+  color: var(--destructive);
 }
 
 .human-item-action,
