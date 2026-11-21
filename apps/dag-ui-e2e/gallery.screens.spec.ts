@@ -823,7 +823,7 @@ const SURFACES: readonly Surface[] = [
       pointAtPlot(page, page.getByRole("region", { name: "Graph timeline" })),
   },
   {
-    name: "35-conversation-item",
+    name: "36-conversation-item",
     title: "A conversation item, opened at that item in its conversation",
     open: async (page) => {
       await openCorpus(
@@ -846,7 +846,7 @@ const SURFACES: readonly Surface[] = [
     },
   },
   {
-    name: "36-refusal-rows",
+    name: "37-refusal-rows",
     title: "Refused edits as rows of the run's event list",
     open: async (page) => {
       const events = await openRefusals(page);
@@ -857,7 +857,7 @@ const SURFACES: readonly Surface[] = [
     },
   },
   {
-    name: "37-refusal-detail",
+    name: "38-refusal-detail",
     title: "A refused edit's detail, its complete refusal read whole",
     open: async (page) => {
       const events = await openRefusals(page);
@@ -1035,6 +1035,36 @@ const SURFACES: readonly Surface[] = [
       await expect(history.getByText(/^Note by you · /u)).toBeVisible();
       await history.scrollIntoViewIfNeeded();
       await settleReads(page);
+    },
+  },
+  {
+    name: "35-action-items-dismissed-reason",
+    title: "Action items: a dismissed item with the reason saved with it",
+    open: async (page) => {
+      const list = await openActionItems(page, "realistic");
+      await page
+        .getByRole("button", { name: /^Dismiss: / })
+        .first()
+        .click();
+      const toast = resultToast(page);
+      await toast.getByRole("button", { name: "Add reason" }).click();
+      await toast
+        .getByRole("textbox", { name: "Reason" })
+        .fill("Duplicate of the release-notes review; tracked there.");
+      await toast.getByRole("button", { name: "Send" }).click();
+      await expect(toast).toContainText("Reason saved");
+      await toast.getByRole("button", { name: "Close" }).click();
+      const folded = page.getByRole("button", { name: /^Filters/u });
+      if (await folded.isVisible()) await folded.click();
+      await page
+        .getByRole("group", { name: "Filter action items" })
+        .getByLabel("State", { exact: true })
+        .selectOption("dismissed");
+      if (await folded.isVisible()) await folded.click();
+      await expect(list.getByRole("article")).toHaveCount(1);
+      await expect(list.getByRole("article")).toContainText(
+        "Reason: Duplicate of the release-notes review",
+      );
     },
   },
 ];

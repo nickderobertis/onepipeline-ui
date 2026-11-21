@@ -12,6 +12,7 @@ import {
   Fragment,
   type KeyboardEvent,
   type MouseEvent,
+  type ReactNode,
   useEffect,
   useId,
   useRef,
@@ -19,6 +20,7 @@ import {
 } from "react";
 import type { LiveHumanItems } from "../../lib/live-human-items";
 import { Timestamp } from "../../lib/Timestamp";
+import { formatParsedAbsolute, parseTimestamp } from "../../lib/time";
 import { HumanItemToast } from "./HumanItemToast";
 import type { Draft } from "./human-item-drafts";
 import {
@@ -41,19 +43,24 @@ import {
   PRIORITY_CHOICES,
   PRIORITY_OPTIONS,
   priorityLabel,
+  SORT_CHOICES,
+  SORT_OPTIONS,
   SOURCE_CHOICES,
+  type SortOrder,
   STATE_CHOICES,
   STATE_OPTIONS,
+  savedNote,
   sourceWords,
   stateLabel,
 } from "./human-items-model";
+import { type CardControl, ReopenAction } from "./ReopenAction";
 import { SendBar } from "./SendBar";
-import { useGroupBy } from "./useGroupBy";
 import {
   type HumanItemWrite,
   useHumanItems,
   type WriteState,
 } from "./useHumanItems";
+import { useListOrder } from "./useListOrder";
 
 /** Marks every card control that belongs to the card-action group. */
 const CARD_ACTION = "data-card-action";
@@ -110,7 +117,7 @@ export function HumanItemsPage({
     choice.state,
     JSON.stringify(choice),
   );
-  const { groupBy, setGroupBy } = useGroupBy();
+  const { groupBy, setGroupBy, sort, setSort } = useListOrder();
   const [room, setRoom] = useState(0);
   const [sendRoom, setSendRoom] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
@@ -122,11 +129,15 @@ export function HumanItemsPage({
   else if (lastShown.current?.item.id !== selectedId)
     lastShown.current = undefined;
 
+  const shownId = useRef(selectedId);
+  shownId.current = selectedId;
   const write: Write = (view, change) => {
-    // The item is resolved as far as this page is concerned: its detail closes
-    // with its card, rather than lingering on something no one is to act on.
-    if (view.item.id === selectedId) setSelectedId(undefined);
-    items.write(view, change);
+    // Once the engine took it, the item is resolved as far as this page is
+    // concerned: its detail closes with its card, rather than lingering on
+    // something no one is to act on. Until then both stay, the press pending.
+    items.write(view, change, () => {
+      if (shownId.current === view.item.id) setSelectedId(undefined);
+    });
   };
 
   // A write that failed put its card back: bring it into view above the toast.
@@ -138,7 +149,7 @@ export function HumanItemsPage({
       ?.scrollIntoView({ block: "nearest" });
   }, [returned]);
 
-  const groups = groupItems(items.items ?? [], groupBy);
+  const groups = groupItems(items.items ?? [], groupBy, sort);
   return (
     <section
       aria-label="Action items"
@@ -151,6 +162,8 @@ export function HumanItemsPage({
         groupBy={groupBy}
         onChange={setChoice}
         onGroupBy={setGroupBy}
+        onSort={setSort}
+        sort={sort}
       />
       <div className="human-items-body">
         <section aria-label="Action item list" className="human-items-list">
@@ -308,19 +321,24 @@ function roveCardActions(
 }
 
 /**
- * Group by and the filters. At phone width they fold behind one Filters button,
- * closed until pressed, which counts the choices that differ from the defaults.
+ * Group by, Sort and the filters. At phone width they fold behind one Filters
+ * button, closed until pressed, which counts the choices that differ from the
+ * defaults; Sort stays out beside it, one tap away, and is not counted.
  */
 function Filters({
   choice,
   groupBy,
+  sort,
   onChange,
   onGroupBy,
+  onSort,
 }: {
   readonly choice: FilterChoice;
   readonly groupBy: GroupBy;
+  readonly sort: SortOrder;
   readonly onChange: (choice: FilterChoice) => void;
   readonly onGroupBy: (groupBy: GroupBy) => void;
+  readonly onSort: (sort: SortOrder) => void;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -346,6 +364,18 @@ function Filters({
           </span>
         )}
       </button>
+      <select
+        aria-label="Sort"
+        className="human-items-sort-toggle"
+        onChange={(event) => onSort(sortOf(event.target.value))}
+        value={sort}
+      >
+        {SORT_OPTIONS.map(({ value, label }) => (
+          <option key={value} value={value}>
+            Sort: {label}
+          </option>
+        ))}
+      </select>
       <fieldset className="human-items-filters" id={`${id}-filters`}>
         <legend className="sr-only">Filter action items</legend>
         <label htmlFor={`${id}-group`}>Group by</label>
@@ -357,6 +387,21 @@ function Filters({
           value={groupBy}
         >
           {GROUP_OPTIONS.map(({ value, label }) => (
+            <option key={value} value={value}>
+              {label}
+            </option>
+          ))}
+        </select>
+        <label className="human-items-sort-label" htmlFor={`${id}-sort`}>
+          Sort
+        </label>
+        <select
+          className="human-items-sort-select"
+          id={`${id}-sort`}
+          onChange={(event) => onSort(sortOf(event.target.value))}
+          value={sort}
+        >
+          {SORT_OPTIONS.map(({ value, label }) => (
             <option key={value} value={value}>
               {label}
             </option>
@@ -446,11 +491,20 @@ function Filters({
   );
 }
 
-/** A click on the card itself selects it; a click on one of its controls does not. */
+function sortOf(value: string): SortOrder {
+  return oneOf(SORT_CHOICES, value) ?? "default";
+}
+
+/**
+ * A click on the card itself selects it; a click on one of its controls, or the
+ * one a finger sends on lifting from a long press of its raised time, does not.
+ */
 function selectsCard(event: MouseEvent<HTMLElement>): boolean {
   return (
     event.target instanceof Element &&
-    event.target.closest("a, button, textarea, input, select") === null
+    event.target.closest(
+      'a, button, textarea, input, select, [data-long-pressed="true"]',
+    ) === null
   );
 }
 
@@ -503,16 +557,25 @@ function HumanItemCard({
   const { item } = view;
   const open = item.state === "open";
   const blocked = blockedSummary(view);
-  const meta = [
-    ...(open ? [] : [stateLabel(item)]),
-    ...(blocked ? [blocked] : []),
-    ...(groupBy === "source" ? [] : [`Source: ${sourceWords(item)}`]),
+  const meta: readonly { readonly key: string; readonly part: ReactNode }[] = [
+    { key: "raised", part: <RaisedAt at={item.created_at} /> },
+    ...(open ? [] : [{ key: "state", part: stateLabel(item) }]),
+    ...(blocked ? [{ key: "blocked", part: blocked }] : []),
+    ...(groupBy === "source"
+      ? []
+      : [{ key: "source", part: `Source: ${sourceWords(item)}` }]),
   ];
   const offers = (item.choices?.length ?? 0) > 0;
+  const note = savedNote(item);
   return (
     <TaskCard
       actions={
-        <CardActions item={view} onSelect={onSelect} onWrite={onWrite} />
+        <CardActions
+          item={view}
+          onSelect={onSelect}
+          onWrite={onWrite}
+          state={state}
+        />
       }
       badges={<Badges groupBy={groupBy} view={view} />}
       body={item.body}
@@ -521,16 +584,12 @@ function HumanItemCard({
       data-blocking={isBlocking(item)}
       data-item-id={item.id}
       data-selected={selected}
-      meta={
-        meta.length === 0
-          ? undefined
-          : meta.map((part, index) => (
-              <Fragment key={part}>
-                {index > 0 && " · "}
-                <span>{part}</span>
-              </Fragment>
-            ))
-      }
+      meta={meta.map(({ key, part }, index) => (
+        <Fragment key={key}>
+          {index > 0 && " · "}
+          <span>{part}</span>
+        </Fragment>
+      ))}
       onClick={(event) => {
         if (selectsCard(event)) onSelect();
       }}
@@ -559,6 +618,7 @@ function HumanItemCard({
         />
       )}
       <AnsweredBlock view={view} />
+      {note && <SavedNote label={note.label} text={note.text} />}
       <RefusalNote reason={answering.refusals[item.id]} />
       <WriteStatus state={state} />
     </TaskCard>
@@ -571,15 +631,18 @@ function HumanItemCard({
  */
 function CardActions({
   item: view,
+  state,
   onSelect,
   onWrite,
 }: {
   readonly item: HumanItemView;
+  readonly state?: WriteState;
   readonly onSelect: () => void;
   readonly onWrite: Write;
 }) {
   const { item } = view;
   const open = item.state === "open";
+  const pending = state?.pending;
   return (
     <>
       {item.tracker && (
@@ -606,30 +669,165 @@ function CardActions({
         Details
       </button>
       {open && item.kind === "task" && (
-        <button
+        <WriteButton
+          action="complete"
+          control={CARD_CONTROL}
           className="human-item-action"
-          data-card-action=""
-          tabIndex={-1}
-          onClick={() => onWrite(view, { action: "complete" })}
-          type="button"
-          aria-label={`Complete: ${item.title}`}
-        >
-          Complete
-        </button>
+          name={`Complete: ${item.title}`}
+          onPress={() => onWrite(view, { action: "complete" })}
+          pending={pending}
+        />
       )}
       {open && (
-        <button
+        <WriteButton
+          action="dismiss"
+          control={CARD_CONTROL}
           className="human-item-action"
-          data-card-action=""
-          tabIndex={-1}
-          onClick={() => onWrite(view, { action: "dismiss" })}
-          type="button"
-          aria-label={`Dismiss: ${item.title}`}
-        >
-          Dismiss
-        </button>
+          name={`Dismiss: ${item.title}`}
+          onPress={() => onWrite(view, { action: "dismiss" })}
+          pending={pending}
+        />
+      )}
+      {!open && (
+        <ReopenAction
+          busyLabel="Reopening…"
+          className="human-item-action"
+          control={CARD_CONTROL}
+          disabled={pending !== undefined}
+          label="Reopen"
+          item={item.title}
+          onPress={() => onWrite(view, { action: "reopen" })}
+          reopen={view.reopen}
+          sending={pending === "reopen"}
+        />
       )}
     </>
+  );
+}
+
+/** What puts a card's control in the card-action group, out of the Tab sequence. */
+const CARD_CONTROL: CardControl = { [CARD_ACTION]: "", tabIndex: -1 };
+
+const WRITE_WORDS = {
+  complete: { label: "Complete", busy: "Completing…" },
+  dismiss: { label: "Dismiss", busy: "Dismissing…" },
+} as const;
+
+/**
+ * Complete or Dismiss: while its write is out it reads as pending, busy and
+ * disabled, and while any write on the item is out it waits for that one.
+ */
+function WriteButton({
+  action,
+  name,
+  pending,
+  onPress,
+  className,
+  control = {},
+  children,
+}: {
+  readonly action: keyof typeof WRITE_WORDS;
+  readonly name?: string;
+  readonly pending: WriteState["pending"];
+  readonly onPress: () => void;
+  readonly className?: string;
+  readonly control?: CardControl;
+  /** Wraps the button, for one drawn by the design system's own `Button`. */
+  readonly children?: (props: WriteButtonProps) => ReactNode;
+}) {
+  const sending = pending === action;
+  const words = WRITE_WORDS[action];
+  const props: WriteButtonProps = {
+    ...control,
+    "aria-busy": sending,
+    "aria-label": sending ? undefined : name,
+    className,
+    disabled: pending !== undefined,
+    onClick: onPress,
+    type: "button",
+    children: sending ? words.busy : words.label,
+  };
+  return children ? children(props) : <button {...props} />;
+}
+
+interface WriteButtonProps extends CardControl {
+  readonly "aria-busy": boolean;
+  readonly "aria-label": string | undefined;
+  readonly className: string | undefined;
+  readonly disabled: boolean;
+  readonly onClick: () => void;
+  readonly type: "button";
+  readonly children: string;
+}
+
+/**
+ * When an item was raised, as an age on its card, with the exact moment on
+ * hover — and on a long press, which is the one a phone has.
+ */
+function RaisedAt({ at }: { readonly at: string }) {
+  const [held, setHeld] = useState(false);
+  // Set from the moment a long press shows the moment until the next press:
+  // the click a lifted finger sends after it is no press on the card.
+  const [pressedLong, setPressedLong] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const tip = useId();
+  const parsed = parseTimestamp(at);
+  const cancel = () => clearTimeout(timer.current);
+  return (
+    <span
+      aria-describedby={held ? tip : undefined}
+      className="human-item-raised"
+      data-long-pressed={pressedLong}
+      // A press target of its own, out of the Tab sequence: a finger on the
+      // time is otherwise moved by the browser to the card's buttons just above.
+      tabIndex={-1}
+      onPointerCancel={cancel}
+      // A mouse shows the moment while it rests on the time, as a finger does
+      // on a long press, so both read the same tip rather than the native one
+      // only a mouse ever gets.
+      onPointerEnter={(event) => {
+        if (event.pointerType === "mouse") setHeld(true);
+      }}
+      onPointerDown={(event) => {
+        setPressedLong(false);
+        if (event.pointerType === "mouse") return;
+        cancel();
+        timer.current = setTimeout(() => {
+          setHeld(true);
+          setPressedLong(true);
+        }, LONG_PRESS_MS);
+      }}
+      onPointerLeave={() => {
+        cancel();
+        setHeld(false);
+      }}
+      onPointerUp={cancel}
+    >
+      Raised <Timestamp at={at} relative />
+      {held && parsed !== undefined && (
+        <span className="human-item-raised-tip" id={tip} role="tooltip">
+          {formatParsedAbsolute(parsed)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** How long a press is held before it reads as a long press, in milliseconds. */
+const LONG_PRESS_MS = 500;
+
+/** A reason or comment a reader saved on resolving the item. */
+function SavedNote({
+  label,
+  text,
+}: {
+  readonly label: string;
+  readonly text: string;
+}) {
+  return (
+    <p className="human-item-note">
+      <span className="human-item-note-label">{label}:</span> {text}
+    </p>
   );
 }
 
@@ -838,23 +1036,33 @@ function DetailPane({
       <RefusalNote reason={answering.refusals[item.id]} />
       <div className="human-item-detail-actions">
         {open && item.kind === "task" && (
-          <Button
-            onClick={() => onWrite(shown, { action: "complete" })}
-            size="sm"
-            type="button"
+          <WriteButton
+            action="complete"
+            onPress={() => onWrite(shown, { action: "complete" })}
+            pending={state?.pending}
           >
-            Complete
-          </Button>
+            {(props) => <Button {...props} size="sm" />}
+          </WriteButton>
         )}
         {open && (
-          <Button
-            onClick={() => onWrite(shown, { action: "dismiss" })}
-            size="sm"
-            type="button"
-            variant="outline"
+          <WriteButton
+            action="dismiss"
+            onPress={() => onWrite(shown, { action: "dismiss" })}
+            pending={state?.pending}
           >
-            Dismiss
-          </Button>
+            {(props) => <Button {...props} size="sm" variant="outline" />}
+          </WriteButton>
+        )}
+        {!open && (
+          <ReopenAction
+            busyLabel="Reopening…"
+            className="human-item-detail-reopen"
+            disabled={state?.pending !== undefined}
+            label="Reopen"
+            onPress={() => onWrite(shown, { action: "reopen" })}
+            reopen={shown.reopen}
+            sending={state?.pending === "reopen"}
+          />
         )}
         <WriteStatus state={state} />
       </div>

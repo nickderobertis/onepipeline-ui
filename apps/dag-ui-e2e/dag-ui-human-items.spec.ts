@@ -75,6 +75,7 @@ const storedSchema = z.object({
   owner: z.object({ session: z.string() }),
   approval: z.object({ board_copy: z.string(), key: z.string() }).nullable(),
   tracker: z.object({ task: z.string(), url: z.string() }).nullable(),
+  created_at: z.string(),
   resolution: z
     .object({
       actor: z.string(),
@@ -780,9 +781,10 @@ test("lists every open item of the host in the engine's order, as compact full-w
     0,
   );
   const filters = page.getByRole("group", { name: "Filter action items" });
-  await expect(filters.getByRole("combobox")).toHaveCount(6);
+  await expect(filters.getByRole("combobox")).toHaveCount(7);
   for (const name of [
     "Group by",
+    "Sort",
     "Kind",
     "Blocking",
     "Priority",
@@ -1536,8 +1538,9 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
       ),
   ).toHaveLength(1);
 
-  // A task's Complete is one write too: the card leaves on the press, so there
-  // is nothing left to press again while its receipt is out.
+  // A task's Complete is one write too: while its receipt is out the card holds
+  // its place with the pressed button pending and disabled, so there is nothing
+  // to press again.
   let releaseTask: () => void = () => {};
   const heldTask = new Promise<void>((resolve) => {
     releaseTask = resolve;
@@ -1549,11 +1552,16 @@ test("a pending receipt keeps the item open, repeats send nothing, and a failure
   });
   const design = "Review the action-items design";
   await page.getByRole("button", { name: `Complete: ${design}` }).click();
-  await expect(card(page, design)).toHaveCount(0);
+  const completing = card(page, design).getByRole("button", {
+    name: "Completing…",
+  });
+  await expect(completing).toBeDisabled();
+  await completing.click({ force: true });
   await expect(outcome(page)).toHaveText(`Completing: ${design}…`);
   expect(sent).toHaveLength(2);
   releaseTask();
   await expect(outcome(page)).toHaveText(`Completed: ${design}`);
+  await expect(card(page, design)).toHaveCount(0);
   expect(sent).toHaveLength(2);
   expect(stored(served, designId).state).toBe("completed");
   await page.unroute(`**/api/human-items/${designId}/complete`);
@@ -2658,24 +2666,112 @@ async function backgroundOf(locator: Locator) {
   return { r, g, b };
 }
 
+/** Press `control` with the mouse at its centre, as a pointer would, enabled or not. */
+async function pressByPointer(page: Page, control: Locator): Promise<void> {
+  await control.scrollIntoViewIfNeeded();
+  const at = await box(control);
+  await page.mouse.click(at.x + at.width / 2, at.y + at.height / 2);
+}
+
 async function box(locator: Locator) {
   const found = await locator.boundingBox();
   if (found === null) throw new Error("no box: the element is not rendered");
   return found;
 }
 
+/**
+ * Hold the next request to `path` on its way to the server, and answer how to
+ * let it go on or fail it at the network boundary, where it never arrives.
+ */
+async function holdOne(page: Page, path: string) {
+  let settle: (arrives: boolean) => void = () => {};
+  const held = new Promise<boolean>((resolve) => {
+    settle = resolve;
+  });
+  // llmlint: ignore[e2e_not_mocked] the task asks for each write to fail at the network boundary, where the request never arrives; nothing is answered in the server's place: a held request is forwarded unchanged to the real server and engine store, and a dropped one fails as a refused connection would, before reaching them.
+  await page.route(
+    `**${path}`,
+    async (route) => {
+      if (await held) await route.continue();
+      else await route.abort("connectionrefused");
+    },
+    { times: 1 },
+  );
+  return { release: () => settle(true), drop: () => settle(false) };
+}
+
+/** The reason the server gives for refusing its next answer to `path`. */
+function refusalOf(page: Page, path: string): Promise<string> {
+  return page
+    .waitForResponse((response) => new URL(response.url()).pathname === path)
+    .then(async (response) => {
+      expect(response.ok()).toBe(false);
+      return z
+        .object({ error: z.object({ message: z.string().min(1) }) })
+        .parse(await response.json()).error.message;
+    });
+}
+
+/** What the page says of a request that never reached the server. */
+const NEVER_ARRIVED = "Telemetry request failed";
+
+/**
+ * Fail one write twice — refused by the server in the engine's words, then
+ * failed at the network boundary — and hold each failure to what a reader is
+ * owed: every place in `shown` carries the reason, the list stands as it did,
+ * and the engine's record of `id` is what it was. The press is the reader's
+ * own each time, so what follows is a retry.
+ */
+async function failTwice(
+  page: Page,
+  served: FixtureServer,
+  {
+    id,
+    path,
+    press,
+    shown,
+  }: {
+    readonly id: string;
+    readonly path: string;
+    readonly press: () => Promise<void>;
+    readonly shown: () => readonly Locator[];
+  },
+): Promise<void> {
+  const before = stored(served, id);
+  const order = await titles(listRegion(page));
+  const mend = breakJournal(served);
+  try {
+    const refused = refusalOf(page, path);
+    await press();
+    const reason = await refused;
+    for (const place of shown()) await expect(place).toContainText(reason);
+  } finally {
+    mend();
+  }
+  expect(await titles(listRegion(page))).toEqual(order);
+  expect(stored(served, id)).toEqual(before);
+
+  const { drop } = await holdOne(page, path);
+  await press();
+  drop();
+  for (const place of shown()) await expect(place).toContainText(NEVER_ARRIVED);
+  expect(await titles(listRegion(page))).toEqual(order);
+  expect(stored(served, id)).toEqual(before);
+}
+
+/** `control` reads as its write's pending state: its words, busy and not pressable. */
+async function expectPending(control: Locator, words: string): Promise<void> {
+  await expect(control).toHaveText(words);
+  await expect(control).toHaveAttribute("aria-busy", "true");
+  await expect(control).toBeDisabled();
+}
+
 for (const { from, verb, key, title } of [
   {
     from: "card",
     verb: "Complete",
-    key: "build",
-    title: "Restore the build service",
-  },
-  {
-    from: "card",
-    verb: "Dismiss",
-    key: "export",
-    title: "Keep the legacy export format?",
+    key: "plain",
+    title: "File the flaky-runner report",
   },
   {
     from: "detail",
@@ -2684,67 +2780,97 @@ for (const { from, verb, key, title } of [
     title: "Review the action-items design",
   },
   {
+    from: "card",
+    verb: "Dismiss",
+    key: "certificate",
+    title: "Rotate the staging certificate",
+  },
+  {
     from: "detail",
     verb: "Dismiss",
-    key: "other",
-    title: "Rotate the deploy credentials",
+    key: "plain",
+    title: "File the flaky-runner report",
   },
 ] as const)
-  test(`${verb} from the ${from} is one press: the card leaves and the toast shows before the receipt, and it stays gone`, async ({
+  test(`${verb} from the ${from} is one press, pending in place until its receipt, and a refused or lost write says why and can be pressed again`, async ({
     page,
   }) => {
-    const served = await serveWorld("queue");
+    const served = await serveWorld("undo");
     const alerts = await recordAlerts(page);
     await open(page, served, { groupBy: null });
     const id = idOf(served, key);
+    const path = `/api/human-items/${id}/${verb.toLowerCase()}`;
+    const other = verb === "Complete" ? "Dismiss" : "Complete";
+    const doing = verb === "Complete" ? "Completing…" : "Dismissing…";
+    const done = verb === "Complete" ? "Completed" : "Dismissed";
     const sent = writes(page);
-    if (from === "detail") {
-      await card(page, title)
-        .getByRole("button", { name: `Details: ${title}` })
-        .click();
-      await expect(
-        detailPane(page).getByRole("heading", { name: title }),
-      ).toBeVisible();
-    }
-    const release = await holdRequests(
-      page,
-      `/api/human-items/${id}/${verb.toLowerCase()}`,
-    );
-    const button =
+    if (from === "detail") await openDetail(page, title);
+    const scope = () =>
+      from === "card" ? card(page, title) : detailPane(page);
+    const control = (name: string) =>
       from === "card"
-        ? card(page, title).getByRole("button", { name: `${verb}: ${title}` })
-        : detailPane(page).getByRole("button", { name: verb, exact: true });
-    await button.click();
-    // With the receipt still held: the write is out, the card is gone, the
-    // detail showing it closed, and the toast already says what is happening —
-    // with no dialog, no confirmation and nothing else to press.
-    await expect.poll(() => verbs(sent)).toEqual([verb.toLowerCase()]);
-    await expect(card(page, title)).toHaveCount(0);
-    await expect(detailPane(page)).toHaveCount(0);
-    await expect(toast(page)).toBeVisible();
+        ? card(page, title).getByRole("button", { name: `${name}: ${title}` })
+        : detailPane(page).getByRole("button", { name, exact: true });
+    const press = () => control(verb).click();
+
+    // Refused, then lost: each time the item stays where it was, the reason is
+    // on it and in the toast, and nothing was recorded.
+    await failTwice(page, served, {
+      id,
+      path,
+      press,
+      shown: () => [scope().getByRole("alert").last(), outcome(page)],
+    });
+    await expect(outcome(page)).toContainText(
+      `Not ${done.toLowerCase()}: ${title}.`,
+    );
+
+    // Pressed again with its receipt held: the card, and the detail showing it,
+    // hold their place; the pressed control is pending and the item's other
+    // write waits; the toast already says what is happening, with no dialog.
+    const order = await titles(listRegion(page));
+    const alarmed = await alerts();
+    const { release } = await holdOne(page, path);
+    await press();
+    const pending = scope().getByRole("button", { name: doing });
+    await expectPending(pending, doing);
+    await expect(control(other)).toBeDisabled();
+    await expect(card(page, title)).toBeVisible();
+    if (from === "detail") await expect(detailPane(page)).toBeVisible();
+    expect(await titles(listRegion(page))).toEqual(order);
     await expect(toast(page)).toHaveAttribute("data-phase", "sending");
-    await expect(outcome(page)).toHaveText(
-      `${verb === "Complete" ? "Completing" : "Dismissing"}: ${title}…`,
-    );
+    await expect(outcome(page)).toHaveText(`${doing.slice(0, -1)}: ${title}…`);
     await expect(page.getByRole("dialog")).toHaveCount(0);
+    // However long the receipt takes, the control stays pending until it lands.
+    await page.waitForTimeout(500);
+    await expectPending(pending, doing);
     expect(stored(served, id).state).toBe("open");
+    // A reader who opens another item while the write is out keeps that one:
+    // the receipt closes only the detail of the item it resolved.
+    const next = "Rotate the staging certificate";
+    if (from === "detail") await openDetail(page, next);
     release();
-    await expect(outcome(page)).toHaveText(
-      `${verb === "Complete" ? "Completed" : "Dismissed"}: ${title}`,
-    );
-    const resolved = verb === "Complete" ? "completed" : "dismissed";
-    expect(stored(served, id).state).toBe(resolved);
-    expect(verbs(sent)).toEqual([verb.toLowerCase()]);
-    await page.unroute(`**/api/human-items/${id}/${verb.toLowerCase()}`);
-    // The stream catches up, the card stays gone, and a reload shows the same.
-    await page.waitForTimeout(1_000);
+
+    // The receipt lands: the toast says so, the card leaves and the detail with
+    // it, and the engine holds the browser's write.
+    await expect(outcome(page)).toHaveText(`${done}: ${title}`);
     await expect(card(page, title)).toHaveCount(0);
+    if (from === "detail")
+      await expect(
+        detailPane(page).getByRole("heading", { name: next }),
+      ).toBeVisible();
+    else await expect(detailPane(page)).toHaveCount(0);
+    expect(stored(served, id)).toMatchObject({
+      state: done.toLowerCase(),
+      resolution: { actor: `browser:session:${SUPERVISOR}` },
+    });
+    expect(verbs(sent)).toEqual(Array(3).fill(verb.toLowerCase()));
+    // Nothing said, at any point of the write that went through, that the item
+    // could not be read.
+    expect(await alerts()).toEqual(alarmed);
     await page.reload();
     await expect(page.getByRole("article").first()).toBeVisible();
     await expect(card(page, title)).toHaveCount(0);
-    expect(stored(served, id).state).toBe(resolved);
-    // Nothing said, at any point, that the item could not be read.
-    expect(await alerts()).toEqual([]);
   });
 
 /**
@@ -3187,7 +3313,10 @@ test("a receipt or refusal that comes after the toast's duration finds its toast
   await expect(toast(page)).toBeVisible();
   expect(verbs(sent)).toEqual(["complete"]);
   expect(stored(served, plainId).state).toBe("open");
-  await expect(card(page, plain)).toHaveCount(0);
+  // Still out: the card holds its place, its Complete pending.
+  await expect(
+    card(page, plain).getByRole("button", { name: "Completing…" }),
+  ).toBeDisabled();
   releaseComplete();
   await expect(outcome(page)).toHaveText(`Reopened: ${plain}`);
   expect(verbs(sent)).toEqual(["complete", "reopen"]);
@@ -3231,7 +3360,7 @@ test("a receipt or refusal that comes after the toast's duration finds its toast
   await page.unroute(`**/api/human-items/${certificateId}/dismiss`);
   await toast(page).getByRole("button", { name: "Close" }).click();
 
-  // A Complete the engine refuses after the duration: the card comes back where
+  // A Complete the engine refuses after the duration: the card stays where
   // it was, with the engine's reason on it and in the toast, in view above it.
   const order = await titles(listRegion(page));
   const releaseRefused = await holdRequests(
@@ -3244,7 +3373,9 @@ test("a receipt or refusal that comes after the toast's duration finds its toast
   await letGo();
   await page.clock.runFor(past);
   await expect(toast(page)).toHaveAttribute("data-phase", "sending");
-  await expect(card(page, plain)).toHaveCount(0);
+  await expect(
+    card(page, plain).getByRole("button", { name: "Completing…" }),
+  ).toBeDisabled();
   const restore = breakJournal(served);
   releaseRefused();
   await expect(toast(page)).toHaveAttribute("data-tone", "failure");
@@ -4046,17 +4177,18 @@ test("what is asked of a toast before its receipt waits for it, and is dropped w
     ["human-item-noted", certificateId],
   ]);
 
-  // Restore pressed again while the first is still waiting on Dismiss's
-  // receipt is the same request: one reopen reaches the server, after it.
+  // Restore, once pressed while Dismiss's receipt is out, is pending and
+  // cannot be pressed again: one reopen reaches the server, after it.
   const releaseRestored = await holdRequests(
     page,
     `/api/human-items/${plainId}/dismiss`,
   );
   await page.getByRole("button", { name: `Dismiss: ${plain}` }).click();
   await toast(page).getByRole("button", { name: "Restore" }).click();
-  await toast(page)
-    .getByRole("button", { name: /^Restore/u })
-    .click();
+  await expectPending(
+    toast(page).getByRole("button", { name: "Restore…" }),
+    "Restore…",
+  );
   await page.waitForTimeout(500);
   expect(verbs(sent).slice(4)).toEqual(["dismiss"]);
   releaseRestored();
@@ -4071,7 +4203,7 @@ test("what is asked of a toast before its receipt waits for it, and is dropped w
   ]);
 });
 
-test("a grouping this page does not know, or storage the browser refuses, groups by Priority and still groups as chosen", async ({
+test("a grouping, sort or filter this page does not know, or storage the browser refuses, groups by Priority in the engine's order and still sorts and groups as chosen", async ({
   browser,
 }) => {
   const served = await serveWorld("queue");
@@ -4079,25 +4211,65 @@ test("a grouping this page does not know, or storage the browser refuses, groups
     listRegion(page).getByRole("heading", { level: 2 });
 
   // A choice another release of the page remembered, which this one does not
-  // offer, is no choice: the list groups by Priority.
+  // offer, is no choice: the list groups by Priority, in the engine's order,
+  // under the default filters.
   const remembered = await browser.newContext();
-  await remembered.addInitScript(() =>
+  // llmlint: ignore[tests_mirror_real_usage] the subject is what this page does with storage another release of it wrote, or text that is no JSON at all; this release's controls offer only the choices it knows, so no press can put such a value there, and everything after the seed is read through the page's own controls and list.
+  await remembered.addInitScript(() => {
     window.localStorage.setItem(
       "onepipeline-ui.human-items.group-by",
       "assignee",
-    ),
-  );
+    );
+    window.localStorage.setItem("onepipeline-ui.human-items.sort", "random");
+    window.localStorage.setItem(
+      "onepipeline-ui.human-items.filters",
+      JSON.stringify({ state: "archived", kind: "task" }),
+    );
+  });
   const first = await remembered.newPage();
   await open(first, served, { groupBy: null });
   await expect(first.getByRole("combobox", { name: "Group by" })).toHaveValue(
     "priority",
   );
+  await expect(first.getByRole("combobox", { name: "Sort" })).toHaveValue(
+    "default",
+  );
+  await expect(first.getByLabel("State", { exact: true })).toHaveValue("open");
+  await expect(first.getByLabel("Kind", { exact: true })).toHaveValue("");
   await expect(headings(first)).toHaveText([
     "Critical (3)",
     "High (3)",
     "Low (1)",
   ]);
   await remembered.close();
+
+  // Filters whose state is known keep what they know and drop what they do
+  // not; text that is not JSON is no choice at all.
+  for (const [stored, priority, shown] of [
+    [
+      JSON.stringify({ state: "open", kind: "robot", priority: "urgent" }),
+      "urgent",
+      ["Critical (3)"],
+    ],
+    ["{not json", "", ["Critical (3)", "High (3)", "Low (1)"]],
+  ] as const) {
+    const partial = await browser.newContext();
+    // llmlint: ignore[tests_mirror_real_usage] the subject is what this page does with storage another release of it wrote, or text that is no JSON at all; this release's controls offer only the choices it knows, so no press can put such a value there, and everything after the seed is read through the page's own controls and list.
+    await partial.addInitScript((filters) => {
+      window.localStorage.setItem(
+        "onepipeline-ui.human-items.filters",
+        filters,
+      );
+    }, stored);
+    const third = await partial.newPage();
+    await open(third, served, { groupBy: null });
+    await expect(third.getByLabel("Kind", { exact: true })).toHaveValue("");
+    await expect(third.getByLabel("Priority", { exact: true })).toHaveValue(
+      priority,
+    );
+    await expect(headings(third)).toHaveText([...shown]);
+    await partial.close();
+  }
 
   // A browser that refuses this page its storage — as one blocking site data
   // does, throwing on every access — still groups this visit as asked.
@@ -4119,6 +4291,20 @@ test("a grouping this page does not know, or storage the browser refuses, groups
   ]);
   await second.getByRole("combobox", { name: "Group by" }).selectOption("kind");
   await expect(headings(second)).toHaveText(["Task (4)", "Question (3)"]);
+  const tasks = await groupedTitles(second);
+  await second.getByRole("combobox", { name: "Sort" }).selectOption("oldest");
+  await expect(second.getByRole("combobox", { name: "Sort" })).toHaveValue(
+    "oldest",
+  );
+  const raised = new Map(
+    listed(served, ["--all", "--full"]).map(({ item }) => [
+      item.title,
+      item.created_at,
+    ]),
+  );
+  await expect
+    .poll(() => groupedTitles(second))
+    .toEqual(tasks.map((group) => byRaised(raised, group, "oldest")));
   await refusing.close();
 });
 
@@ -5726,6 +5912,14 @@ async function expectAge(time: Locator, at: string): Promise<void> {
   expect(local).toBeLessThan(1_000);
 }
 
+/** `tip` is showing the local moment `at` names, to the second. */
+async function expectMoment(tip: Locator, at: string): Promise<void> {
+  await expect(tip).toBeVisible();
+  const shown = (await tip.textContent()) ?? "";
+  const clock = shown.replace(/(?<=[AP]M) .+$/u, "");
+  expect(Math.abs(Date.parse(clock) - Date.parse(at))).toBeLessThan(1_000);
+}
+
 /** The engine's history of `id`, as the detail route serves it to the page. */
 async function servedHistory(page: Page, served: FixtureServer, id: string) {
   const response = await page.request.get(
@@ -5962,3 +6156,1120 @@ test("the detail lists the engine's history oldest first, each row's party in wo
   expect(text).not.toMatch(RFC_3339);
   expect(text).not.toMatch(ABSOLUTE_DATE);
 });
+
+for (const { verb, key, title, noun, words, done } of [
+  {
+    verb: "Dismiss",
+    key: "certificate",
+    title: "Rotate the staging certificate",
+    noun: "Reason",
+    words: "Rotated with the production one",
+    done: "Dismissed",
+  },
+  {
+    verb: "Complete",
+    key: "plain",
+    title: "File the flaky-runner report",
+    noun: "Comment",
+    words: "Filed as INFRA-212",
+    done: "Completed",
+  },
+] as const)
+  test(`a ${noun.toLowerCase()} added after ${verb} is pending until saved, then quoted in the toast and shown on the item's card and detail, and a refused or lost one says why and is sent again`, async ({
+    page,
+  }) => {
+    const served = await serveWorld("undo");
+    await open(page, served);
+    const id = idOf(served, key);
+    const path = `/api/human-items/${id}/note`;
+    await page.getByRole("button", { name: `${verb}: ${title}` }).click();
+    await expect(outcome(page)).toHaveText(`${done}: ${title}`);
+    await toast(page)
+      .getByRole("button", { name: `Add ${noun.toLowerCase()}` })
+      .click();
+    const field = toast(page).getByRole("textbox", { name: noun });
+    await field.fill(words);
+    const send = toast(page).getByRole("button", { name: /^Send( again)?$/u });
+
+    // Refused, then lost: the toast stays with the reason and the words typed,
+    // and nothing is recorded.
+    await failTwice(page, served, {
+      id,
+      path,
+      press: () => send.click(),
+      shown: () => [outcome(page)],
+    });
+    await expect(outcome(page)).toContainText(`${noun} not saved: ${title}.`);
+    await expect(field).toHaveValue(words);
+    expect(
+      stored(served, id).resolution?.[noun === "Reason" ? "reason" : "text"],
+    ).toBeNull();
+
+    // Sent again with its receipt held: Send is pending and the words wait.
+    const { release } = await holdOne(page, path);
+    await send.click();
+    await expectPending(
+      toast(page).getByRole("button", { name: "Sending…" }),
+      "Sending…",
+    );
+    await expect(field).toHaveAttribute("readonly", "");
+    release();
+
+    // Saved: the toast says so and quotes what the engine now holds.
+    await expect(outcome(page)).toHaveText(`${noun} saved: ${title}`);
+    await expect(
+      toast(page).getByRole("blockquote", {
+        name: `Saved ${noun.toLowerCase()}`,
+      }),
+    ).toHaveText(words);
+    expect(stored(served, id)).toMatchObject({
+      state: done.toLowerCase(),
+      resolution: {
+        actor: `browser:session:${SUPERVISOR}`,
+        [noun === "Reason" ? "reason" : "text"]: words,
+      },
+    });
+    await toast(page).getByRole("button", { name: "Close" }).click();
+
+    // And on the item itself: its card under its state, and its detail.
+    await showState(page, done.toLowerCase());
+    const resolved = card(page, title);
+    await expect(resolved).toContainText(done);
+    await expect(resolved).toContainText(`${noun}: ${words}`);
+    const pane = await openDetail(page, title);
+    await expect(metadataOf(pane, noun)).toHaveText(words);
+    await expect(metadataOf(pane, "State")).toHaveText(done);
+  });
+
+for (const { verb, undo, key, title, done, undone } of [
+  {
+    verb: "Dismiss",
+    undo: "Restore",
+    key: "certificate",
+    title: "Rotate the staging certificate",
+    done: "Dismissed",
+    undone: "Restored",
+  },
+  {
+    verb: "Complete",
+    undo: "Reopen",
+    key: "plain",
+    title: "File the flaky-runner report",
+    done: "Completed",
+    undone: "Reopened",
+  },
+] as const)
+  test(`${undo} on the toast after ${verb} is pending until its receipt and brings the card back, and a refused or lost one says why and is pressed again`, async ({
+    page,
+  }) => {
+    const served = await serveWorld("undo");
+    await open(page, served);
+    const id = idOf(served, key);
+    const path = `/api/human-items/${id}/reopen`;
+    await page.getByRole("button", { name: `${verb}: ${title}` }).click();
+    await expect(outcome(page)).toHaveText(`${done}: ${title}`);
+    const press = () =>
+      toast(page).getByRole("button", { name: undo, exact: true }).click();
+
+    // Refused, then lost: the item stays resolved and off the list, and the
+    // toast keeps the control beside the reason.
+    await failTwice(page, served, {
+      id,
+      path,
+      press,
+      shown: () => [outcome(page)],
+    });
+    await expect(outcome(page)).toContainText(
+      `Not ${undone.toLowerCase()}: ${title}.`,
+    );
+    await expect(card(page, title)).toHaveCount(0);
+    expect(stored(served, id).state).toBe(done.toLowerCase());
+
+    const { release } = await holdOne(page, path);
+    await press();
+    await expectPending(
+      toast(page).getByRole("button", { name: `${undo}…` }),
+      `${undo}…`,
+    );
+    expect(stored(served, id).state).toBe(done.toLowerCase());
+    release();
+    await expect(outcome(page)).toHaveText(`${undone}: ${title}`);
+    await expect(card(page, title)).toBeVisible();
+    expect(stored(served, id)).toMatchObject({
+      state: "open",
+      resolution: null,
+    });
+  });
+
+test("Reopen on a resolved card and in its detail follows the engine's answer, is pending until its receipt, and a refused or lost one says why and is pressed again", async ({
+  page,
+}) => {
+  const served = await serveWorld("undo");
+  const certificate = "Rotate the staging certificate";
+  const certificateId = idOf(served, "certificate");
+  const plain = "File the flaky-runner report";
+  const plainId = idOf(served, "plain");
+  const step = "Sign off the release notes";
+  const stepId = idOf(served, "step");
+  cli(
+    served,
+    ["human-items", "dismiss", certificateId, "--reason", "Rotated already"],
+    SUPERVISOR,
+  );
+  cli(served, ["human-items", "dismiss", stepId], SUPERVISOR);
+  cli(served, ["human-items", "complete", plainId], SUPERVISOR);
+  await open(page, served);
+  await showState(page, "dismissed");
+
+  // A dismissed card says so, with its reason, and offers Reopen where the
+  // engine can; where it cannot, Reopen is greyed with the engine's reason.
+  await expect(card(page, certificate)).toContainText("Dismissed");
+  await expect(card(page, certificate)).toContainText(
+    "Reason: Rotated already",
+  );
+  const { reopen } = z
+    .object({
+      reopen: z.object({ available: z.boolean(), reason: z.string() }),
+    })
+    .parse(JSON.parse(cli(served, ["human-items", "show", stepId, "--json"])));
+  expect(reopen.available).toBe(false);
+  await expect(
+    card(page, step).getByRole("button", { name: "Reopen", exact: true }),
+  ).toBeDisabled();
+  await card(page, step)
+    .getByRole("button", { name: `Why Reopen is unavailable: ${step}` })
+    .click();
+  await expect(card(page, step).getByRole("tooltip")).toHaveText(reopen.reason);
+  await expect(detailPane(page)).toHaveCount(0);
+
+  // A pointer pressed on the greyed Reopen, on the card and then in Details,
+  // where the same reason is given, sends nothing and changes nothing the
+  // engine holds.
+  const recorded = () => cli(served, ["human-items", "show", stepId, "--json"]);
+  const before = JSON.parse(recorded());
+  const sent = writes(page);
+  const greyed = card(page, step).getByRole("button", {
+    name: "Reopen",
+    exact: true,
+  });
+  await pressByPointer(page, greyed);
+  await expect(greyed).toBeDisabled();
+  const stepPane = await openDetail(page, step);
+  const greyedInDetail = stepPane.getByRole("button", {
+    name: "Reopen",
+    exact: true,
+  });
+  await expect(greyedInDetail).toBeDisabled();
+  await stepPane
+    .getByRole("button", { name: "Why Reopen is unavailable" })
+    .click();
+  await expect(stepPane.getByRole("tooltip")).toHaveText(reopen.reason);
+  await pressByPointer(page, greyedInDetail);
+  await expect(greyedInDetail).toBeDisabled();
+  await expect(metadataOf(stepPane, "State")).toHaveText("Dismissed");
+  // Reading the detail again goes to the server after both presses, so a
+  // write either one had started would have been sent before it.
+  await stepPane.getByRole("button", { name: "Close detail" }).click();
+  await openDetail(page, step);
+  expect(sent).toHaveLength(0);
+  expect(JSON.parse(recorded())).toEqual(before);
+  await detailPane(page).getByRole("button", { name: "Close detail" }).click();
+
+  // Refused, then lost: the card stays under Dismissed with the reason.
+  const path = `/api/human-items/${certificateId}/reopen`;
+  const press = () =>
+    card(page, certificate)
+      .getByRole("button", { name: `Reopen: ${certificate}` })
+      .click();
+  await failTwice(page, served, {
+    id: certificateId,
+    path,
+    press,
+    shown: () => [card(page, certificate).getByRole("alert"), outcome(page)],
+  });
+  await expect(outcome(page)).toContainText(`Not reopened: ${certificate}.`);
+
+  // Pressed again with its receipt held, it is pending in place; then the
+  // item is open again and leaves the dismissed list.
+  const held = await holdOne(page, path);
+  await press();
+  await expectPending(
+    card(page, certificate).getByRole("button", { name: "Reopening…" }),
+    "Reopening…",
+  );
+  await expect(card(page, certificate)).toBeVisible();
+  await expect(outcome(page)).toHaveText(`Reopening: ${certificate}…`);
+  held.release();
+  await expect(outcome(page)).toHaveText(`Reopened: ${certificate}`);
+  await expect(card(page, certificate)).toHaveCount(0);
+  expect(stored(served, certificateId)).toMatchObject({
+    state: "open",
+    resolution: null,
+  });
+
+  // From a completed item's detail, the same.
+  await showState(page, "completed");
+  const pane = await openDetail(page, plain);
+  const detailPath = `/api/human-items/${plainId}/reopen`;
+  await failTwice(page, served, {
+    id: plainId,
+    path: detailPath,
+    press: () =>
+      pane.getByRole("button", { name: "Reopen", exact: true }).click(),
+    shown: () => [pane.getByRole("alert").last(), outcome(page)],
+  });
+  const fromDetail = await holdOne(page, detailPath);
+  await pane.getByRole("button", { name: "Reopen", exact: true }).click();
+  await expectPending(
+    pane.getByRole("button", { name: "Reopening…" }),
+    "Reopening…",
+  );
+  fromDetail.release();
+  await expect(outcome(page)).toHaveText(`Reopened: ${plain}`);
+  await expect(pane).toHaveCount(0);
+  await expect(card(page, plain)).toHaveCount(0);
+  expect(stored(served, plainId)).toMatchObject({
+    state: "open",
+    resolution: null,
+  });
+  await showState(page, "open");
+  // Each reopened item reads as open again, on its card and in its detail,
+  // with nothing left of the resolution it had.
+  for (const [title, resolved, saved] of [
+    [certificate, "Dismissed", "Reason: Rotated already"],
+    [plain, "Completed", undefined],
+  ] as const) {
+    const reopened = card(page, title);
+    await expect(reopened).toBeVisible();
+    await expect(reopened).not.toContainText(resolved);
+    if (saved !== undefined) await expect(reopened).not.toContainText(saved);
+    await expect(
+      reopened.getByRole("button", { name: `Complete: ${title}` }),
+    ).toBeEnabled();
+    await expect(
+      reopened.getByRole("button", { name: `Dismiss: ${title}` }),
+    ).toBeEnabled();
+    await expect(
+      reopened.getByRole("button", { name: `Reopen: ${title}` }),
+    ).toHaveCount(0);
+    const detail = await openDetail(page, title);
+    await expect(metadataOf(detail, "State")).toHaveText("Open");
+    for (const gone of [resolved, "Reason", "Comment"])
+      await expect(
+        detail
+          .getByRole("term")
+          .filter({ hasText: new RegExp(`^${gone}$`, "u") }),
+      ).toHaveCount(0);
+    await expect(
+      detail.getByRole("button", { name: "Reopen", exact: true }),
+    ).toHaveCount(0);
+    await expect(detail.getByRole("button", { name: "Dismiss" })).toBeEnabled();
+    await detail.getByRole("button", { name: "Close detail" }).click();
+    expect(
+      stored(served, idOf(served, title === plain ? "plain" : "certificate")),
+    ).toMatchObject({ state: "open", resolution: null });
+  }
+});
+
+for (const { verb, undo, key, title, done, undone } of [
+  {
+    verb: "Dismiss",
+    undo: "Restore",
+    key: "certificate",
+    title: "Rotate the staging certificate",
+    done: "dismissed",
+    undone: "Restored",
+  },
+  {
+    verb: "Complete",
+    undo: "Reopen",
+    key: "plain",
+    title: "File the flaky-runner report",
+    done: "completed",
+    undone: "Reopened",
+  },
+] as const)
+  test(`${undo} pressed before ${verb}'s receipt is pending behind it, and one refused or lost after it says why and is pressed again`, async ({
+    page,
+  }) => {
+    const served = await serveWorld("undo");
+    await open(page, served);
+    const id = idOf(served, key);
+    const writePath = `/api/human-items/${id}/${verb.toLowerCase()}`;
+    const undoPath = `/api/human-items/${id}/reopen`;
+    const pending = toast(page).getByRole("button", { name: `${undo}…` });
+    for (const failure of ["refused", "lost"] as const) {
+      const first = await holdOne(page, writePath);
+      const after = await holdOne(page, undoPath);
+      await page.getByRole("button", { name: `${verb}: ${title}` }).click();
+      await toast(page)
+        .getByRole("button", { name: undo, exact: true })
+        .click();
+      await expectPending(pending, `${undo}…`);
+      first.release();
+      await expect.poll(() => stored(served, id).state).toBe(done);
+      await expectPending(pending, `${undo}…`);
+      const before = stored(served, id);
+      if (failure === "refused") {
+        const mend = breakJournal(served);
+        try {
+          const refused = refusalOf(page, undoPath);
+          after.release();
+          await expect(outcome(page)).toContainText(await refused);
+        } finally {
+          mend();
+        }
+      } else {
+        after.drop();
+        await expect(outcome(page)).toContainText(NEVER_ARRIVED);
+      }
+      await expect(outcome(page)).toContainText(
+        `Not ${undone.toLowerCase()}: ${title}.`,
+      );
+      await expect(card(page, title)).toHaveCount(0);
+      expect(stored(served, id)).toEqual(before);
+      // Pressed again, it goes through, and the card is back.
+      await toast(page)
+        .getByRole("button", { name: undo, exact: true })
+        .click();
+      await expect(outcome(page)).toHaveText(`${undone}: ${title}`);
+      await expect(card(page, title)).toBeVisible();
+      expect(stored(served, id)).toMatchObject({
+        state: "open",
+        resolution: null,
+      });
+      await toast(page).getByRole("button", { name: "Close" }).click();
+    }
+  });
+
+/** The send bar's button while a batch is out. */
+function sendingButton(page: Page): Locator {
+  return sendRegion(page).getByRole("button", { name: "Sending…" });
+}
+
+const APPROVAL: readonly Offered[] = [
+  {
+    id: "approve",
+    title: "Approve",
+    description: "The design goes ahead as written.",
+  },
+  {
+    id: "changes",
+    title: "Request changes",
+    description: "Say what to change in your own words.",
+  },
+];
+
+for (const flow of [
+  {
+    by: "free text",
+    title: "Which cache key should retries use?",
+    choices: undefined,
+    pick: undefined,
+  },
+  {
+    by: "a choice",
+    title: "Where should the canary run?",
+    choices: REGIONS,
+    pick: "Europe",
+  },
+  {
+    by: "Approve on a design approval",
+    title: "Approve the design document for the action-items sort?",
+    choices: APPROVAL,
+    pick: "Approve",
+  },
+] as const)
+  test(`an answer by ${flow.by}, drafted in its detail and shown on its card, is sent from the bar pending until its receipt, and a refused or lost send keeps the draft, says why and sends again`, async ({
+    page,
+  }) => {
+    const served = await serveWorld("queue");
+    const { title } = flow;
+    const { choices, pick } = flow;
+    const id = raiseQuestion(served, {
+      key: `answer-${title.length}`,
+      title,
+      ...(choices === undefined ? {} : { choices }),
+    });
+    await open(page, served);
+    const pane = await openDetail(page, title);
+    const words = "Key it by the lockfile digest";
+    if (pick !== undefined) await choiceButton(pane, pick).click();
+    else
+      await pane
+        .getByRole("textbox", { name: `Answer in detail: ${title}` })
+        .fill(words);
+    const drafted = async () => {
+      if (pick !== undefined)
+        await expect(choiceButton(card(page, title), pick)).toHaveAttribute(
+          "aria-pressed",
+          "true",
+        );
+      else await expect(answerBox(page, title)).toHaveValue(words);
+    };
+    await drafted();
+
+    await failTwice(page, served, {
+      id,
+      path: "/api/human-items/answers",
+      press: () => sendAnswers(page),
+      shown: () => [sendRegion(page).getByRole("alert")],
+    });
+    await expect(sendRegion(page).getByRole("alert")).toContainText(
+      "Not sent, and your drafts are kept",
+    );
+    await drafted();
+    await expect(sendButton(page)).toHaveText("Send 1 answer");
+
+    const held = await holdOne(page, "/api/human-items/answers");
+    await sendAnswers(page);
+    await expectPending(sendingButton(page), "Sending…");
+    await expect(card(page, title)).toBeVisible();
+    await expect(answerBox(page, title)).toHaveAttribute("aria-busy", "true");
+    expect(stored(served, id).state).toBe("open");
+    held.release();
+
+    await expect(card(page, title)).toHaveCount(0);
+    await expect(metadataOf(pane, "State")).toHaveText("Answered");
+    await expect(sendRegion(page)).toHaveCount(0);
+    const choice = choices?.find((offered) => offered.title === pick)?.id;
+    expect(stored(served, id)).toMatchObject({
+      state: "answered",
+      resolution: {
+        actor: `browser:session:${SUPERVISOR}`,
+        ...(choice === undefined ? { text: words } : { choice }),
+      },
+    });
+  });
+
+test("drafted answers go as one batch pending until its receipt, a refused or lost batch keeps every draft, and one answer the engine refuses stays with its reason while the rest are answered", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  const one = raiseQuestion(served, { key: "batch-one", title: "Batch one?" });
+  const two = raiseQuestion(served, {
+    key: "batch-two",
+    title: "Batch two?",
+    choices: REGIONS,
+  });
+  const three = raiseQuestion(served, {
+    key: "batch-three",
+    title: "Batch three?",
+    choices: REGIONS,
+  });
+  await open(page, served);
+  const sent = writes(page);
+  await answerBox(page, "Batch one?").fill("First words");
+  await choiceButton(card(page, "Batch two?"), "Europe").click();
+  await choiceButton(card(page, "Batch three?"), "Asia Pacific").click();
+  // The asker withdraws the drafted choice; the question stays open.
+  raiseQuestion(served, {
+    key: "batch-three",
+    title: "Batch three?",
+    choices: REGIONS.filter(({ id }) => id !== "ap"),
+  });
+  await expect(
+    choiceButton(card(page, "Batch three?"), "Asia Pacific"),
+  ).toHaveCount(0);
+  await expect(sendButton(page)).toHaveText("Send 3 answers");
+
+  await failTwice(page, served, {
+    id: one,
+    path: "/api/human-items/answers",
+    press: () => sendAnswers(page),
+    shown: () => [sendRegion(page).getByRole("alert")],
+  });
+  await expect(sendButton(page)).toHaveText("Send 3 answers");
+  for (const id of [two, three]) expect(stored(served, id).state).toBe("open");
+
+  const held = await holdOne(page, "/api/human-items/answers");
+  await sendAnswers(page);
+  await expectPending(sendingButton(page), "Sending…");
+  for (const title of ["Batch one?", "Batch two?", "Batch three?"])
+    await expect(card(page, title)).toBeVisible();
+  held.release();
+
+  await expect(card(page, "Batch one?")).toHaveCount(0);
+  await expect(card(page, "Batch two?")).toHaveCount(0);
+  await expect(card(page, "Batch three?").getByRole("alert")).toContainText(
+    "offers no choice ap",
+  );
+  await expect(sendButton(page)).toHaveText("Send 1 answer");
+  expect(batchesOf(sent).map(({ answers }) => answers.length)).toEqual([
+    3, 3, 3,
+  ]);
+  expect(stored(served, one)).toMatchObject({
+    state: "answered",
+    resolution: { text: "First words" },
+  });
+  expect(stored(served, two)).toMatchObject({
+    state: "answered",
+    resolution: { choice: "eu" },
+  });
+  expect(stored(served, three)).toMatchObject({
+    state: "open",
+    resolution: null,
+  });
+});
+
+/** The titles under each heading of the list, heading by heading. */
+async function groupedTitles(page: Page): Promise<string[][]> {
+  const groups = listRegion(page)
+    .getByRole("region")
+    .filter({ has: page.getByRole("heading", { level: 2 }) });
+  const all: string[][] = [];
+  for (const group of await groups.all()) all.push(await titles(group));
+  return all;
+}
+
+/** `shown` ordered by when each was raised, as `raised` says, newest first or oldest. */
+function byRaised(
+  raised: ReadonlyMap<string, string>,
+  shown: readonly string[],
+  order: "newest" | "oldest",
+): string[] {
+  const at = (title: string) => {
+    const when = raised.get(title);
+    if (when === undefined) throw new Error(`the engine raised no ${title}`);
+    return Date.parse(when);
+  };
+  const sign = order === "newest" ? -1 : 1;
+  return [...shown].sort((a, b) => sign * (at(a) - at(b)));
+}
+
+/** The visible Sort control: in the filter row, or beside Filters on a phone. */
+function sortControl(page: Page): Locator {
+  return page.getByRole("combobox", { name: "Sort", exact: true });
+}
+
+/** Run `choose` with the folded filters open where a phone folds them. */
+async function inFilters(page: Page, choose: () => Promise<void>) {
+  const toggle = page.getByRole("button", { name: /^Filters/u });
+  const folded = await toggle.isVisible();
+  if (folded) await toggle.click();
+  await choose();
+  if (folded) await toggle.click();
+}
+
+/** The computed styles two controls must share to read as one kind. */
+function looks(locator: Locator) {
+  return locator.evaluate(styleOf);
+}
+
+/** What `looks` reads, run in the page. */
+function styleOf(element: Element) {
+  const style = getComputedStyle(element);
+  return {
+    fontFamily: style.fontFamily,
+    fontSize: style.fontSize,
+    fontWeight: style.fontWeight,
+    fontStyle: style.fontStyle,
+    border: [
+      style.borderTopWidth,
+      style.borderTopStyle,
+      style.borderTopColor,
+      style.borderBottomWidth,
+      style.borderLeftWidth,
+      style.borderRightWidth,
+      style.borderRadius,
+    ],
+    background: style.backgroundColor,
+  };
+}
+
+/**
+ * A filter's select and the label the page gives it, as rendered: their boxes,
+ * the line box of the label's text — whose bottom is where its baseline sits
+ * for one font — and the styles each is drawn in. Run in the page.
+ */
+function rendered(select: HTMLSelectElement) {
+  const label = select.labels?.[0];
+  if (label === undefined) throw new Error("a filter with no label");
+  const range = document.createRange();
+  range.selectNodeContents(label);
+  const read = (element: Element) => {
+    const style = getComputedStyle(element);
+    return {
+      fontFamily: style.fontFamily,
+      fontSize: style.fontSize,
+      fontWeight: style.fontWeight,
+      color: style.color,
+      border: style.borderTopWidth,
+      background: style.backgroundColor,
+    };
+  };
+  const edges = ({ top, bottom, left, right, height }: DOMRect) => ({
+    top,
+    bottom,
+    left,
+    right,
+    height,
+  });
+  return {
+    select: edges(select.getBoundingClientRect()),
+    label: edges(label.getBoundingClientRect()),
+    text: edges(range.getBoundingClientRect()),
+    selectLooks: read(select),
+    labelLooks: read(label),
+  };
+}
+
+for (const width of [1440, 390] as const)
+  test(`at ${width} wide every card says when its item was raised, Sort orders each group and a State filter by it beside Group by, and Sort, Group by and the filters survive a reload`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const served = await serveWorld("undo");
+    // Three more medium tasks, each raised after the last.
+    const later = [
+      "Archive the old dashboards",
+      "Prune the stale branches",
+      "Rotate the webhook secret",
+    ];
+    const ids = later.map((title) => raise(served, title, "task"));
+    const everything = listed(served, ["--all", "--full"]);
+    expect(new Set(everything.map(({ item }) => item.created_at)).size).toBe(
+      everything.length,
+    );
+    const raisedAt = new Map(
+      everything.map(({ item }) => [item.title, item.created_at]),
+    );
+    const list = await open(page, served, { groupBy: null });
+    const journalBefore = journal(served);
+
+    // Every card, without opening anything, says when its item was raised: an
+    // age, backed by the exact moment the engine recorded.
+    const cards = list.getByRole("article");
+    await expect(cards).toHaveCount(everything.length);
+    for (const { item } of everything) {
+      const raised = card(page, item.title).getByRole("time");
+      await expect(raised).toBeVisible();
+      await expect(card(page, item.title)).toContainText(/Raised \d+ \w+ ago/u);
+      await expectAge(raised, item.created_at);
+    }
+    const first = card(page, later[0] ?? "");
+    const age = first.getByRole("time");
+    const firstRaised = raisedAt.get(later[0] ?? "") ?? "";
+    // A mouse resting on the time shows the moment the engine recorded, and
+    // leaving takes it away, without opening the card.
+    await age.hover();
+    await expectMoment(first.getByRole("tooltip"), firstRaised);
+    await page.mouse.move(0, 0);
+    await expect(first.getByRole("tooltip")).toHaveCount(0);
+    await expect(detailPane(page)).toHaveCount(0);
+    // A long press, which is what a phone has for hover, shows the moment
+    // while the finger is down, without opening the card.
+    // A touch screen is a coarse pointer, which lays the card out for fingers:
+    // where the time sits is read once the page is one.
+    const touch = await page.context().newCDPSession(page);
+    await touch.send("Emulation.setTouchEmulationEnabled", { enabled: true });
+    await age.scrollIntoViewIfNeeded();
+    const at = await box(age);
+    const finger = [{ x: at.x + at.width / 2, y: at.y + at.height / 2 }];
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: finger,
+    });
+    await expect(first.getByRole("tooltip")).toHaveText(
+      (await age.getAttribute("title")) ?? "",
+    );
+    await expectMoment(first.getByRole("tooltip"), firstRaised);
+    await touch.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+    await expect(first.getByRole("tooltip")).toHaveCount(0);
+    await expect(detailPane(page)).toHaveCount(0);
+    // A touch the browser takes over for a scroll, or a finger lifted before
+    // the hold is long, is no long press: no moment shows, then or later. The
+    // lifted finger is a tap, which opens the card as a tap anywhere on it does.
+    for (const ends of ["touchCancel", "touchEnd"] as const) {
+      await touch.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: finger,
+      });
+      await page.waitForTimeout(100);
+      await touch.send("Input.dispatchTouchEvent", {
+        type: ends,
+        touchPoints: [],
+      });
+      // Past the hold a long press takes, so a timer left running would show.
+      await page.waitForTimeout(700);
+      await expect(first.getByRole("tooltip")).toHaveCount(0);
+      await expect(detailPane(page)).toHaveCount(ends === "touchEnd" ? 1 : 0);
+    }
+    await detailPane(page)
+      .getByRole("button", { name: "Close detail" })
+      .click();
+    await expect(detailPane(page)).toHaveCount(0);
+    await touch.send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await touch.detach();
+
+    // Where Sort sits, and that it reads as its neighbours do.
+    if (width === 1440) {
+      const filters = page.getByRole("group", { name: "Filter action items" });
+      const controls = filters.getByRole("combobox");
+      await expect(controls.nth(0)).toHaveAccessibleName("Group by");
+      await expect(controls.nth(1)).toHaveAccessibleName("Sort");
+      await expect(controls.nth(2)).toHaveAccessibleName("Kind");
+      const [group, sort, kind] = await Promise.all(
+        [0, 1, 2].map((index) => controls.nth(index).evaluate(rendered)),
+      );
+      if (group === undefined || sort === undefined || kind === undefined)
+        throw new Error("the filter row lost a control");
+      const close = (a: number, b: number) =>
+        expect(Math.abs(a - b)).toBeLessThanOrEqual(1);
+      // On one row, in the order Group by, Sort, Kind, a label before each.
+      expect(sort.label.left).toBeGreaterThanOrEqual(group.select.right);
+      expect(sort.select.left).toBeGreaterThanOrEqual(sort.label.right);
+      expect(kind.label.left).toBeGreaterThanOrEqual(sort.select.right);
+      // Its select and its label at Group by's top, height and baseline, in
+      // Group by's own styling, spaced as the row spaces every pair.
+      close(sort.select.top, group.select.top);
+      close(sort.select.height, group.select.height);
+      close(sort.label.top, group.label.top);
+      close(sort.label.height, group.label.height);
+      close(sort.text.top, group.text.top);
+      close(sort.text.bottom, group.text.bottom);
+      expect(sort.selectLooks).toEqual(group.selectLooks);
+      expect(sort.labelLooks).toEqual(group.labelLooks);
+      close(
+        sort.label.left - group.select.right,
+        kind.label.left - sort.select.right,
+      );
+      close(
+        sort.select.left - sort.label.right,
+        group.select.left - group.label.right,
+      );
+    } else {
+      const toggle = page.getByRole("button", { name: /^Filters/u });
+      await expect(toggle).toBeVisible();
+      await expect(sortControl(page)).toBeVisible();
+      const folded = await box(toggle);
+      const sort = await box(sortControl(page));
+      expect(sort.x).toBeGreaterThanOrEqual(folded.x + folded.width);
+      expect(Math.abs(sort.y - folded.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(sort.height - folded.height)).toBeLessThanOrEqual(1);
+      expect(await looks(sortControl(page))).toEqual(await looks(toggle));
+      await expect(sortControl(page)).toHaveText(/Sort: Default/u);
+    }
+    // The Filters button is a phone's; what it counts is read where it shows.
+    const badge = () =>
+      width === 390
+        ? page
+            .getByRole("button", { name: /^Filters/u })
+            .getAttribute("aria-label")
+        : Promise.resolve(null);
+    const counted = await badge();
+
+    // Default is the engine's order; Newest and Oldest first order each
+    // Priority group by when its items were raised, the groups staying put.
+    const engine = await groupedTitles(page);
+    expect(engine.flat()).toEqual(
+      listed(served, ["--all"])
+        .map(({ item }) => item.title)
+        .filter((title) => engine.flat().includes(title)),
+    );
+    const headings = await listRegion(page)
+      .getByRole("heading", { level: 2 })
+      .allTextContents();
+    for (const order of ["newest", "oldest"] as const) {
+      await sortControl(page).selectOption(order);
+      await expect
+        .poll(() => groupedTitles(page))
+        .toEqual(engine.map((group) => byRaised(raisedAt, group, order)));
+      expect(
+        await listRegion(page)
+          .getByRole("heading", { level: 2 })
+          .allTextContents(),
+      ).toEqual(headings);
+    }
+    // The medium group holds the three raised last, so the order is seen to move.
+    expect(engine.some((group) => group.includes(later[2] ?? ""))).toBe(true);
+    // A sort is no filter: the Filters button counts what it did before.
+    expect(await badge()).toBe(counted);
+
+    // With a State filter: dismissed items, oldest first.
+    for (const id of [ids[1], ids[0], ids[2]])
+      cli(served, ["human-items", "dismiss", id ?? ""], SUPERVISOR);
+    await inFilters(page, () => showState(page, "dismissed"));
+    // All three were dismissed, so the State filter lists exactly them.
+    const dismissed = [...later];
+    await expect.poll(() => groupedTitles(page)).toEqual([dismissed]);
+    await sortControl(page).selectOption("newest");
+    await expect
+      .poll(() => groupedTitles(page))
+      .toEqual([byRaised(raisedAt, dismissed, "newest")]);
+
+    // Sort, Group by and the State filter are this browser's until changed.
+    await inFilters(page, async () => {
+      await page
+        .getByRole("combobox", { name: "Group by" })
+        .selectOption("kind");
+    });
+    await page.reload();
+    await expect(page.getByRole("article").first()).toBeVisible();
+    await expect(sortControl(page)).toHaveValue("newest");
+    await inFilters(page, async () => {
+      await expect(
+        page.getByRole("combobox", { name: "Group by" }),
+      ).toHaveValue("kind");
+      await expect(
+        page
+          .getByRole("group", { name: "Filter action items" })
+          .getByLabel("State", { exact: true }),
+      ).toHaveValue("dismissed");
+    });
+    await expect
+      .poll(() => groupedTitles(page))
+      .toEqual([byRaised(raisedAt, dismissed, "newest")]);
+    // Leaving the page and coming back keeps every choice, as a reload does.
+    if (width === 1440) {
+      const nav = page.getByRole("navigation", { name: "Projects" });
+      await nav.getByRole("button", { name: "Host" }).click();
+      await expect(listRegion(page)).toHaveCount(0);
+      await nav.getByRole("button", { name: "Action items" }).click();
+      await expect(page.getByRole("article").first()).toBeVisible();
+      await expect(sortControl(page)).toHaveValue("newest");
+      await expect(
+        page.getByRole("combobox", { name: "Group by" }),
+      ).toHaveValue("kind");
+      await expect
+        .poll(() => groupedTitles(page))
+        .toEqual([byRaised(raisedAt, dismissed, "newest")]);
+    }
+    // Ungrouped, the one list stands in the chosen order too.
+    await inFilters(page, async () => {
+      await page
+        .getByRole("combobox", { name: "Group by" })
+        .selectOption("none");
+    });
+    for (const order of ["oldest", "newest"] as const) {
+      await sortControl(page).selectOption(order);
+      await expect
+        .poll(() => titles(listRegion(page)))
+        .toEqual(byRaised(raisedAt, dismissed, order));
+    }
+    // None of it was a write: the journal holds only the CLI's dismissals.
+    const appended = journal(served)
+      .slice(journalBefore.length)
+      .trimEnd()
+      .split("\n");
+    expect(appended).toHaveLength(3);
+    for (const line of appended)
+      expect(line).toContain('"human-item-dismissed"');
+  });
+
+test("under every Group by choice Newest and Oldest first order each group by when its items were raised and Default restores the engine's order, and under every filter they order exactly what it leaves", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  // One more dismissed, so the State filter leaves more than one to order;
+  // it is the one item alone in its source, so every grouping still draws a
+  // group of several.
+  const other = listed(served).find(
+    ({ item }) => item.title === "Rotate the deploy credentials",
+  );
+  cli(served, ["human-items", "dismiss", other?.item.id ?? ""], SUPERVISOR);
+  // Every item in the world, whatever its state, as the engine raised it.
+  const everything = ["open", "answered", "completed", "dismissed"].flatMap(
+    (state) => listed(served, ["--state", state, "--full"]),
+  );
+  expect(new Set(everything.map(({ item }) => item.created_at)).size).toBe(
+    everything.length,
+  );
+  const raisedAt = new Map(
+    everything.map(({ item }) => [item.title, item.created_at]),
+  );
+  const list = await open(page, served, { groupBy: null });
+  const filters = page.getByRole("group", { name: "Filter action items" });
+  const groupBy = filters.getByRole("combobox", { name: "Group by" });
+  /** The list as drawn: a list per heading, or the one list when ungrouped. */
+  const drawn = async (grouped: boolean) =>
+    grouped ? groupedTitles(page) : [await titles(list)];
+  const engineOrder = listed(served).map(({ item }) => item.title);
+
+  for (const field of ["priority", "kind", "source", "blocking", "none"]) {
+    await groupBy.selectOption(field);
+    await sortControl(page).selectOption("default");
+    const grouped = field !== "none";
+    await expect
+      .poll(async () => (await drawn(grouped)).flat().length)
+      .toBe(engineOrder.length);
+    const engine = await drawn(grouped);
+    // Within each group, Default is the engine's own order.
+    for (const group of engine)
+      expect(group).toEqual(
+        engineOrder.filter((title) => group.includes(title)),
+      );
+    const newest = engine.map((group) => byRaised(raisedAt, group, "newest"));
+    const oldest = engine.map((group) => byRaised(raisedAt, group, "oldest"));
+    // Some group holds items raised apart, so the two orders are seen to differ.
+    expect(newest).not.toEqual(oldest);
+    for (const [order, expected] of [
+      ["newest", newest],
+      ["oldest", oldest],
+    ] as const) {
+      await sortControl(page).selectOption(order);
+      await expect.poll(() => drawn(grouped)).toEqual(expected);
+    }
+    await sortControl(page).selectOption("default");
+    await expect.poll(() => drawn(grouped)).toEqual(engine);
+  }
+
+  // Ungrouped, so what a filter leaves is one list to order.
+  /** Choose `value` under `label`, waiting for the read it asks for. */
+  const choose = async (
+    label: string,
+    value: string,
+    selector: Record<string, unknown>,
+  ) => {
+    const asked = subscribedTo(page, selector);
+    await filters.getByLabel(label, { exact: true }).selectOption(value);
+    await asked;
+  };
+  const selected = (args: string[]) =>
+    listed(served, args).map(({ item }) => item.title);
+  const filtered: readonly {
+    readonly name: string;
+    readonly apply: () => Promise<void>;
+    readonly clear: () => Promise<void>;
+    readonly leaves: () => string[];
+  }[] = [
+    {
+      name: "Kind",
+      apply: () => choose("Kind", "task", { kind: "task" }),
+      clear: () => choose("Kind", "", {}),
+      leaves: () => selected(["--kind", "task"]),
+    },
+    {
+      name: "Blocking",
+      apply: () => choose("Blocking", "yes", { blocking: true }),
+      clear: () => choose("Blocking", "", {}),
+      leaves: () => selected(["--blocking", "yes"]),
+    },
+    {
+      name: "Priority",
+      apply: () => choose("Priority", "urgent", { priority: "urgent" }),
+      clear: () => choose("Priority", "", {}),
+      leaves: () => selected(["--priority", "Critical"]),
+    },
+    {
+      name: "State",
+      apply: () => showState(page, "dismissed"),
+      clear: () => showState(page, "open"),
+      leaves: () => selected(["--state", "dismissed"]),
+    },
+    {
+      name: "Source",
+      apply: async () => {
+        await filters
+          .getByLabel("Source", { exact: true })
+          .selectOption("session");
+        const asked = subscribedTo(page, { session: SUPERVISOR });
+        await filters.getByLabel("Source identifier").fill(SUPERVISOR);
+        await asked;
+      },
+      clear: () => choose("Source", "", {}),
+      leaves: () => selected(["--session", SUPERVISOR]),
+    },
+  ];
+  for (const { name, apply, clear, leaves } of filtered) {
+    await sortControl(page).selectOption("default");
+    await apply();
+    const left = leaves();
+    expect(left.length, `${name} leaves more than one item`).toBeGreaterThan(1);
+    await expect.poll(() => titles(list)).toEqual(left);
+    for (const order of ["newest", "oldest"] as const) {
+      await sortControl(page).selectOption(order);
+      await expect
+        .poll(() => titles(list))
+        .toEqual(byRaised(raisedAt, left, order));
+    }
+    await clear();
+  }
+});
+
+/**
+ * The gaps between consecutive cards of one group and between consecutive
+ * priority groups, as the page before Sort and raised times rendered them over
+ * this world at both widths, measured the same way as below: the cards' own
+ * list gap, and a group's margin above the next.
+ */
+const BASE_CARD_GAP = 5;
+const BASE_GROUP_GAP = 6;
+
+for (const width of [1440, 390] as const)
+  test(`at ${width} wide a question card's answer box sits apart from what is above it by the card's own padding and inside it, with the gaps between cards and groups as they were`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    const served = await serveWorld("realistic");
+    // A question offering choices too, so the box is measured below them as
+    // well as below a body.
+    raiseQuestion(served, {
+      key: "spacing-choices",
+      title: "Which region should the spacing canary use?",
+      choices: REGIONS,
+    });
+    await open(page, served, { groupBy: null });
+    const boxes = listRegion(page).getByRole("textbox", { name: /^Answer: /u });
+    await expect(boxes).toHaveCount(3);
+    for (const field of await boxes.all()) {
+      // llmlint: ignore[e2e_uses_accessible_selectors] the criterion is a layout relation: the gap between the answer field and whatever the card draws directly above it, and the padding of the surface holding both; no role or name says which element sits above a field, so the field is found by its label and only its rendered neighbours are read from the DOM.
+      const measured = await field.evaluate((element) => {
+        const card = element.closest("article");
+        const above = element.previousElementSibling;
+        const surface = element.parentElement;
+        if (card === null || above === null || surface === null)
+          throw new Error("an answer box outside a card");
+        const own = element.getBoundingClientRect();
+        const outer = card.getBoundingClientRect();
+        return {
+          gap: own.top - above.getBoundingClientRect().bottom,
+          padding: Number.parseFloat(getComputedStyle(surface).paddingTop),
+          inside:
+            own.left >= outer.left &&
+            own.right <= outer.right &&
+            own.top >= outer.top &&
+            own.bottom <= outer.bottom,
+        };
+      });
+      expect(measured.padding).toBeGreaterThan(0);
+      expect(Math.abs(measured.gap - measured.padding)).toBeLessThanOrEqual(1);
+      expect(measured.inside).toBe(true);
+    }
+
+    // Each priority group, and each card in it — a list item holding a card,
+    // not one of a body's own bullets — as a reader's tools find them.
+    const between = (boxes: readonly { y: number; height: number }[]) =>
+      boxes
+        .slice(1)
+        .map(
+          (next, index) =>
+            next.y - ((boxes[index]?.y ?? 0) + (boxes[index]?.height ?? 0)),
+        );
+    const groups = await listRegion(page)
+      .getByRole("region")
+      .filter({ has: page.getByRole("heading", { level: 2 }) })
+      .all();
+    const cardGaps: number[] = [];
+    const groupBoxes = [];
+    for (const group of groups) {
+      groupBoxes.push(await box(group));
+      const cards = await group
+        .getByRole("listitem")
+        .filter({ has: page.getByRole("article") })
+        .all();
+      const cardBoxes = [];
+      for (const card of cards) cardBoxes.push(await box(card));
+      cardGaps.push(...between(cardBoxes));
+    }
+    const gaps = { cards: cardGaps, groups: between(groupBoxes) };
+    expect(gaps.cards.length).toBeGreaterThan(0);
+    expect(gaps.groups.length).toBeGreaterThan(0);
+    for (const gap of gaps.cards)
+      expect(Math.abs(gap - BASE_CARD_GAP)).toBeLessThanOrEqual(1);
+    for (const gap of gaps.groups)
+      expect(Math.abs(gap - BASE_GROUP_GAP)).toBeLessThanOrEqual(1);
+  });

@@ -1,20 +1,26 @@
-import type { HumanItemReopen } from "@onepipeline-ui/dag-model";
 import { X } from "lucide-react";
-import { useId, useState } from "react";
+import { useId } from "react";
+import { ReopenAction } from "./ReopenAction";
 import type { Toast } from "./useHumanItems";
 import { useToastLifecycle } from "./useToastLifecycle";
 
 const PAST = {
   complete: "Completed",
   dismiss: "Dismissed",
+  reopen: "Reopened",
 } as const;
 
 const DOING = {
   complete: "Completing",
   dismiss: "Dismissing",
+  reopen: "Reopening",
 } as const;
 
-const UNDONE = { complete: "Reopened", dismiss: "Restored" } as const;
+const UNDONE = {
+  complete: "Reopened",
+  dismiss: "Restored",
+  reopen: "Reopened",
+} as const;
 
 /** What the toast says, in one line, for where its write and follow-up stand. */
 function sentence(toast: Toast): string {
@@ -64,10 +70,13 @@ export function HumanItemToast({
   const { action, phase, followUp } = toast;
   const failed = phase === "failed" || followUp?.phase === "failed";
 
-  const resolving = phase !== "failed";
+  // A reopen is the undo itself: nothing follows it.
+  const resolving = phase !== "failed" && action !== "reopen";
   const undone = followUp?.kind === "undo" && followUp.phase === "done";
   const noteLabel = action === "dismiss" ? "Add reason" : "Add comment";
   const noteName = action === "dismiss" ? "Reason" : "Comment";
+  const noting = followUp?.kind === "note" && followUp.phase === "sending";
+  const undoing = followUp?.kind === "undo" && followUp.phase === "sending";
   return (
     <section
       aria-label="Action result"
@@ -82,13 +91,23 @@ export function HumanItemToast({
       >
         {sentence(toast)}
       </p>
+      {followUp?.kind === "note" && followUp.saved !== undefined && (
+        <blockquote
+          aria-label={`Saved ${noteName.toLowerCase()}`}
+          className="human-items-toast-saved"
+        >
+          {followUp.saved}
+        </blockquote>
+      )}
       {resolving && !undone && (
         <div className="human-items-toast-actions">
-          <UndoAction
+          <ReopenAction
+            className="human-items-toast-action"
+            disabled={undoing}
             label={action === "dismiss" ? "Restore" : "Reopen"}
             onPress={onUndo}
             reopen={toast.reopen}
-            sending={followUp?.kind === "undo" && followUp.phase === "sending"}
+            sending={undoing}
           />
           {!writing && (
             <button
@@ -118,13 +137,20 @@ export function HumanItemToast({
             id={noteId}
             onChange={(event) => setText(event.target.value)}
             placeholder={`${noteName}, then Enter`}
-            readOnly={followUp?.kind === "note" && followUp.phase === "sending"}
+            readOnly={noting}
             value={text}
           />
-          <button className="human-items-toast-action" type="submit">
-            {followUp?.kind === "note" && followUp.phase === "failed"
-              ? "Send again"
-              : "Send"}
+          <button
+            aria-busy={noting}
+            className="human-items-toast-action"
+            disabled={noting}
+            type="submit"
+          >
+            {noting
+              ? "Sending…"
+              : followUp?.kind === "note" && followUp.phase === "failed"
+                ? "Send again"
+                : "Send"}
           </button>
         </form>
       )}
@@ -137,73 +163,5 @@ export function HumanItemToast({
         <X aria-hidden="true" size={14} />
       </button>
     </section>
-  );
-}
-
-/**
- * Restore or Reopen. Where the engine says it cannot be, it is greyed, and a
- * small question mark set on its text as a superscript gives the reason — on
- * hover, and on a press, which is the one a phone has. The mark is a control of
- * its own beside the greyed one, never inside a disabled one, so it stays
- * pressable.
- */
-function UndoAction({
-  label,
-  reopen,
-  sending,
-  onPress,
-}: {
-  readonly label: string;
-  readonly reopen?: HumanItemReopen;
-  readonly sending: boolean;
-  readonly onPress: () => void;
-}) {
-  const [pinned, setPinned] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const tip = useId();
-  if (reopen?.available !== false)
-    return (
-      <button
-        aria-busy={sending}
-        className="human-items-toast-action"
-        onClick={() => {
-          if (!sending) onPress();
-        }}
-        type="button"
-      >
-        {sending ? `${label}…` : label}
-      </button>
-    );
-  return (
-    <fieldset
-      aria-label={`${label} (unavailable)`}
-      className="human-items-toast-action human-items-unavailable"
-      onPointerEnter={() => setHovered(true)}
-      onPointerLeave={() => setHovered(false)}
-    >
-      <button aria-describedby={tip} disabled type="button">
-        {label}
-      </button>
-      <sup className="human-items-why-anchor">
-        <button
-          aria-controls={tip}
-          aria-expanded={pinned}
-          aria-label={`Why ${label} is unavailable`}
-          className="human-items-why"
-          onClick={() => setPinned((open) => !open)}
-          type="button"
-        >
-          ?
-        </button>
-      </sup>
-      <span
-        className="human-items-why-tip"
-        hidden={!(pinned || hovered)}
-        id={tip}
-        role="tooltip"
-      >
-        {reopen.reason}
-      </span>
-    </fieldset>
   );
 }
