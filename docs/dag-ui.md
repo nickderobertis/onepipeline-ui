@@ -665,6 +665,9 @@ being photographed.
 | `20-recorded-overall` | execution ending at settlement, and the run's own events with the completion 41 hours later among them |
 | `22-node-timeline-crosshair` | the node timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
 | `23-overall-timeline-crosshair` | the overall timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
+| `35-conversation-item` | an agent message opened from the node's events: its conversation alone, scrolled to that item and outlined in the selection accent |
+| `36-refusal-rows` | refused edits as rows of the run's event list, each its one-line summary by its author and not applied |
+| `37-refusal-detail` | a refused edit's detail: its author, summary, node and command, and its complete refusal read whole |
 | `24-held-graph` | a run holding finished work for releases: a held-unlanded and a draft node, each card naming what it awaits |
 | `25-held-node` | the draft node's view, naming every release it awaits in full above the settlement's detail |
 | `26-action-items` | Action items: six long realistic cards under their priority headings, the filters folded at phone width |
