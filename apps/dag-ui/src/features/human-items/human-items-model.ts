@@ -35,9 +35,16 @@ const STATE_LABELS: { readonly [S in HumanItem["state"]]: string } = {
   answered: "Answered",
   completed: "Completed",
   dismissed: "Dismissed",
+  expired: "Expired",
 };
 
-const STATES = ["open", "answered", "completed", "dismissed"] as const;
+const STATES = [
+  "open",
+  "answered",
+  "completed",
+  "dismissed",
+  "expired",
+] as const;
 
 export const STATE_OPTIONS = STATES.map((state) => ({
   state,
@@ -160,6 +167,7 @@ const HISTORY_ACTIONS: Record<HumanItemHistoryEntry["action"], string> = {
   "human-item-auto-resolved": "Resolved",
   "human-item-reopened": "Reopened",
   "human-item-noted": "Note",
+  "human-item-expired": "Expired",
 };
 
 /**

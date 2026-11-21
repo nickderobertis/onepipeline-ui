@@ -26,6 +26,7 @@ export type HumanItem = {
   readonly state: HumanItemState;
   readonly resolution: HumanItemResolution | null;
   readonly tracker: HumanItemTracker | null;
+  readonly expiry?: readonly HumanItemExpiryCondition[];
   readonly created_at: string;
   readonly updated_at: string;
 };
@@ -40,6 +41,7 @@ export type HumanItemInput = {
   readonly owner: HumanItemOwner;
   readonly block: HumanItemBlock;
   readonly approval: HumanItemApproval | null;
+  readonly expiry?: readonly HumanItemExpiryCondition[];
 };
 export type HumanItemAction =
   | {
@@ -53,6 +55,7 @@ export type HumanItemAction =
       readonly owner: HumanItemOwner;
       readonly block: HumanItemBlock;
       readonly approval: HumanItemApproval | null;
+      readonly expiry?: readonly HumanItemExpiryCondition[];
       readonly action: "raise";
     }
   | {
@@ -115,6 +118,7 @@ export type HumanItemView = {
   readonly item: HumanItem;
   readonly blocked: HumanItemBlocked;
   readonly reopen: HumanItemReopen;
+  readonly checks?: readonly HumanItemCheckStatus[];
 };
 export type HumanItemDetail = {
   readonly item: HumanItem;
@@ -122,6 +126,7 @@ export type HumanItemDetail = {
   readonly nodes: readonly HumanItemNode[];
   readonly reopen: HumanItemReopen;
   readonly history?: readonly HumanItemHistoryEntry[];
+  readonly checks?: readonly HumanItemCheckStatus[];
 };
 export type HumanItemReceipt = {
   readonly item: HumanItemView;
@@ -138,6 +143,7 @@ export type HumanItemMetadata = {
   readonly title: string;
   readonly body: string;
   readonly choices?: readonly HumanItemChoice[];
+  readonly expiry?: readonly HumanItemExpiryCondition[];
 };
 export type HumanItemEventPayload = {
   readonly schema_version: number;
@@ -185,6 +191,13 @@ export type HumanItemBlockedPlan = {
   readonly count: number;
   readonly preview: readonly HumanItemNode[];
 };
+export type HumanItemCheckOutcome = "holds" | "not-yet" | "failed";
+export type HumanItemCheckStatus = {
+  readonly condition: number;
+  readonly last_run_at: string;
+  readonly outcome: HumanItemCheckOutcome;
+  readonly detail: string | null;
+};
 export type HumanItemChoice = {
   readonly id: string;
   readonly title: string;
@@ -197,7 +210,8 @@ export type HumanItemEventAction =
   | "human-item-dismissed"
   | "human-item-auto-resolved"
   | "human-item-reopened"
-  | "human-item-noted";
+  | "human-item-noted"
+  | "human-item-expired";
 export type HumanItemEventBatch = {
   readonly id: string;
   readonly size: number;
@@ -207,6 +221,33 @@ export type HumanItemEventBy = {
   readonly on_behalf_of: string | null;
   readonly provenance?: Provenance;
 };
+export type HumanItemExpiryCondition =
+  | {
+      readonly when: "time";
+      readonly at?: string;
+      readonly after_seconds?: number;
+      readonly reason?: string;
+    }
+  | {
+      readonly when: "run";
+      readonly run: string;
+      readonly on: "settled" | "ended";
+      readonly reason?: string;
+    }
+  | {
+      readonly when: "node";
+      readonly run: string;
+      readonly node: string;
+      readonly reason?: string;
+    }
+  | {
+      readonly when: "check";
+      readonly command: readonly string[];
+      readonly cwd?: string;
+      readonly timeout_seconds?: number;
+      readonly interval_seconds?: number;
+      readonly reason?: string;
+    };
 export type HumanItemHistoryEntry = {
   readonly action: HumanItemEventAction;
   readonly at: string;
@@ -236,13 +277,19 @@ export type HumanItemResolution = {
   readonly choice?: string | null;
   readonly reason: string | null;
   readonly provenance?: Provenance;
+  readonly condition?: HumanItemExpiryCondition | null;
 };
 export type HumanItemSampleApproval = {
   readonly approval: HumanItemApproval;
   readonly actor: string;
   readonly on_behalf_of: string | null;
 };
-export type HumanItemState = "open" | "answered" | "completed" | "dismissed";
+export type HumanItemState =
+  | "open"
+  | "answered"
+  | "completed"
+  | "dismissed"
+  | "expired";
 export type HumanItemTracker = { readonly task: string; readonly url: string };
 export type Provenance = "manager" | "user";
 export type Ticket = {
