@@ -4013,7 +4013,7 @@ fn a_refused_expiry_sweep_is_said_and_made_again_once_the_store_reads() {
 
     // A directory where the engine opens its index lock refuses every read and
     // sweep; the journal itself is untouched, so the view is not read again.
-    // llmlint: ignore[tests_mirror_real_usage] no public interface makes the engine refuse a sweep, and the refusal and its recovery are the subject; the lock path is the one `an_open_view_rides_out_a_journal_it_cannot_read_and_catches_up_on_the_same_stream` swaps for a refused read, and everything after it is read through the server's own stream.
+    // llmlint: ignore-block[tests_mirror_real_usage] no public interface makes the engine refuse a sweep, and the refusal and its recovery are the subject; the lock path is the one `an_open_view_rides_out_a_journal_it_cannot_read_and_catches_up_on_the_same_stream` swaps for a refused read, and everything after it is read through the server's own stream.
     let lock = world.root.join("human-items").join("index.lock");
     let deadline = Instant::now() + PATIENCE;
     while std::fs::remove_file(&lock)
@@ -4032,6 +4032,7 @@ fn a_refused_expiry_sweep_is_said_and_made_again_once_the_store_reads() {
     );
 
     std::fs::remove_dir(&lock).expect("give the lock back");
+    // llmlint: ignore-end[tests_mirror_real_usage]
     while tab.state["visible"]["items"]
         .as_array()
         .is_some_and(|items| !items.is_empty())
