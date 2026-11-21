@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.88.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.87.2...v0.88.0) - 2026-11-21
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine whose run-end hook fires for a settle after its driver exited ([#867](https://github.com/nickderobertis/onepipeline-ui/pull/867))
+
 ## [0.87.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.87.1...v0.87.2) - 2026-11-21
 
 ### Fixed
