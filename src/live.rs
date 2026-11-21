@@ -32,7 +32,9 @@
 //! once every [`EXPIRY_SWEEP_INTERVAL`] and off its own thread: an item whose time,
 //! run, node or check condition came to hold is retired by that sweep, which moves
 //! the journal, so a page left open is the one reader that need be running for the
-//! item to leave it.
+//! item to leave it. A sweep reads the journal, so it is made only when it could
+//! change a held view: never over an untouched journal no shown item's expiry
+//! names, and for time conditions only once one has passed (`SweepDue`).
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -502,18 +504,98 @@ struct Sweeps {
     finished: Option<Result<onepipeline::human_items::HumanItemExpirySweep, ApiError>>,
 }
 
-/// One human-item view: what it selects, and the `visible` its tabs hold.
+/// One human-item view: what it selects, the `visible` its tabs hold, and when a
+/// sweep could next change it.
 struct HeldHumanItems {
     filter: HumanItemFilter,
     item: Option<HumanItemId>,
     visible: Value,
+    due: SweepDue,
 }
 
 impl HeldHumanItems {
-    /// The `visible` this view shows now, as the engine reads it.
-    fn read(&self, items: &crate::human_items::HumanItems) -> Result<Value, ApiError> {
+    /// The `visible` this view shows now, as the engine reads it, and when a sweep
+    /// could next change what it shows.
+    fn read(&self, items: &crate::human_items::HumanItems) -> Result<(Value, SweepDue), ApiError> {
         let (listed, detail) = items.view(&self.filter, self.item.as_ref())?;
-        Ok(json!({ "type": "human-items", "items": listed, "detail": detail }))
+        let due = SweepDue::of(
+            &self.filter,
+            listed
+                .iter()
+                .map(|view| &view.item)
+                .chain(detail.as_ref().map(|detail| &detail.item)),
+        );
+        Ok((
+            json!({ "type": "human-items", "items": listed, "detail": detail }),
+            due,
+        ))
+    }
+}
+
+/// When an expiry sweep could next change what a held view shows. A sweep reads
+/// the journal, so the poller makes one only when it could: never while no open
+/// item a view shows carries expiry, and for time conditions alone only once the
+/// earliest of them has passed. A run, node or check condition can come to hold
+/// without the journal moving, so it is swept every [`EXPIRY_SWEEP_INTERVAL`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SweepDue {
+    /// No open item shown carries expiry.
+    Never,
+    /// Only time conditions, the earliest of which comes due then.
+    At(SystemTime),
+    /// Every interval.
+    Always,
+}
+
+impl SweepDue {
+    /// What a view of `filter` listing `shown` asks of the sweep. A view of any
+    /// state but open can gain an item that expires out of a view no tab holds, so
+    /// it is swept every interval.
+    fn of<'a>(
+        filter: &HumanItemFilter,
+        shown: impl Iterator<Item = &'a onepipeline::human_items::HumanItem>,
+    ) -> Self {
+        use onepipeline::human_items::{HumanItemExpiryCondition, HumanItemState};
+        if filter
+            .state
+            .is_some_and(|state| state != HumanItemState::Open)
+        {
+            return Self::Always;
+        }
+        let conditions = shown
+            .filter(|item| item.state == HumanItemState::Open)
+            .flat_map(|item| item.expiry.iter());
+        let mut due = Self::Never;
+        for condition in conditions {
+            let at = match condition {
+                HumanItemExpiryCondition::Time { at: Some(at), .. } => {
+                    time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339)
+                        .ok()
+                        .map(SystemTime::from)
+                }
+                _ => None,
+            };
+            due = due.and(at.map_or(Self::Always, Self::At));
+        }
+        due
+    }
+
+    /// The sooner of the two.
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Always, _) | (_, Self::Always) => Self::Always,
+            (Self::Never, due) | (due, Self::Never) => due,
+            (Self::At(one), Self::At(two)) => Self::At(one.min(two)),
+        }
+    }
+
+    /// Whether a sweep could change anything now.
+    fn now(self) -> bool {
+        match self {
+            Self::Never => false,
+            Self::At(at) => SystemTime::now() >= at,
+            Self::Always => true,
+        }
     }
 }
 
@@ -2034,23 +2116,20 @@ impl Hub {
                 .iter()
                 .any(|visible| matches!(visible, Visible::HumanItems(shown) if shown == key))
         });
-        self.sweep_expiry(&mut reading);
+        self.take_sweep(&mut reading);
         // Reported once a spell by the refresh itself, and tried again next tick.
         let _ = self.refresh_human_items(&mut reading);
+        self.sweep_expiry(&reading);
     }
 
-    /// Take what the last expiry sweep came to, and start the next once one is due
-    /// and an Action items view is held.
+    /// Take what the last expiry sweep came to.
     ///
     /// An expiry the sweep wrote moved the journal, so the refresh after this reads
     /// it like any other write. A check's outcome is kept beside the journal rather
     /// than in it, so a sweep that ran one has the views read again whatever the
-    /// journal's stamp says. A refused sweep is said once a spell and started again
-    /// when the next is due.
-    fn sweep_expiry(&self, reading: &mut HumanItemsReading) {
-        if reading.views.is_empty() {
-            return;
-        }
+    /// journal's stamp says. A refused sweep is said once a spell, and started
+    /// again when the next is due.
+    fn take_sweep(&self, reading: &mut HumanItemsReading) {
         let finished = lock(&reading.sweeps).finished.take();
         match finished {
             Some(Ok(sweep)) => {
@@ -2069,6 +2148,18 @@ impl Hub {
                 reading.sweep_failing = true;
             }
             None => {}
+        }
+    }
+
+    /// Start the next expiry sweep once one is due and could change what a held
+    /// Action items view shows (see [`SweepDue`]).
+    fn sweep_expiry(&self, reading: &HumanItemsReading) {
+        let could = reading
+            .views
+            .values()
+            .fold(SweepDue::Never, |due, held| due.and(held.due));
+        if !could.now() {
+            return;
         }
         let mut sweeps = lock(&reading.sweeps);
         let due = sweeps
@@ -2120,8 +2211,9 @@ impl Hub {
             filter: filter.clone(),
             item: item.clone(),
             visible: Value::Null,
+            due: SweepDue::Never,
         };
-        held.visible = held.read(items)?;
+        (held.visible, held.due) = held.read(items)?;
         let visible = held.visible.clone();
         reading.views.insert(key, held);
         Ok(visible)
@@ -2148,7 +2240,8 @@ impl Hub {
         let mut refused = None;
         for (key, held) in &mut reading.views {
             match held.read(items) {
-                Ok(visible) => {
+                Ok((visible, due)) => {
+                    held.due = due;
                     let mut ops = Vec::new();
                     if let Err(refused) = crate::patch::diff(&held.visible, &visible, &mut ops) {
                         eprintln!("onepipeline-api: human items could not be patched: {refused}");
