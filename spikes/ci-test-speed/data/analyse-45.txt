@@ -1,0 +1,153 @@
+population: 30 merged non-release PRs (#675–#767), each with its cited run
+
+== test-linux: wall = 13.3 + 0.127 × executed task-minutes (r=0.72, n=37 runs)
+  #767 run 43346136460 wall 11.2 | ran 2 replayed 4 of 6 cacheable | 1× no diff-matched input; 1× files: onevcs.toml
+  #764 run 43277793896 wall 17.4 | ran 6 replayed 4 of 10 cacheable | 1× no diff-matched input; 1× files: .github/scripts, .github/tests, .github/workflows; 1× files: docs/release-sweep-timing.md; 1× files: AGENTS.md; 1× files: .github/scripts, .github/tests, .github/workflows, AGENTS.md; 1× files: .github/workflows, tests/release
+  #762 run 43257411385 wall 28.6 | ran 16 replayed 10 of 26 cacheable | 2× files: apps/dag-ui-e2e, apps/dag-ui, docs/contract.md, packages/dag-model; 2× files: apps/dag-ui, packages/dag-model, src/human_items.rs, src/store.rs; 2× files: apps/dag-ui, docs/contract.md, packages/dag-model, src/human_items.rs; 1× files: shots/baseline, src/human_items.rs, src/store.rs, tests/contract.rs; 2× files: apps/dag-ui-e2e, apps/dag-ui, docs/contract.md, docs/dag-ui.md; 3× files: src/human_items.rs, src/store.rs; 1× files: apps/dag-ui-e2e; 2× files: apps/dag-ui-e2e, src/human_items.rs, src/store.rs; 1× files: apps/dag-ui-e2e, src/human_items.rs, src/store.rs, tests/fixtures
+  #749 run 43334228586 wall 25.3 | ran 10 replayed 15 of 25 cacheable | 3× files: scripts/coverage-tier-key.mjs, scripts/coverage-unit.sh; 1× files: .github/project.json, .github/tests, .github/workflows, scripts/build-linux-wheel.sh; 1× files: scripts/build-linux-wheel.sh, scripts/coverage-tier-key.mjs, scripts/coverage-unit.sh; 1× files: .github/project.json, .github/tests, .github/workflows, apps/dag-ui-e2e; 1× files: .github/project.json, scripts/build-linux-wheel.sh, scripts/ci-compile-env.sh, scripts/ci-job.sh; 2× version-free manifest digest (cargo); 1× files: scripts/build-linux-wheel.sh, tests/release
+  #748 run 43204179393 wall 24.4 | ran 8 replayed 13 of 21 cacheable | 2× files: apps/dag-ui-e2e, apps/dag-ui, src/payload.rs; 4× files: apps/dag-ui, src/payload.rs; 2× files: apps/dag-ui-e2e, src/payload.rs
+  #746 run 43173228984 wall 22.4 | ran 10 replayed 13 of 23 cacheable | 4× files: apps/dag-ui, justfile, src/live.rs, src/live; 1× files: .github/reporting, .github/tests, .github/workflows, apps/dag-ui-e2e; 1× files: AGENTS.md, justfile, scripts/ci-job.sh, src/live.rs; 1× files: .github/reporting, .github/tests, .github/workflows, AGENTS.md; 1× files: .github/tests, apps/dag-ui-e2e, justfile, scripts/ci-job.sh; 2× files: apps/dag-ui-e2e, src/live.rs, src/live
+  #742 run 43126654757 wall 33.6 | ran 20 replayed 6 of 26 cacheable | 3× files: tests/fixtures; 1× files: tests/e2e, tests/fixtures; 1× files: tests/e2e, tests/packaging.rs; 1× files: tests/packaging.rs; 12× version-free manifest digest (cargo); 2× files: tests/e2e, tests/fixtures, tests/packaging.rs, tests/plan_copy.rs
+  #739 run 43063892233 wall 33.6 | ran 10 replayed 16 of 26 cacheable | 1× files: tests/fixtures; 1× files: tests/e2e, tests/fixtures; 1× files: tests/packaging.rs; 4× version-free manifest digest (cargo); 1× files: tests/e2e, tests/packaging.rs; 2× files: tests/e2e, tests/fixtures, tests/packaging.rs
+  #737 run 43020798319 wall 2.1 | ran 0 replayed 0 of 0 cacheable | 
+  #735 run 43010382184 wall 24.9 | ran 5 replayed 0 of 5 cacheable | 2× files: tests/fixtures; 1× version-free manifest digest (cargo); 2× files: tests/packaging.rs
+  #731 run 42955851132 wall 35.8 | ran 19 replayed 7 of 26 cacheable | 19× version-free manifest digest (cargo)
+  #729 run 42948785594 wall 36.0 | ran 22 replayed 4 of 26 cacheable | 2× files: packages/timeline-categories, tests/fixtures; 2× files: packages/timeline-categories, tests/packaging.rs; 4× files: packages/timeline-categories; 2× files: tests/fixtures; 1× files: tests/fixtures, tests/packaging.rs; 10× version-free manifest digest (cargo); 1× files: packages/timeline-categories, tests/fixtures, tests/packaging.rs
+  #725 run 43014974237 wall 24.4 | ran 8 replayed 19 of 27 cacheable | 1× files: apps/dag-ui, docs/contract.md, packages/dag-model, packages/telemetry-client; 2× files: apps/dag-ui, packages/dag-model, packages/telemetry-client, src/contract.rs; 1× files: README.md, apps/dag-ui, docs/contract.md, packages/dag-model; 2× files: .github/reporting, README.md, apps/dag-ui-e2e, apps/dag-ui; 2× files: apps/dag-ui-e2e, src/contract.rs, src/error.rs, src/live.rs
+  #723 run 42802836364 wall 25.3 | ran 20 replayed 6 of 26 cacheable | 4× files: tests/fixtures; 12× version-free manifest digest (cargo); 2× files: tests/packaging.rs; 2× files: tests/fixtures, tests/packaging.rs
+  #719 run 42718348256 wall 31.3 | ran 22 replayed 4 of 26 cacheable | 1× files: packages/timeline-categories, tests/fixtures; 1× files: packages/timeline-categories, tests/e2e, tests/fixtures; 1× files: packages/timeline-categories, tests/e2e, tests/packaging.rs; 4× files: packages/timeline-categories; 1× files: packages/timeline-categories, tests/packaging.rs; 2× files: tests/fixtures; 1× files: tests/e2e, tests/fixtures, tests/packaging.rs; 10× version-free manifest digest (cargo); 1× files: packages/timeline-categories, tests/e2e, tests/fixtures, tests/packaging.rs
+  #717 run 42698740533 wall 26.1 | ran 7 replayed 19 of 26 cacheable | 3× files: packages/dag-model, src/human_items.rs, tests/e2e, tests/fixtures; 1× files: packages/dag-model, src/human_items.rs, tests/packaging.rs; 1× files: packages/dag-model, src/human_items.rs; 1× files: packages/dag-model, src/human_items.rs, tests/e2e, tests/packaging.rs; 1× files: src/human_items.rs, tests/e2e, tests/fixtures, tests/packaging.rs
+  #715 run 42705177443 wall 33.6 | ran 2 replayed 1 of 3 cacheable | 2× files: .github/tests, .github/workflows
+  #714 run 42735750874 wall 32.1 | ran 20 replayed 3 of 23 cacheable | 1× files: apps/dag-ui-e2e, apps/dag-ui, docs/contract.md, packages/dag-model; 3× files: README.md, apps/dag-ui, docs/contract.md, packages/dag-model; 2× files: apps/dag-ui, packages/dag-model, packages/telemetry-client, src/contract.rs; 1× files: packages/dag-model, tests/fixtures; 1× files: README.md, shots/baseline, src/contract.rs, src/human_items.rs; 1× files: README.md, apps/dag-ui, docs/contract.md, docs/human-items.md; 1× files: apps/dag-ui, packages/dag-model, src/contract.rs, src/human_items.rs; 7× files: src/contract.rs, src/human_items.rs, src/server.rs; 2× files: apps/dag-ui-e2e, src/contract.rs, src/human_items.rs, src/server.rs; 1× files: README.md, apps/dag-ui-e2e, apps/dag-ui, docs/contract.md
+  #711 run 42682963404 wall 21.9 | ran 6 replayed 21 of 27 cacheable | 4× files: justfile, nx.json, scripts/coverage-merge.mjs, scripts/coverage-tier-key.mjs; 1× files: .github/tests, justfile, nx.json, project.json; 1× files: .github/tests, AGENTS.md, justfile, llmlint.yml
+  #709 run 42622911862 wall 31.8 | ran 15 replayed 6 of 21 cacheable | 2× files: tests/fixtures; 2× files: tests/fixtures, tests/packaging.rs; 11× version-free manifest digest (cargo)
+  #703 run 42525106270 wall 34.0 | ran 0 replayed 0 of 0 cacheable | 
+  #693 run 42482048586 wall 15.9 | ran 2 replayed 0 of 2 cacheable | 1× files: .github/reporting, .github/tests, .github/workflows; 1× no diff-matched input
+  #690 run 42552874806 wall 30.6 | ran 7 replayed 15 of 22 cacheable | 1× files: README.md, project.json, scripts/ci-job.sh, scripts/visual-capture.sh; 1× files: src/contract.rs, src/human_items.rs, src/server.rs; 1× files: .github/tests, apps/dag-ui-e2e, project.json, scripts/ci-job.sh; 1× files: .github/tests, .github/workflows, README.md, apps/dag-ui-e2e; 2× files: apps/dag-ui-e2e, src/contract.rs, src/human_items.rs, src/server.rs; 1× files: README.md, apps/dag-ui, docs/contract.md, packages/dag-model
+  #689 run 42547836968 wall 23.8 | ran 2 replayed 6 of 8 cacheable | 1× files: .github/workflows, scripts/release.mjs; 1× files: .github/tests, .github/workflows, scripts/release.mjs, tests/e2e
+  #686 run 42421538096 wall 32.4 | ran 0 replayed 0 of 0 cacheable | 
+  #685 run 42420095766 wall 3.0 | ran 0 replayed 0 of 0 cacheable | 
+  #684 run 42420095766 wall 3.0 | ran 0 replayed 0 of 0 cacheable | 
+  #678 run 42376260531 wall 21.9 | ran 15 replayed 0 of 15 cacheable | 2× no diff-matched input; 13× files: src/payload.rs
+  #676 run 42384341444 wall 16.3 | ran 3 replayed 19 of 22 cacheable | 1× files: AGENTS.md, budgets.yaml, scripts/actions-budget-figures.sh, scripts/actions-budget-figures.versions; 1× version-free manifest digest (npm); 1× files: .github/project.json, .github/reporting, .github/tests, .github/workflows
+  #675 run 42373174063 wall 25.3 | ran 20 replayed 1 of 21 cacheable | 1× files: packages/dag-model, tests/fixtures; 13× version-free manifest digest (cargo); 1× files: tests/e2e, tests/fixtures, tests/packaging.rs; 3× files: packages/dag-model; 1× files: tests/fixtures; 1× files: packages/dag-model, tests/e2e, tests/fixtures, tests/packaging.rs
+  executed task medians, before #711 → from #711 (minutes, n):
+    dag-ui-e2e:test                                  16.6 (n=7) → 19.5 (n=12)
+    github-workflows-nx-cache:test                   12.2 (n=14) → 17.2 (n=17)
+    onepipeline-ui-release:test-standalone           12.4 (n=13) → 17.0 (n=16)
+    onepipeline-ui-repo-tooling:test                 10.8 (n=14) → 16.1 (n=16)
+    dag-ui-read-latency:compile-release-server       13.3 (n=4) → 12.1 (n=17)
+    report-job:test                                  3.5 (n=9) → 6.1 (n=6)
+    onepipeline-ui-release:test-staged               3.9 (n=13) → 4.9 (n=16)
+    onepipeline-ui-e2e:test                          3.6 (n=10) → 4.8 (n=13)
+    dag-ui-read-latency:test                         4.2 (n=4) → 4.4 (n=10)
+    onepipeline-ui-npm-launcher:test                 2.1 (n=10) → 3.8 (n=13)
+    onepipeline-ui-release:rehearse                  9.2 (n=13) → 3.7 (n=16)
+    onepipeline-ui-ci-jobs:test                      3.3 (n=8) → 3.5 (n=9)
+    onepipeline-ui:test                              1.4 (n=12) → 3.2 (n=15)
+    dag-ui-build-cache:test                          1.5 (n=6) → 3.1 (n=6)
+  options replayed over the population (task-minutes skipped; wall minutes by the fit's slope, an estimate):
+    A: the script-testing e2e tiers in a crate of their own: 3/30 PRs, 16.2 task-min, 0.54 per PR → ~0.07 wall min per PR
+    B: github-workflows-nx-cache:test keyed on what it reads, not the whole workspace and the merge base: 6/30 PRs, 94.3 task-min, 3.14 per PR → ~0.40 wall min per PR
+    C: coverage tiers keyed on audited reads, not the whole checkout less a deny-list: 2/30 PRs, 3.5 task-min, 0.12 per PR → ~0.01 wall min per PR
+
+== test-macos: wall = 4.3 + 0.183 × executed task-minutes (r=0.87, n=37 runs)
+  #767 run 43346136460 wall 3.5 | ran 4 replayed 6 of 10 cacheable | 4× files: onevcs.toml
+  #764 run 43277793896 wall 9.2 | ran 7 replayed 6 of 13 cacheable | 1× files: .github/scripts, .github/tests, .github/workflows, AGENTS.md; 1× files: tests/release; 3× files: AGENTS.md; 2× files: .github/scripts, .github/tests, .github/workflows
+  #762 run 43257411385 wall 9.4 | ran 4 replayed 23 of 27 cacheable | 1× files: apps/dag-ui-e2e, apps/dag-ui, docs/contract.md, docs/dag-ui.md; 2× files: shots/baseline, src/human_items.rs, src/store.rs, tests/contract.rs; 1× files: apps/dag-ui-e2e, apps/dag-ui, docs/contract.md, packages/dag-model
+  #749 run 43334228586 wall 14.9 | ran 7 replayed 20 of 27 cacheable | 1× files: .github/project.json, .github/tests, .github/workflows, apps/dag-ui-e2e; 2× files: .github/project.json, .github/tests, .github/workflows, scripts/build-linux-wheel.sh; 3× files: scripts/build-linux-wheel.sh, scripts/ci-compile-env.sh, scripts/ci-job.sh, scripts/ci-warm.sh; 1× files: scripts/build-linux-wheel.sh
+  #748 run 43204179393 wall 3.9 | ran 3 replayed 14 of 17 cacheable | 1× files: apps/dag-ui-e2e, apps/dag-ui, src/payload.rs; 2× files: apps/dag-ui-e2e
+  #746 run 43173228984 wall 10.7 | ran 19 replayed 0 of 19 cacheable | 2× files: apps/dag-ui; 4× files: apps/dag-ui-e2e; 1× files: .github/reporting, .github/tests, .github/workflows, AGENTS.md; 1× files: .github/tests, .github/workflows, apps/dag-ui-e2e, justfile; 1× files: tests/release; 2× files: AGENTS.md, justfile, scripts/ci-job.sh, src/live.rs; 1× files: src/live.rs, src/live; 1× files: justfile, src/live.rs, src/live; 1× files: AGENTS.md, apps/dag-ui, justfile, scripts/ci-job.sh; 1× files: .github/tests, apps/dag-ui-e2e, justfile, tests/release; 3× files: apps/dag-ui, justfile, src/live.rs, src/live; 1× files: .github/reporting, .github/tests, .github/workflows, apps/dag-ui-e2e
+  #742 run 43126654757 wall 10.3 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/e2e, tests/fixtures, tests/packaging.rs, tests/plan_copy.rs; 5× version-free manifest digest (cargo); 1× files: tests/e2e, tests/packaging.rs; 1× files: tests/packaging.rs; 1× files: tests/e2e, tests/fixtures
+  #739 run 43063892233 wall 8.8 | ran 6 replayed 21 of 27 cacheable | 4× files: tests/e2e, tests/fixtures, tests/packaging.rs; 1× files: tests/e2e, tests/packaging.rs; 1× files: tests/e2e, tests/fixtures
+  #737 run 43020798319 wall 2.2 | ran 0 replayed 0 of 0 cacheable | 
+  #735 run 43010382184 wall 5.3 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/fixtures, tests/packaging.rs; 5× version-free manifest digest (cargo); 2× files: tests/packaging.rs; 1× files: tests/fixtures
+  #731 run 42955851132 wall 13.3 | ran 12 replayed 15 of 27 cacheable | 12× version-free manifest digest (cargo)
+  #729 run 42948785594 wall 9.9 | ran 14 replayed 13 of 27 cacheable | 3× files: packages/timeline-categories; 2× files: packages/timeline-categories, tests/fixtures, tests/packaging.rs; 2× files: tests/fixtures, tests/packaging.rs; 4× version-free manifest digest (cargo); 2× files: packages/timeline-categories, tests/packaging.rs; 1× files: packages/timeline-categories, tests/fixtures
+  #725 run 43014974237 wall 6.8 | ran 3 replayed 24 of 27 cacheable | 2× files: apps/dag-ui-e2e; 1× files: .github/reporting, README.md, apps/dag-ui-e2e, apps/dag-ui
+  #723 run 42802836364 wall 11.8 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/fixtures, tests/packaging.rs; 5× version-free manifest digest (cargo); 1× files: tests/fixtures; 2× files: tests/packaging.rs
+  #719 run 42718348256 wall 4.9 | ran 14 replayed 13 of 27 cacheable | 3× files: packages/timeline-categories; 2× files: packages/timeline-categories, tests/e2e, tests/fixtures, tests/packaging.rs; 2× files: tests/e2e, tests/fixtures, tests/packaging.rs; 4× version-free manifest digest (cargo); 1× files: packages/timeline-categories, tests/e2e, tests/packaging.rs; 1× files: packages/timeline-categories, tests/packaging.rs; 1× files: packages/timeline-categories, tests/e2e, tests/fixtures
+  #717 run 42698740533 wall 10.7 | ran 5 replayed 22 of 27 cacheable | 3× files: packages/dag-model, src/human_items.rs, tests/e2e, tests/fixtures; 2× files: src/human_items.rs, tests/e2e, tests/fixtures, tests/packaging.rs
+  #715 run 42705177443 wall 9.1 | ran 3 replayed 1 of 4 cacheable | 3× files: .github/tests, .github/workflows
+  #714 run 42735750874 wall 5.2 | ran 12 replayed 9 of 21 cacheable | 2× files: apps/dag-ui-e2e; 2× files: README.md, apps/dag-ui-e2e, apps/dag-ui, docs/contract.md; 2× files: README.md, shots/baseline, src/contract.rs, src/human_items.rs; 2× files: src/contract.rs, src/human_items.rs, src/server.rs; 2× files: apps/dag-ui, packages/dag-model, packages/telemetry-client, src/contract.rs; 2× files: README.md, apps/dag-ui, docs/contract.md, packages/dag-model
+  #711 run 42682963404 wall 10.6 | ran 2 replayed 25 of 27 cacheable | 1× files: .github/tests, AGENTS.md, justfile, llmlint.yml; 1× files: .github/tests, justfile, nx.json, project.json
+  #709 run 42622911862 wall 14.2 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/fixtures, tests/packaging.rs; 5× version-free manifest digest (cargo); 2× files: tests/packaging.rs; 1× files: tests/fixtures
+  #703 run 42525106270 wall 5.1 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/e2e, tests/fixtures, tests/packaging.rs; 5× version-free manifest digest (cargo); 1× files: tests/packaging.rs; 1× files: tests/e2e, tests/fixtures; 1× files: tests/e2e, tests/packaging.rs
+  #693 run 42482048586 wall 5.0 | ran 3 replayed 1 of 4 cacheable | 2× files: .github/reporting, .github/tests, .github/workflows; 1× files: .github/workflows
+  #690 run 42552874806 wall 6.5 | ran 9 replayed 18 of 27 cacheable | 1× files: .github/tests, .github/workflows, README.md, apps/dag-ui-e2e; 2× files: apps/dag-ui-e2e; 1× files: .github/tests, .github/workflows, apps/dag-ui-e2e, project.json; 2× files: README.md, project.json, scripts/ci-job.sh, scripts/visual-capture.sh; 1× files: README.md, apps/dag-ui-e2e, apps/dag-ui, docs/contract.md; 1× files: .github/tests, .github/workflows, README.md, apps/dag-ui; 1× files: README.md, apps/dag-ui, docs/contract.md, packages/dag-model
+  #689 run 42547836968 wall 8.1 | ran 14 replayed 0 of 14 cacheable | 7× no diff-matched input; 2× files: .github/tests, .github/workflows, scripts/release.mjs, tests/e2e; 1× files: .github/tests, .github/workflows, scripts/release.mjs; 3× files: scripts/release.mjs, tests/e2e; 1× files: scripts/release.mjs
+  #686 run 42421538096 wall 9.2 | ran 14 replayed 4 of 18 cacheable | 2× files: packages/telemetry-client; 2× files: apps/dag-ui; 2× files: apps/dag-ui-e2e; 1× files: README.md, apps/dag-ui-e2e, apps/dag-ui, docs/dag-ui.md; 2× files: README.md, shots/baseline; 1× files: README.md, apps/dag-ui-e2e, apps/dag-ui, packages/telemetry-client; 2× files: apps/dag-ui, packages/telemetry-client; 2× files: README.md, apps/dag-ui, packages/telemetry-client
+  #685 run 42420095766 wall 2.5 | ran 0 replayed 0 of 0 cacheable | 
+  #684 run 42420095766 wall 2.5 | ran 0 replayed 0 of 0 cacheable | 
+  #678 run 42376260531 wall 12.4 | ran 15 replayed 0 of 15 cacheable | 5× no diff-matched input; 10× files: src/payload.rs
+  #676 run 42384341444 wall 11.1 | ran 6 replayed 19 of 25 cacheable | 1× files: .github/project.json, .github/reporting, .github/tests, .github/workflows; 3× files: AGENTS.md, budgets.yaml, scripts/actions-budget-figures.sh, scripts/actions-budget-figures.versions; 1× files: .github/package.json, .github/project.json, .github/reporting, .github/tests; 1× version-free manifest digest (npm)
+  #675 run 42373174063 wall 9.3 | ran 24 replayed 1 of 25 cacheable | 3× files: packages/dag-model; 14× version-free manifest digest (cargo); 2× files: tests/e2e, tests/fixtures, tests/packaging.rs; 2× files: packages/dag-model, tests/e2e, tests/fixtures, tests/packaging.rs; 1× files: packages/dag-model, tests/e2e, tests/fixtures; 2× files: packages/dag-model, tests/packaging.rs
+  executed task medians, before #711 → from #711 (minutes, n):
+    onepipeline-ui:install-smoke                     6.7 (n=14) → 7.1 (n=17)
+    onepipeline-ui-repo-tooling:test-quick           5.3 (n=16) → 6.4 (n=12)
+    onepipeline-ui-versions:test-quick               6.0 (n=11) → 5.2 (n=10)
+    onepipeline-ui-e2e:test-quick                    4.6 (n=8) → 4.5 (n=10)
+    onepipeline-ui-npm-launcher:test-quick           3.5 (n=8) → 3.1 (n=8)
+    onepipeline-ui:test-quick                        2.3 (n=12) → 3.1 (n=14)
+    onepipeline-ui-nx-worker-startup:test-quick      3.8 (n=7) → 3.0 (n=7)
+    onepipeline-ui-baseline-reuse:test-quick         2.8 (n=7) → 2.3 (n=8)
+    onepipeline-ui:lint                              0.7 (n=12) → 1.0 (n=14)
+    dag-ui-build-cache:lint                          1.8 (n=2) → 0.9 (n=2)
+    pool-maintenance:bootstrap                       - (n=0) → 0.6 (n=1)
+    onepipeline-ui:bootstrap                         - (n=0) → 0.4 (n=2)
+    dag-ui-e2e:bootstrap                             0.3 (n=3) → 0.3 (n=1)
+  options replayed over the population (task-minutes skipped; wall minutes by the fit's slope, an estimate):
+    A: the script-testing e2e tiers in a crate of their own: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
+    B: github-workflows-nx-cache:test keyed on what it reads, not the whole workspace and the merge base: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
+    C: coverage tiers keyed on audited reads, not the whole checkout less a deny-list: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
+
+== test-windows: wall = 7.2 + 0.175 × executed task-minutes (r=0.83, n=37 runs)
+  #767 run 43346136460 wall 6.5 | ran 4 replayed 6 of 10 cacheable | 4× files: onevcs.toml
+  #764 run 43277793896 wall 11.2 | ran 7 replayed 6 of 13 cacheable | 1× files: tests/release; 1× files: .github/scripts, .github/tests, .github/workflows, AGENTS.md; 2× files: .github/scripts, .github/tests, .github/workflows; 3× files: AGENTS.md
+  #762 run 43257411385 wall 11.0 | ran 4 replayed 23 of 27 cacheable | 2× files: shots/baseline, src/human_items.rs, src/store.rs, tests/contract.rs; 1× files: apps/dag-ui-e2e, apps/dag-ui, docs/contract.md, docs/dag-ui.md; 1× files: apps/dag-ui-e2e, apps/dag-ui, docs/contract.md, packages/dag-model
+  #749 run 43334228586 wall 15.8 | ran 7 replayed 20 of 27 cacheable | 3× files: scripts/build-linux-wheel.sh, scripts/ci-compile-env.sh, scripts/ci-job.sh, scripts/ci-warm.sh; 1× files: .github/project.json, .github/tests, .github/workflows, apps/dag-ui-e2e; 2× files: .github/project.json, .github/tests, .github/workflows, scripts/build-linux-wheel.sh; 1× files: scripts/build-linux-wheel.sh
+  #748 run 43204179393 wall 5.9 | ran 3 replayed 14 of 17 cacheable | 2× files: apps/dag-ui-e2e; 1× files: apps/dag-ui-e2e, apps/dag-ui, src/payload.rs
+  #746 run 43173228984 wall 7.6 | ran 8 replayed 11 of 19 cacheable | 2× files: apps/dag-ui-e2e; 1× files: .github/reporting, .github/tests, .github/workflows, AGENTS.md; 1× files: .github/tests, .github/workflows, apps/dag-ui-e2e, justfile; 2× files: AGENTS.md, justfile, scripts/ci-job.sh, src/live.rs; 1× files: AGENTS.md, apps/dag-ui, justfile, scripts/ci-job.sh; 1× files: .github/reporting, .github/tests, .github/workflows, apps/dag-ui-e2e
+  #742 run 43126654757 wall 16.1 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/e2e, tests/fixtures, tests/packaging.rs, tests/plan_copy.rs; 5× version-free manifest digest (cargo); 1× files: tests/e2e, tests/fixtures; 1× files: tests/packaging.rs; 1× files: tests/e2e, tests/packaging.rs
+  #739 run 43063892233 wall 14.4 | ran 10 replayed 17 of 27 cacheable | 4× files: tests/e2e, tests/fixtures, tests/packaging.rs; 3× version-free manifest digest (cargo); 1× files: tests/e2e, tests/fixtures; 1× files: tests/packaging.rs; 1× files: tests/e2e, tests/packaging.rs
+  #737 run 43020798319 wall 3.6 | ran 0 replayed 0 of 0 cacheable | 
+  #735 run 43010382184 wall 14.7 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/fixtures, tests/packaging.rs; 5× version-free manifest digest (cargo); 1× files: tests/fixtures; 2× files: tests/packaging.rs
+  #731 run 42955851132 wall 12.8 | ran 12 replayed 15 of 27 cacheable | 12× version-free manifest digest (cargo)
+  #729 run 42948785594 wall 9.9 | ran 14 replayed 13 of 27 cacheable | 3× files: packages/timeline-categories; 2× files: tests/fixtures, tests/packaging.rs; 4× version-free manifest digest (cargo); 2× files: packages/timeline-categories, tests/fixtures, tests/packaging.rs; 1× files: packages/timeline-categories, tests/fixtures; 2× files: packages/timeline-categories, tests/packaging.rs
+  #725 run 43014974237 wall 7.0 | ran 3 replayed 24 of 27 cacheable | 2× files: apps/dag-ui-e2e; 1× files: .github/reporting, README.md, apps/dag-ui-e2e, apps/dag-ui
+  #723 run 42802836364 wall 13.5 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/fixtures, tests/packaging.rs; 5× version-free manifest digest (cargo); 1× files: tests/fixtures; 2× files: tests/packaging.rs
+  #719 run 42718348256 wall 14.2 | ran 14 replayed 13 of 27 cacheable | 3× files: packages/timeline-categories; 2× files: tests/e2e, tests/fixtures, tests/packaging.rs; 2× files: packages/timeline-categories, tests/e2e, tests/fixtures, tests/packaging.rs; 4× version-free manifest digest (cargo); 1× files: packages/timeline-categories, tests/e2e, tests/fixtures; 1× files: packages/timeline-categories, tests/packaging.rs; 1× files: packages/timeline-categories, tests/e2e, tests/packaging.rs
+  #717 run 42698740533 wall 10.7 | ran 5 replayed 22 of 27 cacheable | 2× files: src/human_items.rs, tests/e2e, tests/fixtures, tests/packaging.rs; 3× files: packages/dag-model, src/human_items.rs, tests/e2e, tests/fixtures
+  #715 run 42705177443 wall 13.9 | ran 3 replayed 1 of 4 cacheable | 3× files: .github/tests, .github/workflows
+  #714 run 42735750874 wall 10.1 | ran 12 replayed 9 of 21 cacheable | 2× files: apps/dag-ui-e2e; 2× files: README.md, apps/dag-ui-e2e, apps/dag-ui, docs/contract.md; 2× files: README.md, shots/baseline, src/contract.rs, src/human_items.rs; 2× files: src/contract.rs, src/human_items.rs, src/server.rs; 2× files: apps/dag-ui, packages/dag-model, packages/telemetry-client, src/contract.rs; 2× files: README.md, apps/dag-ui, docs/contract.md, packages/dag-model
+  #711 run 42682963404 wall 11.3 | ran 2 replayed 25 of 27 cacheable | 1× files: .github/tests, AGENTS.md, justfile, llmlint.yml; 1× files: .github/tests, justfile, nx.json, project.json
+  #709 run 42622911862 wall 13.2 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/fixtures, tests/packaging.rs; 5× version-free manifest digest (cargo); 1× files: tests/fixtures; 2× files: tests/packaging.rs
+  #703 run 42525106270 wall 14.3 | ran 12 replayed 15 of 27 cacheable | 4× files: tests/e2e, tests/fixtures, tests/packaging.rs; 5× version-free manifest digest (cargo); 1× files: tests/e2e, tests/packaging.rs; 1× files: tests/e2e, tests/fixtures; 1× files: tests/packaging.rs
+  #693 run 42482048586 wall 10.9 | ran 3 replayed 1 of 4 cacheable | 2× files: .github/reporting, .github/tests, .github/workflows; 1× files: .github/workflows
+  #690 run 42552874806 wall 11.2 | ran 9 replayed 18 of 27 cacheable | 2× files: README.md, project.json, scripts/ci-job.sh, scripts/visual-capture.sh; 1× files: .github/tests, .github/workflows, README.md, apps/dag-ui-e2e; 2× files: apps/dag-ui-e2e; 1× files: .github/tests, .github/workflows, apps/dag-ui-e2e, project.json; 1× files: README.md, apps/dag-ui-e2e, apps/dag-ui, docs/contract.md; 1× files: .github/tests, .github/workflows, README.md, apps/dag-ui; 1× files: README.md, apps/dag-ui, docs/contract.md, packages/dag-model
+  #689 run 42547836968 wall 9.4 | ran 3 replayed 11 of 14 cacheable | 2× files: .github/tests, .github/workflows, scripts/release.mjs, tests/e2e; 1× files: .github/tests, .github/workflows, scripts/release.mjs
+  #686 run 42421538096 wall 14.9 | ran 14 replayed 4 of 18 cacheable | 2× files: packages/telemetry-client; 2× files: apps/dag-ui; 2× files: apps/dag-ui-e2e; 2× files: README.md, shots/baseline; 1× files: README.md, apps/dag-ui-e2e, apps/dag-ui, docs/dag-ui.md; 1× files: README.md, apps/dag-ui-e2e, apps/dag-ui, packages/telemetry-client; 2× files: apps/dag-ui, packages/telemetry-client; 2× files: README.md, apps/dag-ui, packages/telemetry-client
+  #685 run 42420095766 wall 4.4 | ran 0 replayed 0 of 0 cacheable | 
+  #684 run 42420095766 wall 4.4 | ran 0 replayed 0 of 0 cacheable | 
+  #678 run 42376260531 wall 15.6 | ran 15 replayed 0 of 15 cacheable | 5× no diff-matched input; 10× files: src/payload.rs
+  #676 run 42384341444 wall 10.8 | ran 5 replayed 20 of 25 cacheable | 3× files: AGENTS.md, budgets.yaml, scripts/actions-budget-figures.sh, scripts/actions-budget-figures.versions; 1× files: .github/project.json, .github/reporting, .github/tests, .github/workflows; 1× files: .github/package.json, .github/project.json, .github/reporting, .github/tests
+  #675 run 42373174063 wall 12.4 | ran 24 replayed 1 of 25 cacheable | 3× files: packages/dag-model; 14× version-free manifest digest (cargo); 2× files: tests/e2e, tests/fixtures, tests/packaging.rs; 2× files: packages/dag-model, tests/e2e, tests/fixtures, tests/packaging.rs; 2× files: packages/dag-model, tests/packaging.rs; 1× files: packages/dag-model, tests/e2e, tests/fixtures
+  executed task medians, before #711 → from #711 (minutes, n):
+    onepipeline-ui-repo-tooling:test-quick           6.9 (n=16) → 7.2 (n=13)
+    onepipeline-ui:install-smoke                     8.2 (n=14) → 7.0 (n=17)
+    onepipeline-ui-versions:test-quick               3.6 (n=9) → 6.9 (n=9)
+    onepipeline-ui-e2e:test-quick                    2.8 (n=8) → 3.4 (n=9)
+    onepipeline-ui-nx-worker-startup:test-quick      3.9 (n=7) → 3.3 (n=7)
+    onepipeline-ui-npm-launcher:test-quick           3.4 (n=8) → 3.1 (n=8)
+    onepipeline-ui-baseline-reuse:test-quick         3.6 (n=7) → 2.7 (n=8)
+    onepipeline-ui:test-quick                        2.4 (n=11) → 1.9 (n=14)
+    onepipeline-ui:lint                              1.3 (n=11) → 1.7 (n=14)
+    pool-maintenance:bootstrap                       - (n=0) → 1.1 (n=1)
+    onepipeline-ui:bootstrap                         0.6 (n=18) → 0.5 (n=18)
+    dag-ui-e2e:bootstrap                             0.3 (n=11) → 0.4 (n=13)
+    dag-ui-e2e:lint                                  0.4 (n=3) → 0.3 (n=1)
+    timeline-categories:lint                         0.3 (n=1) → 0.3 (n=1)
+  options replayed over the population (task-minutes skipped; wall minutes by the fit's slope, an estimate):
+    A: the script-testing e2e tiers in a crate of their own: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
+    B: github-workflows-nx-cache:test keyed on what it reads, not the whole workspace and the merge base: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR
+    C: coverage tiers keyed on audited reads, not the whole checkout less a deny-list: 0/30 PRs, 0.0 task-min, 0.00 per PR → ~0.00 wall min per PR

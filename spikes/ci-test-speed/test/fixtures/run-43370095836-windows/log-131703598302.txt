@@ -1,0 +1,119 @@
+2026-11-13T05:09:22.0984378Z [command]"C:\Program Files\Git\bin\git.exe" log -1 --format=%H
+2026-11-13T05:09:22.1370890Z 90bc9a098d423b4aeb62e864be5047f7713b0c25
+2026-11-13T05:09:22.9160455Z ##[group]Run Swatinem/rust-cache@v2.9.2
+2026-11-13T05:09:48.5850304Z Cache hit for: v0-rust-test-windows-Windows_NT-x64-645f1527-861f7ea2
+2026-11-13T05:09:52.5563007Z Cache Size: ~527 MB (552985324 B)
+2026-11-13T05:10:19.0742899Z ##[group]Run actions/cache/restore@v4
+2026-11-13T05:10:19.4674775Z Cache hit for: onepipeline-cli-Windows-X64-0.110.0-5f2271a5575c-11718d84675715abfdf9615802cc7aa79e7a77b94d68096655d7f0032acf3868
+2026-11-13T05:10:20.1521053Z Cache Size: ~25 MB (25979568 B)
+2026-11-13T05:11:47.9942444Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui:bootstrap
+2026-11-13T05:11:48.0647848Z ##[group]✅ [2m> [22m[2mnx run[22m github-workflows:bootstrap
+2026-11-13T05:12:07.6584331Z ##[group]✅ [2m> [22m[2mnx run[22m dag-ui-e2e:bootstrap
+2026-11-13T05:12:07.7257921Z ##[group]✅ [2m> [22m[2mnx run[22m github-workflows-judge-install:bootstrap
+2026-11-13T05:12:07.7894564Z ##[group]✅ [2m> [22m[2mnx run[22m github-workflows-installs:bootstrap
+2026-11-13T05:12:10.0893544Z ##[group]✅ [2m> [22m[2mnx run[22m github-workflows-nx-cache:bootstrap
+2026-11-13T05:12:10.3165192Z ##[group]✅ [2m> [22m[2mnx run[22m pool-maintenance:bootstrap
+2026-11-13T05:12:16.6358343Z ci-job: test-windows runs 23 task(s): dag-ui-build-cache:lint dag-ui-e2e:format-check dag-ui-e2e:lint dag-ui-read-latency:format-check dag-ui-read-latency:lint dag-ui:build dag-ui:format-check dag-ui:lint github-workflows-nx-cache:lint github-workflows:bootstrap github-workflows:lint onepipeline-ui-baseline-reuse:test-quick onepipeline-ui-e2e:test-quick onepipeline-ui-npm-launcher:test-quick onepipeline-ui-release:lint onepipeline-ui-repo-tooling:test-quick onepipeline-ui-versions:test-quick onepipeline-ui:ensure-node-without-execve onepipeline-ui:ensure-sibling onepipeline-ui:format-check onepipeline-ui:install-smoke onepipeline-ui:lint onepipeline-ui:test-quick
+2026-11-13T05:12:20.5907242Z Cache hit for: nx-cache-3334479480174608912
+2026-11-13T05:12:20.6139759Z Cache hit for: nx-cache-14363355959019358966
+2026-11-13T05:12:20.6145629Z Cache hit for: nx-cache-6036976356760156141
+2026-11-13T05:12:20.6162714Z Cache hit for: nx-cache-9267157074437932570
+2026-11-13T05:12:20.6172851Z Cache hit for: nx-cache-12324734518389085250
+2026-11-13T05:12:20.6258716Z Cache hit for: nx-cache-17790153763822108588
+2026-11-13T05:12:20.6269145Z Cache hit for: nx-cache-17260210352103954804
+2026-11-13T05:12:20.7895661Z Cache Size: ~0 MB (471 B)
+2026-11-13T05:12:20.7906310Z Cache Size: ~0 MB (459 B)
+2026-11-13T05:12:20.8772907Z Cache Size: ~0 MB (435 B)
+2026-11-13T05:12:20.8791669Z Cache Size: ~0 MB (459 B)
+2026-11-13T05:12:20.8928415Z Cache Size: ~0 MB (861 B)
+2026-11-13T05:12:20.9115892Z Cache Size: ~0 MB (451 B)
+2026-11-13T05:12:20.9140107Z Cache Size: ~0 MB (464 B)
+2026-11-13T05:12:20.9723838Z ##[group]🔁 [2m> [22m[2mnx run[22m dag-ui:format-check  [2m[remote cache][22m
+2026-11-13T05:12:20.9729408Z ##[group]🔁 [2m> [22m[2mnx run[22m dag-ui:lint  [2m[remote cache][22m
+2026-11-13T05:12:20.9753958Z ##[group]🔁 [2m> [22m[2mnx run[22m dag-ui-e2e:format-check  [2m[remote cache][22m
+2026-11-13T05:12:20.9759692Z ##[group]🔁 [2m> [22m[2mnx run[22m dag-ui-e2e:lint  [2m[remote cache][22m
+2026-11-13T05:12:20.9763411Z ##[group]🔁 [2m> [22m[2mnx run[22m onepipeline-ui-release:lint  [2m[remote cache][22m
+2026-11-13T05:12:20.9766332Z ##[group]🔁 [2m> [22m[2mnx run[22m dag-ui-read-latency:format-check  [2m[remote cache][22m
+2026-11-13T05:12:20.9769562Z ##[group]🔁 [2m> [22m[2mnx run[22m dag-ui-read-latency:lint  [2m[remote cache][22m
+2026-11-13T05:12:21.2337050Z ##[group]✅ [2m> [22m[2mnx run[22m github-workflows:bootstrap
+2026-11-13T05:12:21.4172918Z ##[group]✅ [2m> [22m[2mnx run[22m github-workflows-nx-cache:lint
+2026-11-13T05:12:21.7462318Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui:ensure-node-without-execve
+2026-11-13T05:12:22.1533119Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui:ensure-sibling
+2026-11-13T05:12:24.5324147Z ##[group]✅ [2m> [22m[2mnx run[22m github-workflows:lint
+2026-11-13T05:12:24.7854323Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui:format-check
+2026-11-13T05:12:25.2039984Z ##[group]✅ [2m> [22m[2mnx run[22m dag-ui:build
+2026-11-13T05:12:50.8187818Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui:lint
+2026-11-13T05:13:32.8539253Z ##[group]✅ [2m> [22m[2mnx run[22m dag-ui-build-cache:lint
+2026-11-13T05:13:39.1498375Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui:test-quick
+2026-11-13T05:13:39.3641984Z [32;1m        PASS[0m [   0.018s] ( 1/87) [35;1monepipeline-ui[0m [36mpatch::tests[0m[36m::[0m[34;1ma_shrunk_or_reordered_array_is_replaced_whole_at_its_own_path[0m
+2026-11-13T05:13:39.3725766Z [32;1m        PASS[0m [   0.021s] ( 2/87) [35;1monepipeline-ui[0m [36mencoding::tests[0m[36m::[0m[34;1mgzip_is_taken_when_named_or_covered_and_never_when_refused[0m
+2026-11-13T05:13:39.3949623Z [32;1m        PASS[0m [   0.021s] ( 3/87) [35;1monepipeline-ui[0m [36mpatch::tests[0m[36m::[0m[34;1ma_diff_applied_is_the_new_value_and_appends_rather_than_restates[0m
+2026-11-13T05:13:39.4329459Z [32;1m        PASS[0m [   0.024s] ( 4/87) [35;1monepipeline-ui[0m [36mpatch::tests[0m[36m::[0m[34;1mthe_wire_form_round_trips_and_refuses_what_the_contract_does_not_allow[0m
+2026-11-13T05:13:39.4523380Z [32;1m        PASS[0m [   0.019s] ( 5/87) [35;1monepipeline-ui[0m [36mpayload::transcript::tests[0m[36m::[0m[34;1man_entry_already_kept_is_not_counted_twice[0m
+2026-11-13T05:13:39.4727874Z [32;1m        PASS[0m [   0.018s] ( 6/87) [35;1monepipeline-ui[0m [36mpayload::transcript::tests[0m[36m::[0m[34;1man_entry_larger_than_the_whole_bound_is_never_kept[0m
+2026-11-13T05:13:39.4730977Z [32;1m        PASS[0m [   0.018s] ( 7/87) [35;1monepipeline-ui[0m [36mpayload::transcript::tests[0m[36m::[0m[34;1mthe_oldest_entries_go_first_once_the_bytes_would_pass_the_bound[0m
+2026-11-13T05:13:39.4872359Z [32;1m        PASS[0m [   0.018s] ( 8/87) [35;1monepipeline-ui[0m [36mpayload::transcript::tests[0m[36m::[0m[34;1mthe_oldest_entries_go_first_once_the_count_would_pass_the_bound[0m
+2026-11-13T05:13:39.5092994Z [32;1m        PASS[0m [   0.021s] ( 9/87) [35;1monepipeline-ui::contract[0m [34;1ma_config_file_cannot_name_a_runs_root_the_cli_would_reject[0m
+2026-11-13T05:13:39.5402665Z [32;1m        PASS[0m [   0.025s] (10/87) [35;1monepipeline-ui::contract[0m [34;1ma_config_file_cannot_name_a_poll_interval_the_cli_would_reject[0m
+2026-11-13T05:13:39.5441400Z [32;1m        PASS[0m [   0.028s] (11/87) [35;1monepipeline-ui::contract[0m [34;1ma_cost_is_an_amount_of_money_or_it_is_never_made[0m
+2026-11-13T05:13:39.5660607Z [32;1m        PASS[0m [   0.034s] (12/87) [35;1monepipeline-ui::contract[0m [34;1ma_cost_no_number_can_hold_never_reaches_a_payload[0m
+2026-11-13T05:13:39.5748094Z [32;1m        PASS[0m [   0.047s] (13/87) [35;1monepipeline-ui::contract[0m [34;1ma_dispatch_span_carries_a_dispatch_id_this_crate_can_name[0m
+2026-11-13T05:13:39.5850447Z [32;1m        PASS[0m [   0.042s] (14/87) [35;1monepipeline-ui::contract[0m [34;1ma_document_that_breaks_the_producers_contract_is_refused_by_name[0m
+2026-11-13T05:13:39.5923693Z [32;1m        PASS[0m [   0.041s] (15/87) [35;1monepipeline-ui::contract[0m [34;1ma_history_page_cannot_carry_a_limit_outside_the_bound[0m
+2026-11-13T05:13:39.6094263Z [32;1m        PASS[0m [   0.099s] (16/87) [35;1monepipeline-ui::checkout_paths[0m [34;1mevery_tracked_path_checks_out_under_every_windows_root[0m
+2026-11-13T05:13:39.6197154Z [32;1m        PASS[0m [   0.028s] (17/87) [35;1monepipeline-ui::contract[0m [34;1ma_run_list_query_cannot_carry_a_page_size_outside_the_bound[0m
+2026-11-13T05:13:39.6264944Z [32;1m        PASS[0m [   0.024s] (18/87) [35;1monepipeline-ui::contract[0m [34;1ma_scratch_path_reads_as_the_golden_whichever_separator_recorded_it[0m
+2026-11-13T05:13:39.6337237Z [32;1m        PASS[0m [   0.028s] (19/87) [35;1monepipeline-ui::contract[0m [34;1ma_telemetry_document_that_holds_to_its_producers_contract_is_read[0m
+2026-11-13T05:13:39.6360528Z [32;1m        PASS[0m [   0.031s] (20/87) [35;1monepipeline-ui::contract[0m [34;1mcheck_visibility_records_follow_the_host_check_contract[0m
+2026-11-13T05:13:39.6451054Z [32;1m        PASS[0m [   0.022s] (21/87) [35;1monepipeline-ui::contract[0m [34;1mevery_bucket_and_party_is_named_as_the_document_spells_it[0m
+2026-11-13T05:13:39.6481704Z [32;1m        PASS[0m [   0.034s] (22/87) [35;1monepipeline-ui::contract[0m [34;1mevery_engine_refusal_maps_to_the_code_and_status_the_contract_assigns[0m
+2026-11-13T05:13:39.6527970Z [32;1m        PASS[0m [   0.028s] (23/87) [35;1monepipeline-ui::contract[0m [34;1mevery_error_maps_to_its_code_and_status[0m
+2026-11-13T05:13:39.6551693Z [32;1m        PASS[0m [   0.043s] (24/87) [35;1monepipeline-ui::contract[0m [34;1mevery_enveloped_fixture_round_trips_byte_for_byte[0m
+2026-11-13T05:13:39.6571663Z [32;1m        PASS[0m [   0.146s] (25/87) [35;1monepipeline-ui::contract[0m [34;1mevery_human_item_fixture_is_the_engines_record[0m
+2026-11-13T05:13:39.6577582Z [32;1m        PASS[0m [   0.102s] (26/87) [35;1monepipeline-ui::contract[0m [34;1mevery_route_has_a_fixture[0m
+2026-11-13T05:13:39.6610726Z [32;1m        PASS[0m [   0.505s] (27/87) [35;1monepipeline-ui::contract[0m [34;1mevery_field_the_run_list_served_before_is_served_with_the_same_value[0m
+2026-11-13T05:13:39.6619949Z [32;1m        PASS[0m [   0.178s] (28/87) [35;1monepipeline-ui::contract[0m [34;1mevery_route_the_contract_documents_is_in_the_route_table[0m
+2026-11-13T05:13:39.6648209Z [32;1m        PASS[0m [   0.105s] (29/87) [35;1monepipeline-ui::contract[0m [34;1mevery_shape_of_a_free_space_reading_is_redacted[0m
+2026-11-13T05:13:39.6672231Z [32;1m        PASS[0m [   1.122s] (30/87) [35;1monepipeline-ui::contract[0m [34;1mevery_read_verb_serves_the_payload_its_golden_pins[0m
+2026-11-13T05:13:39.6678632Z [32;1m        PASS[0m [   0.137s] (31/87) [35;1monepipeline-ui::contract[0m [34;1midentifiers_accept_a_bare_path_segment[0m
+2026-11-13T05:13:39.6682207Z [32;1m        PASS[0m [   0.204s] (32/87) [35;1monepipeline-ui::contract[0m [34;1midentifiers_are_validated_when_they_are_deserialized[0m
+2026-11-13T05:13:39.6684616Z [32;1m        PASS[0m [   1.226s] (33/87) [35;1monepipeline-ui::contract[0m [34;1mevery_route_serves_the_payload_its_golden_pins[0m
+2026-11-13T05:13:39.6686641Z [32;1m        PASS[0m [   1.597s] (34/87) [35;1monepipeline-ui::contract[0m [34;1ma_row_read_from_the_summary_is_the_row_a_fold_produces[0m
+2026-11-13T05:13:39.6688969Z [32;1m        PASS[0m [   0.134s] (35/87) [35;1monepipeline-ui::contract[0m [34;1midentifiers_reject_anything_that_is_not_one[0m
+2026-11-13T05:13:39.6696754Z [32;1m        PASS[0m [   0.144s] (36/87) [35;1monepipeline-ui::contract[0m [34;1mthe_agent_graph_vocabulary_this_crate_reads_is_the_one_that_library_declares[0m
+2026-11-13T05:13:39.6761082Z [32;1m        PASS[0m [   0.124s] (37/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_clients_copy_of_each_schema_version_matches_this_one[0m
+2026-11-13T05:13:39.6808909Z [32;1m        PASS[0m [   0.153s] (38/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_clients_copy_of_the_agent_label_vocabulary_matches_the_engines[0m
+2026-11-13T05:13:39.6811573Z [32;1m        PASS[0m [   0.134s] (39/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_clients_copy_of_the_page_bound_matches_this_one[0m
+2026-11-13T05:13:39.6814130Z [32;1m        PASS[0m [   0.171s] (40/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_clients_copy_of_the_reference_vocabulary_matches_this_one[0m
+2026-11-13T05:13:39.6816671Z [32;1m        PASS[0m [   0.751s] (41/87) [35;1monepipeline-ui::contract[0m [34;1mthe_acting_sessions_key_round_trips_when_present_and_is_omitted_when_absent[0m
+2026-11-13T05:13:39.6819276Z [32;1m        PASS[0m [   0.119s] (42/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_clients_first_answer_paths_are_the_ones_the_server_keeps[0m
+2026-11-13T05:13:39.6823924Z [32;1m        PASS[0m [   0.184s] (43/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_clients_copy_of_the_reply_commands_matches_the_engines[0m
+2026-11-13T05:13:39.6826228Z [32;1m        PASS[0m [   0.888s] (44/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_channel_records_match_the_sdks_writer[0m
+2026-11-13T05:13:39.6828952Z [32;1m        PASS[0m [   0.185s] (45/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_clients_node_window_is_the_servers[0m
+2026-11-13T05:13:39.6851834Z [32;1m        PASS[0m [   0.180s] (46/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_files_every_kind_those_libraries_declare[0m
+2026-11-13T05:13:39.6853838Z [32;1m        PASS[0m [   0.127s] (47/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_files_every_release_kind_this_crate_reads[0m
+2026-11-13T05:13:39.6856091Z [32;1m        PASS[0m [   0.090s] (48/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_fixture_excludes_the_linked_harness_binaries_from_its_path[0m
+2026-11-13T05:13:39.6858515Z [32;1m        PASS[0m [   0.110s] (49/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browser_fixtures_copy_of_the_activity_bound_matches_the_producers[0m
+2026-11-13T05:13:39.6861139Z [32;1m        PASS[0m [   0.199s] (50/87) [35;1monepipeline-ui::contract[0m [34;1mthe_check_states_this_crate_reads_are_the_ones_that_library_declares[0m
+2026-11-13T05:13:39.6863305Z [32;1m        PASS[0m [   0.219s] (51/87) [35;1monepipeline-ui::contract[0m [34;1mthe_checked_in_human_item_schema_is_the_linked_engines[0m
+2026-11-13T05:13:39.6865521Z [32;1m        PASS[0m [   0.404s] (52/87) [35;1monepipeline-ui::contract[0m [34;1mthe_browsers_release_delivery_words_are_the_ones_the_engine_publishes[0m
+2026-11-13T05:13:39.6867781Z [32;1m        PASS[0m [   0.130s] (53/87) [35;1monepipeline-ui::contract[0m [34;1mthe_contract_states_every_field_the_transcript_reading_serves[0m
+2026-11-13T05:13:39.6870189Z [32;1m        PASS[0m [   0.172s] (54/87) [35;1monepipeline-ui::contract[0m [34;1mthe_contract_states_the_words_and_the_field_finished_work_held_for_a_release_serves[0m
+2026-11-13T05:13:39.6872833Z [32;1m        PASS[0m [   0.154s] (55/87) [35;1monepipeline-ui::contract[0m [34;1mthe_engine_judges_every_human_item_verdict_as_the_corpus_says[0m
+2026-11-13T05:13:39.6875057Z [32;1m        PASS[0m [   0.485s] (56/87) [35;1monepipeline-ui::contract[0m [34;1mthe_contract_describes_the_queued_span_and_every_field_it_carries[0m
+2026-11-13T05:13:39.6877206Z [32;1m        PASS[0m [   0.157s] (57/87) [35;1monepipeline-ui::contract[0m [34;1mthe_event_frame_round_trips_and_opens_with_a_snapshot[0m
+2026-11-13T05:13:39.6879355Z [32;1m        PASS[0m [   0.171s] (58/87) [35;1monepipeline-ui::contract[0m [34;1mthe_error_envelope_round_trips_and_matches_the_error_it_renders[0m
+2026-11-13T05:13:39.6882095Z [32;1m        PASS[0m [   0.126s] (59/87) [35;1monepipeline-ui::contract[0m [34;1mthe_failure_kinds_and_fall_through_reasons_the_fixtures_carry_are_oneharnesss_own[0m
+2026-11-13T05:13:39.6884656Z [32;1m        PASS[0m [   0.231s] (60/87) [35;1monepipeline-ui::contract[0m [34;1mthe_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract_names[0m
+2026-11-13T05:13:39.6948518Z [32;1m     Summary[0m [   8.417s] [1m87[0m tests run: [1m87[0m [32;1mpassed[0m, [1m0[0m [33;1mskipped[0m
+2026-11-13T05:13:43.2146281Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui-npm-launcher:test-quick
+2026-11-13T05:13:43.3730553Z [32;1m     Summary[0m [  11.119s] [1m12[0m tests run: [1m12[0m [32;1mpassed[0m, [1m381[0m [33;1mskipped[0m
+2026-11-13T05:13:52.2280700Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui-baseline-reuse:test-quick
+2026-11-13T05:13:52.3034910Z [32;1m     Summary[0m [  20.760s] [1m1[0m test run: [1m1[0m [32;1mpassed[0m, [1m392[0m [33;1mskipped[0m
+2026-11-13T05:17:49.9680771Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui-e2e:test-quick
+2026-11-13T05:17:50.0586611Z [32;1m     Summary[0m [ 246.558s] [1m276[0m tests run: [1m276[0m [32;1mpassed[0m ([1m2[0m [33;1mslow[0m), [1m117[0m [33;1mskipped[0m
+2026-11-13T05:18:54.2777706Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui-repo-tooling:test-quick
+2026-11-13T05:18:54.3189147Z [32;1m     Summary[0m [ 323.441s] [1m129[0m tests run: [1m129[0m [32;1mpassed[0m ([1m4[0m [33;1mslow[0m), [1m302[0m [33;1mskipped[0m
+2026-11-13T05:21:44.6913824Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui:install-smoke
+2026-11-13T05:21:58.5471177Z ##[group]✅ [2m> [22m[2mnx run[22m onepipeline-ui-versions:test-quick
+2026-11-13T05:21:58.5502986Z [32;1m     Summary[0m [ 499.960s] [1m4[0m tests run: [1m4[0m [32;1mpassed[0m ([1m1[0m [33;1mslow[0m), [1m427[0m [33;1mskipped[0m
