@@ -15713,6 +15713,16 @@ fn a_node_held_on_an_unanswered_source_renders_and_adopts_with_or_without_its_ca
         );
         eventually("the driver let go and was reaped", || !process_is_live(pid));
         drop(driver);
+        // The adoption returned on the approval's decision, so — since
+        // onepipeline 0.116 — it handed the run to a driver that waits on that
+        // decision, which records its own adoption: one adoption and its
+        // hand-off, each from a driver of its own. That driver is let go here so
+        // that it does not outlive the journey.
+        let waiting = launch_record(&root, run)["pid"]
+            .as_u64()
+            .and_then(|pid| u32::try_from(pid).ok())
+            .expect("the waiting driver's pid");
+        let_go(&root, run, waiting);
         let events = events_on(
             &http::get(
                 serving.address,
@@ -15720,14 +15730,12 @@ fn a_node_held_on_an_unanswered_source_renders_and_adopts_with_or_without_its_ca
             )
             .json(),
         );
-        assert_eq!(
-            events
-                .iter()
-                .filter(|event| event["kind"] == json!("driver-adopted"))
-                .count(),
-            1,
-            "{events:?}"
-        );
+        let adopted: Vec<&Value> = events
+            .iter()
+            .filter(|event| event["kind"] == json!("driver-adopted"))
+            .collect();
+        assert_eq!(adopted.len(), 2, "{events:?}");
+        assert_ne!(adopted[0]["stream"], adopted[1]["stream"], "{events:?}");
     }
     serving.stop_on(Stop::Terminate);
 }
@@ -20149,6 +20157,14 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     }
     // llmlint: ignore-end[tests_mirror_real_usage]
     let run = "cached-approval";
+    // The launch returned on the approval and, since onepipeline 0.116, handed
+    // the run to a driver that waits on it; the adoption below is what this
+    // journey is about, so that driver is let go first.
+    let waiting = launch_record(&root, run)["pid"]
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())
+        .expect("the waiting driver's pid");
+    let_go(&root, run, waiting);
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
         fixture_run::SESSION,
@@ -20223,13 +20239,14 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
         )
         .json(),
     );
-    assert_eq!(
-        events
-            .iter()
-            .filter(|event| event["kind"] == json!("driver-adopted"))
-            .count(),
-        1
-    );
+    // The launch's hand-off to the driver that waited on the approval, then this
+    // journey's one adoption, each from a driver of its own.
+    let adopted: Vec<&Value> = events
+        .iter()
+        .filter(|event| event["kind"] == json!("driver-adopted"))
+        .collect();
+    assert_eq!(adopted.len(), 2, "{events:?}");
+    assert_ne!(adopted[0]["stream"], adopted[1]["stream"], "{events:?}");
     let state = board.state();
     assert_eq!(
         state["issues"]["approve"]["status"],
@@ -20443,6 +20460,14 @@ fn an_adopted_run_moves_the_card_of_its_plans_completed_task_to_done() {
         "{}",
         String::from_utf8_lossy(&launched.stderr)
     );
+    // The launch returned on the approval and, since onepipeline 0.116, handed
+    // the run to a driver that waits on it; the adoption below is what this
+    // journey is about, so that driver is let go first.
+    let waiting = launch_record(&root, run)["pid"]
+        .as_u64()
+        .and_then(|pid| u32::try_from(pid).ok())
+        .expect("the waiting driver's pid");
+    let_go(&root, run, waiting);
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
         fixture_run::SESSION,
