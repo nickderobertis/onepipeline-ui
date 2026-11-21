@@ -737,7 +737,7 @@ fn a_linear_home_in_the_collapsed_block_is_read_through_the_linked_plugin() {
         &[("LINEAR_API_KEY", "fixture-key")],
         &["start", &project, "--detach"],
     );
-    let run = started_and_let_go(&launched);
+    let run = started_and_let_go(&root, &launched);
     {
         let held = linear.held();
         assert!(
@@ -16717,19 +16717,22 @@ fn launch_rendered_over_local_md_store(
         &[&approval],
     );
 
-    let run = started_and_let_go(&onepipeline(&[
-        "start",
-        &format!(
-            "{}:{}",
-            fixture_run::LOCAL_MD_SOURCE,
-            fixture_run::LOCAL_MD_PROJECT
-        ),
-        "--detach",
-        onepipeline::templates::ROOT_FLAG,
-        "template-root",
-        onepipeline::templates::REQUIRE_RENDERED_FLAG,
-        "true",
-    ]));
+    let run = started_and_let_go(
+        &root,
+        &onepipeline(&[
+            "start",
+            &format!(
+                "{}:{}",
+                fixture_run::LOCAL_MD_SOURCE,
+                fixture_run::LOCAL_MD_PROJECT
+            ),
+            "--detach",
+            onepipeline::templates::ROOT_FLAG,
+            "template-root",
+            onepipeline::templates::REQUIRE_RENDERED_FLAG,
+            "true",
+        ]),
+    );
     let template_root = template_root
         .canonicalize()
         .expect("the template root resolves");
@@ -16787,17 +16790,97 @@ fn provisioned_onepipeline_with_env(
     output.stdout
 }
 
-/// The run a detached `start` printed as `launched`, once the driver it left
-/// has let go of it.
+/// The run a detached `start` or `adopt` under `root` printed as `launched`, once
+/// the driver it left has let go of it.
+///
+/// A driver that settles the run exits by itself. One that reaches a decision
+/// does not: since onepipeline 0.116 it waits on that decision for as long as it
+/// stays unmade, and continues the run itself once a reply or an attestation
+/// arrives, refusing an adoption meanwhile. These journeys adopt the run through
+/// the read API's host or the CLI once they have made the decision, so a driver
+/// found waiting is ended — it installs no handler for SIGTERM and writes
+/// nothing more — which leaves the run as a waiting driver that exited left it
+/// before 0.116: paused on its decision, with nothing driving it.
 #[cfg(unix)]
-fn started_and_let_go(launched: &[u8]) -> String {
+fn started_and_let_go(root: &Path, launched: &[u8]) -> String {
     let launched: Value = serde_json::from_slice(launched).expect("start prints its launch");
     let run = launched["run_id"].as_str().expect("a run id").to_owned();
     let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    eventually("the launched driver let go of the run", || {
-        !process_is_live(pid)
-    });
+    let_go(root, &run, pid);
     run
+}
+
+/// Wait until the driver `pid` of `run` under `root` has let go of the run, ending
+/// it once it waits on a decision, as [`started_and_let_go`] says.
+#[cfg(unix)]
+fn let_go(root: &Path, run: &str, pid: u32) {
+    eventually("the launched driver let go of the run", || {
+        if !process_is_live(pid) {
+            return true;
+        }
+        if waits_on_a_decision(root, run) && drives(pid, run) {
+            let raw = i32::try_from(pid).expect("a pid the kernel issued");
+            // SAFETY: `kill` takes a pid and a signal and touches no memory of
+            // this process; the pid was just read as this run's own driver.
+            unsafe { libc::kill(raw, libc::SIGTERM) };
+        }
+        false
+    });
+}
+
+/// Whether the engine reads `run` under `root` as paused on a waiting human
+/// action, by its own `status`, and the driver has journaled each one's `waiting`
+/// settlement — `status` reads the pause off the decision record the driver writes
+/// just before it, and a driver ended in between leaves an action nothing can
+/// attest.
+#[cfg(unix)]
+fn waits_on_a_decision(root: &Path, run: &str) -> bool {
+    let output = std::process::Command::new(sibling::binary())
+        .args(["status", run, "--json"])
+        .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
+        .output()
+        .expect("the provisioned onepipeline runs");
+    let Ok(status) = serde_json::from_slice::<Value>(&output.stdout) else {
+        return false;
+    };
+    let Some(waiting) = status["paused"]["human_actions"].as_array() else {
+        return false;
+    };
+    let journal = fs::read_to_string(root.join(run).join("events.jsonl")).unwrap_or_default();
+    let last_settled = |node: &Value| {
+        journal
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|record| {
+                record["kind"] == json!("node-settled") && &record["labels"]["node"] == node
+            })
+            .last()
+            .map(|record| record["payload"]["status"].clone())
+    };
+    output.status.success()
+        && status["word"] == json!("PAUSED")
+        && !waiting.is_empty()
+        && waiting
+            .iter()
+            .all(|node| last_settled(node) == Some(json!("waiting")))
+}
+
+/// Whether `pid` is still the provisioned engine's driver of `run` — the
+/// pid alone could by now name anything.
+#[cfg(unix)]
+fn drives(pid: u32, run: &str) -> bool {
+    std::process::Command::new("ps")
+        .args(["-o", "args=", "-p", &pid.to_string()])
+        .output()
+        .is_ok_and(|ps| {
+            let args = String::from_utf8_lossy(&ps.stdout);
+            let mut words = args.split_whitespace();
+            words
+                .next()
+                .is_some_and(|program| program.ends_with("onepipeline"))
+                && words.next() == Some("drive-run")
+                && words.next() == Some(run)
+        })
 }
 
 /// The launch record of `run` under `root`, as the engine last wrote it.
@@ -17031,13 +17114,16 @@ fn launch_copied_from_plan_task_renderings(
         .unwrap_or_else(|| panic!("the copy names where the project landed: {report:?}"))
         .to_string();
 
-    let run = started_and_let_go(&onepipeline(&[
-        "start",
-        &home,
-        "--detach",
-        onepipeline::templates::REQUIRE_RENDERED_FLAG,
-        "true",
-    ]));
+    let run = started_and_let_go(
+        &root,
+        &onepipeline(&[
+            "start",
+            &home,
+            "--detach",
+            onepipeline::templates::REQUIRE_RENDERED_FLAG,
+            "true",
+        ]),
+    );
     (run, report)
 }
 
@@ -17222,15 +17308,18 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
         &[&approval],
     );
     let engine = |arguments: &[&str]| provisioned_onepipeline(&root, &dir, &graph, arguments);
-    let run = started_and_let_go(&engine(&[
-        "start",
-        &format!(
-            "{}:{}",
-            fixture_run::LOCAL_MD_SOURCE,
-            fixture_run::LOCAL_MD_PROJECT
-        ),
-        "--detach",
-    ]));
+    let run = started_and_let_go(
+        &root,
+        &engine(&[
+            "start",
+            &format!(
+                "{}:{}",
+                fixture_run::LOCAL_MD_SOURCE,
+                fixture_run::LOCAL_MD_PROJECT
+            ),
+            "--detach",
+        ]),
+    );
     let recorded_statuses = || -> Value {
         let printed: Value =
             serde_json::from_slice(&engine(&["results", "--json", &run])).expect("results JSON");
@@ -17316,7 +17405,7 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
     assert_eq!(recorded_statuses(), waiting);
 
     engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
-    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    started_and_let_go(&root, &engine(&["adopt", &run, "--detach"]));
     let approved = recorded_statuses();
     assert_eq!(
         approved,
@@ -17325,7 +17414,7 @@ fn a_run_the_pinned_engine_launched_attested_and_settled_is_served_as_the_engine
     assert_eq!(served_statuses(), approved, "{}", detail()["graph"]);
 
     engine(&["attest", &run, SIGNOFF]);
-    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    started_and_let_go(&root, &engine(&["adopt", &run, "--detach"]));
     let settled = recorded_statuses();
     assert_eq!(
         settled,
@@ -17401,15 +17490,18 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
     )
     .expect("a public destination");
     let engine = |arguments: &[&str]| provisioned_onepipeline(&root, &dir, &graph, arguments);
-    let run = started_and_let_go(&engine(&[
-        "start",
-        &format!(
-            "{}:{}",
-            fixture_run::LOCAL_MD_SOURCE,
-            fixture_run::LOCAL_MD_PROJECT
-        ),
-        "--detach",
-    ]));
+    let run = started_and_let_go(
+        &root,
+        &engine(&[
+            "start",
+            &format!(
+                "{}:{}",
+                fixture_run::LOCAL_MD_SOURCE,
+                fixture_run::LOCAL_MD_PROJECT
+            ),
+            "--detach",
+        ]),
+    );
     // A person edits the board while approval waits. The settlement's narrow
     // write adds its metadata without re-reading the body to screen it.
     let approval = approval.to_string();
@@ -17432,7 +17524,7 @@ fn a_settlement_leaves_a_stored_term_and_is_read_through_the_status_and_node_rou
         json!("waiting")
     );
     engine(&["attest", &run, fixture_run::APPROVAL_NODE_ID]);
-    started_and_let_go(&engine(&["adopt", &run, "--detach"]));
+    started_and_let_go(&root, &engine(&["adopt", &run, "--detach"]));
     let written = fs::read_to_string(&path).expect("the settlement write-back");
     assert!(
         written.contains("Approve the velvetquasar change."),
@@ -18221,18 +18313,21 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
         fixture_run::LOCAL_MD_SOURCE,
         fixture_run::LOCAL_MD_PROJECT
     );
-    let run = started_and_let_go(&provisioned_onepipeline(
+    let run = started_and_let_go(
         &root,
-        &dir,
-        &graph,
-        &[
-            "start",
-            &project,
-            "--detach",
-            "--bus-config",
-            &bus.display().to_string(),
-        ],
-    ));
+        &provisioned_onepipeline(
+            &root,
+            &dir,
+            &graph,
+            &[
+                "start",
+                &project,
+                "--detach",
+                "--bus-config",
+                &bus.display().to_string(),
+            ],
+        ),
+    );
     // The engine recorded the hook as the launch declared it, so the bus every
     // writer of this run opens — this server's included — runs it.
     assert_eq!(
@@ -18286,9 +18381,17 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
     }
     assert_eq!(served_tasks[0]["id"], json!(node));
     assert_eq!(launched["graph"]["plan"]["name"], recorded["name"]);
+    // Held to the status alone: the engine adds what else it records of a
+    // settlement — 0.116's task digest among it — and the payload is its own.
+    let statuses = || -> Vec<Value> {
+        settled_records()
+            .iter()
+            .map(|settled| settled["status"].clone())
+            .collect()
+    };
     assert_eq!(
-        settled_records(),
-        [json!({ "status": "waiting" })],
+        statuses(),
+        [json!("waiting")],
         "the launch settled the approval as anything but waiting"
     );
     assert_eq!(launched["graph"]["node_status"][node], json!("waiting"));
@@ -18334,7 +18437,7 @@ fn a_run_launched_with_a_bus_hook_is_served_and_supervised_as_the_engine_recorde
             .any(|record| record["kind"] == json!("edit-committed")),
         "a dropped envelope was committed"
     );
-    assert_eq!(settled_records(), [json!({ "status": "waiting" })]);
+    assert_eq!(statuses(), [json!("waiting")]);
     assert_eq!(detail()["graph"]["node_status"][node], json!("waiting"));
 
     // The hook keeps this one, unchanged: the receipt says it applied and says
@@ -18829,13 +18932,16 @@ fn an_adopted_private_coordination_run_keeps_its_public_task_public_and_hands_it
         fixture_run::LOCAL_MD_SOURCE,
         fixture_run::LOCAL_MD_PROJECT
     );
-    let run = started_and_let_go(&provisioned_onepipeline_with_env(
+    let run = started_and_let_go(
         &root,
-        &dir,
-        &graph,
-        &launching,
-        &["start", &project, "--detach"],
-    ));
+        &provisioned_onepipeline_with_env(
+            &root,
+            &dir,
+            &graph,
+            &launching,
+            &["start", &project, "--detach"],
+        ),
+    );
 
     let serving = Serving::start_in_as_with_env(workspace, fixture_run::SESSION, &environment);
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
@@ -22461,9 +22567,7 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
         serde_json::from_slice(&launched.stdout).expect("start prints its launch");
     let run = launched["run_id"].as_str().expect("a run id").to_owned();
     let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    eventually("the launched driver let go of the run", || {
-        !process_is_live(pid)
-    });
+    let_go(&root, &run, pid);
 
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
