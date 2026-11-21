@@ -903,6 +903,19 @@ calls none of the new verbs. The move is announced as a break: the re-exported e
 types change. Its oneagentgraph, onejudge, oneharness-core, onemessagebus and
 onetaskgraph requirements are the ones 0.115.1 resolved.
 
+0.116.1 is the engine whose refused edits say what they were: every `edit-rejected` it
+writes carries a one-line `summary`, the `node` its command names (and is labelled with
+it), and `full_reason`, the id of an artifact of the record keeping the complete refusal
+— a plan-edit hook's whole stderr up to its 64 KiB read bound, `full_reason_truncated`
+saying where it wrote more — and the reconciler's `edit-rejected` surface names the record
+it was raised for as `rejection`. This crate moves to it so the browser shows a refusal as
+an attributed event with its complete text, under timeline schema 17: the reference
+vocabulary gains `refusal`, an artifact the engine kept in the run's reports directory is
+named on the wire by its file name and served whole by the artifact route, and the run's
+own span lists every refusal whatever node it names. A patch move within 0.116, so the
+re-exported engine types do not change. Its oneagentgraph, onejudge, oneharness-core,
+onemessagebus, onetaskgraph and onevcs requirements are the ones 0.116.0 resolved.
+
 0.117.0 is the engine whose human items expire: an asker declares time, run, node and
 check conditions on an item, and the engine retires an open item as `expired` once one
 holds, recording the condition and its reason. `HumanItemState` gains `expired`, the

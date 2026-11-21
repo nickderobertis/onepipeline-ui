@@ -1,8 +1,16 @@
-import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from "node:fs";
 import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { z } from "zod";
 import { FIXTURE_FACTS_NAME } from "./fixtures/facts-file";
 import { FIXTURE_WORKSPACE } from "./playwright.config";
 
@@ -205,14 +213,19 @@ export async function startFixtureServer(
     // Whatever was still relayed to the stopped server ends with it.
     for (const socket of relayed) socket.destroy();
   };
+  const facts: unknown = JSON.parse(
+    readFileSync(join(workspace, FIXTURE_FACTS_NAME), "utf8"),
+  );
   return {
     origin,
     workspace,
-    facts: JSON.parse(
-      readFileSync(join(workspace, FIXTURE_FACTS_NAME), "utf8"),
-    ),
+    facts,
     stop: async () => {
-      await halt();
+      try {
+        endRuns(workspace, facts);
+      } finally {
+        await halt();
+      }
       await new Promise<void>((resolve) => front.close(() => resolve()));
       rmSync(workspace, { recursive: true, force: true });
     },
@@ -221,4 +234,54 @@ export async function startFixtureServer(
       if (child === undefined) child = await serve();
     },
   };
+}
+
+/** What a corpus that launches runs with the engine publishes about how to reach it. */
+const engineFactsSchema = z.looseObject({
+  engine: z.string().min(1),
+  cwd: z.string().min(1),
+  launcher: z.string().min(1),
+  environment: z.record(z.string(), z.string()),
+  removed: z.array(z.string()),
+});
+
+const statusSchema = z.looseObject({ driven: z.boolean() });
+
+/**
+ * End every run a corpus launched that something still drives, with the engine's
+ * own `stop`, before its workspace is removed.
+ *
+ * Since onepipeline 0.116 a launch that waits on a person keeps a driver waiting
+ * on that decision, and nothing else ends it: left alone it outlives the world it
+ * drives, and holds the next world built at the same path. Only a world being
+ * removed is stopped; one paused by `stopServing` is served again as it was.
+ */
+function endRuns(workspace: string, facts: unknown): void {
+  const parsed = engineFactsSchema.safeParse(facts);
+  if (!parsed.success) return;
+  const { engine, cwd, launcher, environment, removed } = parsed.data;
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  for (const name of removed) delete env[name];
+  Object.assign(env, environment, { ONEPIPELINE_LAUNCHER_SESSION: launcher });
+  const runs = join(workspace, "runs");
+  if (!existsSync(runs)) return;
+  for (const run of readdirSync(runs)) {
+    if (!existsSync(join(runs, run, "launch.json"))) continue;
+    const status = spawnSync(engine, ["status", run, "--json"], {
+      cwd,
+      env,
+      encoding: "utf8",
+    });
+    const read = statusSchema.safeParse(
+      status.status === 0 ? JSON.parse(status.stdout) : null,
+    );
+    if (!read.success || !read.data.driven) continue;
+    const stopped = spawnSync(engine, ["stop", run], {
+      cwd,
+      env,
+      encoding: "utf8",
+    });
+    if (stopped.status !== 0)
+      throw new Error(`\`onepipeline stop ${run}\` refused: ${stopped.stderr}`);
+  }
 }

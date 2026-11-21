@@ -10,7 +10,12 @@
     "test": {
       "command": "node --test pool-maintenance/tests/*.test.mjs",
       "dependsOn": ["bootstrap"],
-      "inputs": ["{projectRoot}/**/*", "{workspaceRoot}/justfile", "platform"]
+      "inputs": [
+        "{projectRoot}/**/*",
+        "{workspaceRoot}/justfile",
+        "{workspaceRoot}/rust-toolchain.toml",
+        "platform"
+      ]
     },
     "check": {
       "executor": "nx:noop",

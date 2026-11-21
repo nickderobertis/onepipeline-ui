@@ -77,6 +77,31 @@ struct World {
     dir: TempDir,
     root: PathBuf,
     board: GitHubBoard,
+    /// Every run this world launched, with the session that launched it.
+    launched: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+/// Since onepipeline 0.116 a run launched here that waits on a person keeps a
+/// driver waiting on that decision, which nothing else ends: each run something
+/// still drives is ended with the engine's own `stop`, as the session that
+/// launched it, before the world is removed. Best effort — a world dropped
+/// while its journey is already failing must not panic again.
+impl Drop for World {
+    fn drop(&mut self) {
+        let launched = self
+            .launched
+            .lock()
+            .map(|runs| runs.clone())
+            .unwrap_or_default();
+        for (run, session) in &launched {
+            let driven =
+                serde_json::from_slice::<Value>(&self.cli(None, &["status", run, "--json"]).stdout)
+                    .is_ok_and(|status| status["driven"] == json!(true));
+            if driven {
+                let _ = self.cli(Some(session), &["stop", run]);
+            }
+        }
+    }
 }
 
 impl World {
@@ -137,7 +162,12 @@ impl World {
              oneharness_config: ./child.toml\n",
         )
         .expect("the node graph");
-        Self { dir, root, board }
+        Self {
+            dir,
+            root,
+            board,
+            launched: std::sync::Mutex::default(),
+        }
     }
 
     fn base(&self) -> &Path {
@@ -390,6 +420,10 @@ impl World {
 
     /// Launch `plan` as `session` with the engine's own `start`, driving it
     /// until nothing more can happen without a person; answers the run id.
+    ///
+    /// Since onepipeline 0.116 the attached launch hands the run to a retained
+    /// driver that waits on the decision and moves the run on itself once a
+    /// person makes it.
     fn start(&self, session: &str, plan: &str) -> String {
         let printed = self.ok(Some(session), &["start", plan, "--attach"]);
         let last = printed
@@ -397,10 +431,15 @@ impl World {
             .rev()
             .find(|line| line.starts_with('{'))
             .unwrap_or_else(|| panic!("`start` printed no settlement: {printed}"));
-        serde_json::from_str::<Value>(last).expect("the settlement")["run_id"]
+        let run = serde_json::from_str::<Value>(last).expect("the settlement")["run_id"]
             .as_str()
             .expect("a run id")
-            .to_owned()
+            .to_owned();
+        self.launched
+            .lock()
+            .expect("the launched runs")
+            .push((run.clone(), session.to_owned()));
+        run
     }
 
     /// End the detached driver an attached `start` hands `run` to as it returns,

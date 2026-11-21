@@ -14,7 +14,7 @@
  *     --metric human-items-requests|human-items-lag
  *   node apps/dag-ui-e2e/read-latency/read-latency-budget.mjs \
  *     --telemetry apps/dag-ui-e2e/read-latency/telemetry/read-latency-large.json \
- *     --metric first-view|rest-arrived|history-page|node-timeline-complete|status
+ *     --metric first-view|rest-arrived|history-page|node-timeline-complete|status|refusal-detail
  *
  * Exits 0 having reported the figure, 1 when the telemetry is absent or does not
  * state the workload, and 2 on a usage error.
@@ -128,6 +128,13 @@ const MEASURES = {
     return {
       value: status.slowest_s,
       detail: { ...status, ...provenance(telemetry) },
+    };
+  },
+  "refusal-detail"(telemetry) {
+    const refusal = large(telemetry).refusal_detail;
+    return {
+      value: refusal.slowest_s,
+      detail: { ...refusal, ...provenance(telemetry) },
     };
   },
   "human-items-requests"(telemetry) {

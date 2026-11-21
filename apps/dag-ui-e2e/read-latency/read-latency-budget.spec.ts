@@ -109,6 +109,19 @@ const nodeReading = (seconds: number | null, held = 10_001) => ({
   held: { expected: 10_001, chart: held, list: held },
   host_load: load,
 });
+/** One refusal's three readings, as the large run's phase records them. */
+const refusal = (record: string, readings: readonly number[]) => ({
+  record,
+  lines: 720,
+  readings: readings.map((seconds) => ({
+    seconds,
+    response_s: seconds / 3,
+    bytes: 65_700,
+    render_s: seconds / 2,
+  })),
+  median_s: [...readings].sort((a, b) => a - b)[1] ?? 0,
+});
+
 const largeRun = (overrides: object = {}) => ({
   corpus: { ...DRIVERS },
   first_view: {
@@ -144,6 +157,12 @@ const largeRun = (overrides: object = {}) => ({
     slowest_s: 0.4,
     checkpoint_bytes: DRIVERS.checkpoint_bytes,
     stand_in_starts: 0,
+  },
+  refusal_detail: {
+    refusals: 500,
+    newest: refusal("a.1001", [0.3, 0.32, 0.31]),
+    oldest: refusal("a.3", [0.5, 0.45, 0.52]),
+    slowest_s: 0.5,
   },
   host_load: { start: load, end: load },
   ...overrides,
@@ -190,7 +209,7 @@ const telemetry = (overrides: object = {}) => ({
 });
 
 const largeTelemetry = (overrides: object = {}) => ({
-  schema_version: 4,
+  schema_version: 5,
   recorded_at: "2026-11-07T00:00:00.000Z",
   commit: "a".repeat(40),
   dirty: false,
@@ -287,6 +306,7 @@ test("the large-run budgets report their figures and detail through the real che
     ["history-page", 1],
     ["node-timeline-complete", 7],
     ["status", 1],
+    ["refusal-detail", 1],
   ]);
   expect(
     Object.fromEntries(
@@ -298,7 +318,29 @@ test("the large-run budgets report their figures and detail through the real che
     "runner-history-page": [0.6, "within"],
     "runner-node-timeline-complete": [5.1, "within"],
     "runner-status": [0.4, "within"],
+    "runner-refusal-detail": [0.5, "within"],
   });
+  // The refusal detail reports each refusal's readings and their breakdown.
+  const refused = z
+    .object({
+      refusals: z.number(),
+      slowest_s: z.number(),
+      newest: z.object({
+        record: z.string(),
+        readings: z.array(
+          z.object({
+            seconds: z.number(),
+            response_s: z.number(),
+            bytes: z.number(),
+            render_s: z.number(),
+          }),
+        ),
+      }),
+      oldest: z.object({ median_s: z.number() }),
+    })
+    .parse(JSON.parse(results[5]?.detail ?? "{}"));
+  expect(refused.newest.readings).toHaveLength(3);
+  expect(refused.oldest.median_s).toBe(0.5);
   expect(results[0]?.detail).toContain("corpus");
   expect(results[4]?.detail).toContain("stand_in_starts");
   // The node's complete load reports every reading and its breakdown.
@@ -613,6 +655,7 @@ test("each budgets file names this runner's metrics and its own telemetry, with 
         "history-page",
         "node-timeline-complete",
         "status",
+        "refusal-detail",
       ],
     ],
   ] as const) {

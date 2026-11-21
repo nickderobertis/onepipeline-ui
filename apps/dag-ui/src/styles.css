@@ -1001,12 +1001,36 @@ p {
 .timeline-detail {
   min-width: 0;
   min-height: 0;
+  /* The conversation item a panel opened on is marked in this view's own selection
+     accent — the border a selected event-list row carries — rather than the package's
+     default, so one colour says "this is the one you opened" across the screen. */
+  --conversation-focus-highlight: var(--primary);
 }
 
 /* A turn's tool call is opened by its own row, which is `flex-1` and so carries the
    default `min-width: auto` — held at its min-content, the control went off the edge
    of a panel that clips sideways. Zeroing the floor lets the argument preview give up
    its width first, which is what its own `truncate` is for. */
+/* A refused edit's complete refusal: every line as the engine kept it, scrolled in
+   place rather than stretching the panel. */
+.refusal-figure {
+  margin: 0;
+}
+.refusal-text {
+  max-height: 24rem;
+  overflow: auto;
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .timeline-detail [data-slot="accordion-trigger"] {
   min-width: 0;
 }
@@ -3437,51 +3461,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
     z-index: 50;
     max-width: none;
   }
-}
-
-/* The run's refused live edits, over the graph's top-left corner: a correction that
-   never landed changes nothing the canvas draws, so it is stated beside it. */
-.rejected-edits {
-  position: absolute;
-  z-index: 5;
-  top: 10px;
-  left: 10px;
-  max-width: min(420px, calc(100% - 20px));
-  max-height: 40%;
-  overflow: auto;
-  padding: 8px 10px;
-  border: 1px solid var(--destructive);
-  border-radius: 6px;
-  background: var(--popover);
-  font-size: 12px;
-}
-
-.rejected-edits h2 {
-  margin: 0 0 4px;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.rejected-edits ol {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.rejected-edits li {
-  display: grid;
-  gap: 2px;
-}
-
-.rejected-edit-what {
-  font-weight: 600;
-}
-
-.rejected-edit-reason {
-  color: var(--muted-foreground);
-  overflow-wrap: anywhere;
 }
 
 /* A command node's log tail, scrolled in place rather than stretching the view. */

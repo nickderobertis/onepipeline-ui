@@ -47,7 +47,7 @@ after(() => {
   for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A repository root holding one crate, the real justfile and the real script. */
+/** A repository root holding one crate and the real justfile, toolchain pin and script. */
 function fixture({ feature = true, view = true } = {}) {
   const root = mkdtempSync(join(process.env.ONEPIPELINE_NODE_SCRATCH_DIR ?? tmpdir(), "pool-maintenance-measure-"));
   scratch.push(root);
@@ -57,6 +57,13 @@ function fixture({ feature = true, view = true } = {}) {
     join(root, "pool-maintenance", "measure.sh"),
   );
   copyFileSync(join(ROOT, "justfile"), join(root, "justfile"));
+  // The repository's own toolchain pin, as its builds get it: outside the checkout
+  // cargo is whatever the host's default is, and cargo 1.100 lays a profile out by
+  // unit rather than in the `deps`/`.fingerprint` the script and the pruner read.
+  copyFileSync(
+    join(ROOT, "rust-toolchain.toml"),
+    join(root, "rust-toolchain.toml"),
+  );
   writeFileSync(
     join(root, "Cargo.toml"),
     [

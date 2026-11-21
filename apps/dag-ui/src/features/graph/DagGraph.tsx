@@ -6,7 +6,6 @@
 // journeys to catch what moved. The two hooks it does have — useConversation and
 // useStickyBottom — are the ones that were extracted upstream.
 import { layoutDag } from "@onepipeline-ui/dag-layout";
-import type { RejectedEdit } from "@onepipeline-ui/dag-model";
 import {
   Background,
   Controls,
@@ -24,7 +23,6 @@ import {
 } from "../../lib/run-model";
 import { type DagFlowNode, DagNodeCard } from "./DagNodeCard";
 import { DagRoutedEdge } from "./DagRoutedEdge";
-import { RejectedEdits } from "./RejectedEdits";
 
 const nodeTypes = { dagNode: DagNodeCard };
 const edgeTypes = { routed: DagRoutedEdge };
@@ -34,11 +32,8 @@ export function DagGraph({
   selectedNodeId,
   onSelectNode,
   journalSeq,
-  rejectedEdits,
 }: {
   readonly nodes: readonly NodeView[];
-  /** The live edits the run refused, oldest first; absent when it refused none. */
-  readonly rejectedEdits?: readonly RejectedEdit[];
   /** The journal sequence number of the last record this view has rendered. */
   readonly journalSeq?: number;
   readonly selectedNodeId?: string;
@@ -182,7 +177,6 @@ export function DagGraph({
         <Background color="var(--border)" gap={22} />
         <Controls showInteractive={false} />
       </ReactFlow>
-      <RejectedEdits edits={rejectedEdits} />
       {/* The keyboard path to the graph, and the only reading of it available without
           the canvas: it states the same authoritative status each card paints, and the
           same reason each card truncates, so nothing here is pointer-only. */}

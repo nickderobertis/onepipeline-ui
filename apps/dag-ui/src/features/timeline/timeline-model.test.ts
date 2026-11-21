@@ -310,6 +310,79 @@ describe("one node's slice of the run timeline", () => {
     );
   });
 
+  test("a refused edit is one row read by its summary, and the surface raised for it answers to that row", () => {
+    const refusal = {
+      kind: "edit-rejected",
+      record_id: "host.4",
+      author: "monitor",
+      fields: {
+        author: "monitor",
+        summary: "cancel: node 'build' has settled",
+        reason: "refused: cancel: node 'build' has settled",
+      },
+    };
+    const surface = (kind: string, id: string) => ({
+      kind,
+      record_id: id,
+      surface_id: 7,
+      surface_state: {
+        id: 7,
+        kind: "edit-rejected",
+        read_at: "2026-07-26T12:02:00.000Z",
+      },
+      fields: {
+        surface: 7,
+        kind: "edit-rejected",
+        ...(kind === "planner-surface-queued"
+          ? { rejection: { stream: "host", seq: 4 } }
+          : {}),
+      },
+    });
+    const rows = nodeWith([
+      refusal,
+      // The surfaced record first in the list, the queued one naming the refusal after.
+      surface("planner-surfaced", "host.6"),
+      surface("planner-surface-queued", "host.5"),
+    ]);
+    const listed = eventList(rows);
+    expect(listed.map((row) => row.displayLabel)).toEqual([
+      "cancel: node 'build' has settled · by monitor",
+    ]);
+    const [row] = listed;
+    expect(row?.status).toBe("not applied · read");
+    expect(row?.statusAt).toBe("2026-07-26T12:02:00.000Z");
+    expect(row?.aliases).toEqual(expect.arrayContaining(["host.6", "host.5"]));
+    expect(typeCounts(rows).get("edit")).toBe(1);
+    expect(typeCounts(rows).get("surface")).toBeUndefined();
+
+    // A surface nobody has read says so on the refusal's row.
+    const unread = eventList(
+      nodeWith([
+        refusal,
+        {
+          ...surface("planner-surface-queued", "host.5"),
+          surface_state: { id: 7, kind: "edit-rejected" },
+        },
+      ]),
+    );
+    expect(unread.map((listedRow) => listedRow.status)).toEqual([
+      "not applied · unread",
+    ]);
+
+    // A surface whose refusal the list does not hold is a surface like any other,
+    // and a refusal written before summaries reads as it always did.
+    const apart = eventList(
+      nodeWith([
+        { ...refusal, record_id: "host.9", fields: { author: "planner" } },
+        surface("planner-surface-queued", "host.5"),
+      ]),
+    );
+    expect(apart.map((listedRow) => listedRow.displayLabel)).toEqual([
+      "edit-rejected · by monitor",
+      "edit-rejected",
+    ]);
+  });
+
   test("two different repeats back to back are two blocks, and the longer saving wins", () => {
     const pair = [{ kind: "gate-run" }, { kind: "push" }];
     const rows = nodeWith([

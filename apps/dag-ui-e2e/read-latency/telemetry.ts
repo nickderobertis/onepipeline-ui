@@ -322,6 +322,26 @@ const nodeTimelineReadingSchema = z
       });
   });
 
+/** One reading of a refused edit's complete text: pressed to every line shown. */
+const refusalReadingSchema = z.object({
+  /** From pressing the row until the detail shows every line of the kept text. */
+  seconds: figure,
+  /** The artifact request's response time, as the browser timed it. */
+  response_s: figure,
+  /** The artifact response's body, in bytes. */
+  bytes: count,
+  /** From the response to the text rendered. */
+  render_s: figure,
+});
+
+/** One refusal's three readings and their median. */
+const refusalSchema = z.object({
+  record: z.string().min(1),
+  lines: count,
+  readings: z.array(refusalReadingSchema).length(3),
+  median_s: figure,
+});
+
 const largeRunSchema = z.object({
   corpus: corpusSchema,
   // The corpus holds the relayed run, so its Overall is read with the rest.
@@ -353,6 +373,13 @@ const largeRunSchema = z.object({
     checkpoint_bytes: count,
     stand_in_starts: count,
   }),
+  /** A refused edit's complete text, the newest and the oldest of the run's. */
+  refusal_detail: z.object({
+    refusals: count,
+    newest: refusalSchema,
+    oldest: refusalSchema,
+    slowest_s: figure,
+  }),
   host_load: z.object({ start: hostLoad, end: hostLoad }),
 });
 export type LargeRun = z.infer<typeof largeRunSchema>;
@@ -379,9 +406,10 @@ export const largeTelemetrySchema = z.object({
   /**
    * Each reading carries the server's split of its `POST`; the first views hold
    * `relayed_overall` and the corpus its drivers; the busiest node's complete load
-   * is read, and the history page is the paged route's own.
+   * is read, and the history page is the paged route's own; at 5 the refusal
+   * detail's readings are recorded.
    */
-  schema_version: z.literal(4),
+  schema_version: z.literal(5),
   recorded_at: z.iso.datetime(),
   commit: z.string().regex(/^[0-9a-f]{40}$/u),
   dirty: z.boolean(),

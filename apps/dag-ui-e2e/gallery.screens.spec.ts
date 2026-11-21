@@ -362,6 +362,57 @@ async function openActionItems(page: Page, world: string): Promise<Locator> {
   return list;
 }
 
+/** The server of a corpus of its own a surface is photographed over, stopped after it. */
+let corpus: FixtureServer | undefined;
+
+/** Serve the named corpus of its own and open `path` on it. */
+async function openCorpus(
+  page: Page,
+  flag: string,
+  path: string,
+): Promise<string> {
+  corpus = await startFixtureServer(`gallery-${flag}`, [`--${flag}`]);
+  await visit(page, `${corpus.origin}${path}`);
+  return corpus.origin;
+}
+
+/** The refusals corpus's Overall, its own records read and listed. */
+async function openRefusals(page: Page): Promise<Locator> {
+  await openCorpus(
+    page,
+    "refusals-corpus",
+    "/?run=dag-ui-refusals&view=overall",
+  );
+  await page
+    .getByRole("button", { name: "Load the run's own records" })
+    .click();
+  const events = page.getByRole("region", { name: "Run events" });
+  await expect(events.getByRole("article").first()).toBeVisible();
+  await settleReads(page);
+  return events;
+}
+
+/**
+ * Leave `region`'s scrollbar at rest: hidden, as the package's scroll area leaves it
+ * once the pointer has gone.
+ *
+ * The scroll area shows its bar while the pointer is over it and takes it away a
+ * moment after the pointer leaves. A detail that opens under the pointer that clicked
+ * its row is over it or not depending on whether the browser has re-hit-tested that
+ * stationary pointer yet, so two captures of one build drew the bar in one and not
+ * the other. Entering and leaving on purpose, then waiting for the bar to go, makes
+ * that the same every time.
+ */
+async function restScrollbars(page: Page, region: Locator): Promise<void> {
+  await region.hover({ position: { x: 8, y: 8 } });
+  await parkPointer(page);
+  await expect(
+    // llmlint: ignore[e2e_uses_accessible_selectors] the scroll area's bar is decoration with no role or name; it is waited away, never selected or asserted as content.
+    region.locator('[data-slot="scroll-area-scrollbar"]'),
+    "the scroll area's bar is at rest",
+  ).toHaveCount(0);
+}
+
 const resultToast = (page: Page): Locator =>
   page.getByRole("region", { name: "Action result" });
 
@@ -793,6 +844,58 @@ const SURFACES: readonly Surface[] = [
       pointAtPlot(page, page.getByRole("region", { name: "Graph timeline" })),
   },
   {
+    name: "38-conversation-item",
+    title: "A conversation item, opened at that item in its conversation",
+    open: async (page) => {
+      await openCorpus(
+        page,
+        "transcripts-corpus",
+        "/?run=dag-ui-transcripts&node=narrated",
+      );
+      await settleReads(page);
+      await page
+        .getByRole("region", { name: "Node transcript" })
+        .getByRole("button", { name: /^Open You.ve hit your weekly limit/u })
+        .first()
+        .click({ position: { x: 24, y: 8 } });
+      await expect(
+        page
+          .getByRole("region", { name: "Timeline item detail" })
+          .getByRole("group", { name: "Agent message" })
+          .filter({ hasText: "weekly limit" }),
+      ).toHaveAttribute("aria-current", "true");
+    },
+  },
+  {
+    name: "39-refusal-rows",
+    title: "Refused edits as rows of the run's event list",
+    open: async (page) => {
+      const events = await openRefusals(page);
+      await events
+        .getByRole("article", { name: / · by monitor$/u })
+        .first()
+        .scrollIntoViewIfNeeded();
+    },
+  },
+  {
+    name: "40-refusal-detail",
+    title: "A refused edit's detail, its complete refusal read whole",
+    open: async (page) => {
+      const events = await openRefusals(page);
+      await events
+        .getByRole("article", { name: /^amend of node 'review': / })
+        .getByRole("button")
+        .click();
+      const detail = page.getByRole("region", {
+        name: "Timeline item detail",
+      });
+      await expect(
+        detail.getByRole("figure", { name: "Complete refusal" }),
+      ).toBeVisible();
+      await restScrollbars(page, detail);
+    },
+  },
+  {
     name: "24-held-graph",
     title: "Graph view: finished work held for releases",
     open: async (page) => {
@@ -1050,6 +1153,8 @@ for (const size of VIEWPORTS) {
     test.afterEach(async () => {
       await actionItems?.stop();
       actionItems = undefined;
+      await corpus?.stop();
+      corpus = undefined;
     });
 
     for (const surface of SURFACES) {

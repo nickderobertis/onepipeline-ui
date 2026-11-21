@@ -815,7 +815,8 @@
         "gate_log",
         "worker_report",
         "oneharness_session",
-        "pr"
+        "pr",
+        "refusal"
       ],
       "field": "answer.initial.snapshot.visible.timeline.spans[0].reference.kind",
       "required": true,

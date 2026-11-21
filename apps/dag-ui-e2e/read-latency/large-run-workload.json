@@ -17,7 +17,11 @@
     "harness_spans": 5900,
     "checkpoint_bytes": 7000000,
     "busiest_node_records": 10000,
-    "off_graph_node_records": 6000
+    "off_graph_node_records": 6000,
+    "refusals": {
+      "records": 500,
+      "full_reason_bytes": 65536
+    }
   },
   "relayed": {
     "state": "settled",

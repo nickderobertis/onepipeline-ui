@@ -5,8 +5,13 @@
 // repository imported precisely so as not to reimplement it, with nothing but the copied
 // journeys to catch what moved. The two hooks it does have — useConversation and
 // useStickyBottom — are the ones that were extracted upstream.
+import type { TimelineHover } from "@oneharness/ui";
 import {
+  createContext,
+  type PointerEvent,
+  type ReactNode,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -40,6 +45,14 @@ import { markerReadingAt } from "./item-reading";
  * all, so its reading is the one this app hung on its glyph in `item-reading.tsx`,
  * and everything below — the placement, the flip, the clamp — is what a marker at the
  * top of a clipped plot needs exactly as much as a segment inside one.
+ *
+ * What the pointer is over is the package's to say, not this layer's to look up. Its
+ * `Timeline` resolves the pointer anywhere over the plot — an empty lane, the marker
+ * row past the last bar — to the entry nearest it, and reports that entry's bar or
+ * glyph through `onHover`; every `Timeline` this app draws hands that report here
+ * (`useTimelineHoverReport`). The one plot the package draws without that callback,
+ * an opened conversation's own `ConversationTimeline`, reports the entry under the
+ * pointer through `ConversationPlotHover`, scoped to that plot alone.
  */
 
 /** How far the reading sits from what it describes, and how close it may come to an edge. */
@@ -48,6 +61,9 @@ const MARGIN = 8;
 
 /** The prefix the package derives every segment description's id from. */
 const DESCRIBED = '[aria-describedby^="timeline-detail-"]';
+
+/** What the package marks every bar and marker glyph it draws with. */
+const ENTRY = "[data-timeline-entry]";
 
 /** What is being read, and the text somebody else composed for it. */
 interface Anchored {
@@ -69,12 +85,20 @@ const anchoredAt = (target: EventTarget | null): Anchored | undefined => {
   const marker = markerReadingAt(target);
   if (marker !== undefined) return marker;
   const element = target.closest(DESCRIBED);
-  if (!(element instanceof HTMLElement)) return undefined;
-  const described = document.getElementById(
-    element.getAttribute("aria-describedby") ?? "",
-  );
-  const detail = described?.textContent?.trim();
-  return detail ? { element, detail } : undefined;
+  if (element instanceof HTMLElement) {
+    const described = document.getElementById(
+      element.getAttribute("aria-describedby") ?? "",
+    );
+    const detail = described?.textContent?.trim();
+    return detail ? { element, detail } : undefined;
+  }
+  // A marker drawn with no reading hung on it — the graph timeline's — is read by
+  // the name the package gives the entry, which says whose record it is and what.
+  const entry = target.closest(ENTRY);
+  const named = entry?.getAttribute("aria-label")?.replace(/, marker$/u, "");
+  return entry instanceof HTMLElement && named
+    ? { element: entry, detail: named }
+    : undefined;
 };
 
 /** Keeps the previous value when the same thing is entered again, so nothing churns. */
@@ -88,7 +112,73 @@ const settle = (
     ? current
     : next;
 
-export function TimelinePopoverLayer() {
+/** Where a plot reports the entry the pointer resolves to, or `null` once it leaves. */
+type Report = (element: HTMLElement | null) => void;
+
+const HoverReport = createContext<Report>(() => undefined);
+
+/**
+ * The `onHover` a `Timeline` this app draws is handed: the entry the package resolved,
+ * reported to the layer by the element it drew for it.
+ *
+ * A plot that goes away under a reading — Escape leaving the node view with the
+ * pointer still — is never left by the pointer, so the package reports no `null`
+ * for it; the plot's own unmount clears the reading it last reported instead.
+ */
+export function useTimelineHoverReport(): (
+  hover: TimelineHover<unknown> | null,
+) => void {
+  const report = useContext(HoverReport);
+  const reporting = useRef(false);
+  useEffect(
+    () => () => {
+      if (reporting.current) report(null);
+    },
+    [report],
+  );
+  return useCallback(
+    (hover) => {
+      reporting.current = hover !== null;
+      report(hover?.element ?? null);
+    },
+    [report],
+  );
+}
+
+/**
+ * The conversation plot's hover, which `ConversationTimeline` gives no callback for:
+ * the segment directly under the pointer, reported as the package reports the others,
+ * and cleared when the pointer leaves that plot.
+ */
+export function ConversationPlotHover({
+  children,
+}: {
+  readonly children: ReactNode;
+}) {
+  const report = useContext(HoverReport);
+  return (
+    <div
+      onPointerLeave={() => report(null)}
+      onPointerOver={(event: PointerEvent<HTMLDivElement>) => {
+        const target = event.target;
+        report(
+          target instanceof Element
+            ? (anchoredAt(target)?.element ?? null)
+            : null,
+        );
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** The layer, around everything that draws a plot so each can report to it. */
+export function TimelinePopoverLayer({
+  children,
+}: {
+  readonly children?: ReactNode;
+}) {
   const node = useRef<HTMLDivElement>(null);
   // Pointed at and focused are tracked apart, and either one shows the reading. The
   // package conflates them and clears on mouse-leave whichever it was, which loses a
@@ -104,13 +194,18 @@ export function TimelinePopoverLayer() {
     setFocused(undefined);
   }, []);
 
-  // `pointerover` fires for every element the pointer enters, so one handler both
-  // opens the reading over a segment or a marker and closes it on the way out —
-  // including the move from one straight onto the next, which a pair of enter/leave
-  // handlers has to reconcile between them.
+  // A plot's report replaces whatever the pointer was over before, so moving from
+  // one entry straight onto the next is one report rather than a leave and an enter
+  // to reconcile.
+  const report = useCallback<Report>(
+    (element) =>
+      setHovered((current) =>
+        settle(current, element === null ? undefined : anchoredAt(element)),
+      ),
+    [],
+  );
+
   useEffect(() => {
-    const point = (event: Event) =>
-      setHovered((current) => settle(current, anchoredAt(event.target)));
     const focus = (event: Event) =>
       setFocused((current) => settle(current, anchoredAt(event.target)));
     // Focus moving to something with no reading ends this one; focus moving to
@@ -123,13 +218,12 @@ export function TimelinePopoverLayer() {
         // signature is untyped in the name it is registered under.
         settle(current, anchoredAt((event as FocusEvent).relatedTarget)),
       );
+    // The pointer leaving the window leaves every plot, whatever a plot reported.
     const away = () => setHovered(undefined);
-    document.addEventListener("pointerover", point);
     document.addEventListener("pointerleave", away);
     document.addEventListener("focusin", focus);
     document.addEventListener("focusout", blur);
     return () => {
-      document.removeEventListener("pointerover", point);
       document.removeEventListener("pointerleave", away);
       document.removeEventListener("focusin", focus);
       document.removeEventListener("focusout", blur);
@@ -191,20 +285,25 @@ export function TimelinePopoverLayer() {
     };
   }, [anchor, place]);
 
-  if (anchor === undefined) return null;
-  return createPortal(
-    <div
-      aria-hidden="true"
-      className="timeline-popover"
-      data-testid="timeline-popover"
-      // A fresh element per reading, so it always starts hidden and is painted only
-      // once the layout effect below has measured and placed it.
-      key={anchor.detail}
-      ref={node}
-      style={{ visibility: "hidden" }}
-    >
-      {anchor.detail}
-    </div>,
-    document.body,
+  return (
+    <HoverReport.Provider value={report}>
+      {children}
+      {anchor !== undefined &&
+        createPortal(
+          <div
+            aria-hidden="true"
+            className="timeline-popover"
+            data-testid="timeline-popover"
+            // A fresh element per reading, so it always starts hidden and is painted only
+            // once the layout effect below has measured and placed it.
+            key={anchor.detail}
+            ref={node}
+            style={{ visibility: "hidden" }}
+          >
+            {anchor.detail}
+          </div>,
+          document.body,
+        )}
+    </HoverReport.Provider>
   );
 }

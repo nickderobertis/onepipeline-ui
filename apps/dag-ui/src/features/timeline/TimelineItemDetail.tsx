@@ -43,6 +43,7 @@ import { formatDuration } from "../../lib/time";
 import { useRead } from "../../lib/useRead";
 import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
+import { ConversationPlotHover } from "./TimelinePopover";
 import {
   dispatchRoleLabel,
   editAuthor,
@@ -121,7 +122,13 @@ export function TimelineItemDetail({
                   conversation item is read in the conversation alone, before,
                   during and after its transcript loads. */}
               {row.rowKind === "event" && !opensConversation(reference) && (
-                <RecordContent client={client} event={row.event} />
+                <RecordContent
+                  client={client}
+                  event={row.event}
+                  {...(row.event.kind === "edit-rejected"
+                    ? { shown: REFUSAL_SHOWN }
+                    : {})}
+                />
               )}
             </>
           )}
@@ -153,6 +160,15 @@ function Body({
   // reference is a conversation is read in that conversation and nowhere else.
   if (opensConversation(reference))
     return <Session row={row} transcript={transcript} />;
+  if (row.rowKind === "event" && row.event.kind === "edit-rejected")
+    return (
+      <Refusal
+        client={client}
+        event={row.event}
+        reference={reference}
+        runId={runId}
+      />
+    );
   const redirection = redirectionOf(row);
   if (redirection !== undefined)
     return <Redirection redirection={redirection} row={row} />;
@@ -374,12 +390,14 @@ function Session({
         </header>
         <Separator className="my-2.5" />
         <div className="conversation-timeline-sticky" ref={pinned}>
-          <ConversationTimeline
-            cursor={sync.cursor}
-            {...(focus === undefined ? {} : { focus })}
-            onSelectTurn={sync.scrollTo}
-            turns={[...turns]}
-          />
+          <ConversationPlotHover>
+            <ConversationTimeline
+              cursor={sync.cursor}
+              {...(focus === undefined ? {} : { focus })}
+              onSelectTurn={sync.scrollTo}
+              turns={[...turns]}
+            />
+          </ConversationPlotHover>
         </div>
         {/* llmlint: ignore[changed_behavior_has_e2e] the same unproducible state as
             above, from the other side: a served timeline names this turn, so only a
@@ -699,6 +717,147 @@ function Author({ row }: { readonly row: TimelineRow }) {
 }
 
 /**
+ * A refused edit, as the engine recorded it: who sent it, the one line it was
+ * summarised in, the node it concerned, the command exactly as sent, and the whole
+ * refusal — every line of it, read from the artifact the engine kept beside the
+ * record through the read API's artifact route, never rebuilt from `reason`. A
+ * record written before the engine kept one has its `reason` and nothing more.
+ */
+function Refusal({
+  client,
+  event,
+  reference,
+  runId,
+}: {
+  readonly client: TelemetryClient;
+  readonly event: TimelineEvent;
+  readonly reference?: TimelineReference;
+  readonly runId: string;
+}) {
+  const fields = event.fields ?? {};
+  const said = (key: string) =>
+    typeof fields[key] === "string" ? fields[key] : undefined;
+  const author = editAuthor(event);
+  const summary = said("summary");
+  const node = said("node");
+  const reason = said("reason");
+  const stated: readonly (readonly [string, string | undefined])[] = [
+    ["Author", author],
+    ["Summary", summary],
+    ["Node", node],
+  ];
+  const kept =
+    said("full_reason") !== undefined && reference?.kind === "refusal"
+      ? servableArtifact(reference.value)
+      : undefined;
+  return (
+    <section aria-label="Refused edit" className="refusal">
+      <dl className="facts">
+        <div>
+          <dt>Recorded at</dt>
+          <dd>
+            <Timestamp at={event.at} relative />
+          </dd>
+        </div>
+        {stated
+          .filter(([, value]) => value !== undefined)
+          .map(([term, value]) => (
+            <div key={term}>
+              <dt>{term}</dt>
+              <dd>{value}</dd>
+            </div>
+          ))}
+        {fields.command !== undefined && (
+          <div>
+            <dt>Command as sent</dt>
+            <dd>
+              <FieldValue value={fields.command} />
+            </dd>
+          </div>
+        )}
+      </dl>
+      {kept === undefined ? (
+        reason === undefined ? (
+          <p className="detail-note">The record holds no reason.</p>
+        ) : (
+          <figure className="refusal-figure">
+            <figcaption className="detail-heading">Refusal</figcaption>
+            <pre className="refusal-text">{reason}</pre>
+          </figure>
+        )
+      ) : (
+        <FullRefusal
+          artifactId={kept}
+          client={client}
+          cut={fields.full_reason_truncated === true}
+          runId={runId}
+        />
+      )}
+    </section>
+  );
+}
+
+/**
+ * The fields {@link Refusal} states, which the record's remaining fields leave out:
+ * `full_reason` is where the complete refusal is kept, not something to read.
+ */
+const REFUSAL_SHOWN: ReadonlySet<string> = new Set([
+  "author",
+  "summary",
+  "node",
+  "command",
+  "reason",
+  "full_reason",
+  "full_reason_truncated",
+]);
+
+/** The complete refusal the engine kept, read once through the artifact route. */
+function FullRefusal({
+  artifactId,
+  client,
+  cut,
+  runId,
+}: {
+  readonly artifactId: string;
+  readonly client: TelemetryClient;
+  readonly cut: boolean;
+  readonly runId: string;
+}) {
+  // A run id never holds a slash, so the pair cannot spell another pair; a kept
+  // refusal does not change, so nothing invalidates the read.
+  const artifact = useRead(
+    `${runId}/${artifactId}`,
+    () => client.getArtifact(runId, artifactId),
+    0,
+  );
+  const content = artifact.value?.content;
+  return (
+    <>
+      {cut && (
+        <p className="detail-note" role="note">
+          The hook wrote more than the engine reads, so its output was cut at
+          the engine's read bound.
+        </p>
+      )}
+      {artifact.loading ? (
+        <p aria-live="polite" className="detail-note">
+          Loading the complete refusal…
+        </p>
+      ) : content === undefined ? (
+        <p aria-live="polite" className="detail-note">
+          This run holds no readable copy of the complete refusal.
+        </p>
+      ) : (
+        <figure className="refusal-figure">
+          <figcaption className="detail-heading">Complete refusal</figcaption>
+          <pre className="refusal-text">{content}</pre>
+        </figure>
+      )}
+    </>
+  );
+}
+
+/**
  * What one surface said, in the fields the record carried.
  *
  * The kind is the host's own word, shown as spelled: the engine relays any
@@ -1008,11 +1167,23 @@ function roleLabel(
 function RecordContent({
   client,
   event,
+  shown,
 }: {
   readonly client: TelemetryClient;
   readonly event: TimelineEvent;
+  /**
+   * The fields the view above already states, left out here; where nothing is left
+   * the block is not drawn at all rather than saying the record holds nothing.
+   */
+  readonly shown?: ReadonlySet<string>;
 }) {
-  const fields = event.fields ?? {};
+  const fields =
+    shown === undefined
+      ? (event.fields ?? {})
+      : Object.fromEntries(
+          Object.entries(event.fields ?? {}).filter(([key]) => !shown.has(key)),
+        );
+  if (shown !== undefined && Object.keys(fields).length === 0) return null;
   const argv =
     event.kind === "command-started" ? argvOf(fields.command) : undefined;
   return (

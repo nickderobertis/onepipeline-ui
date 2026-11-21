@@ -673,7 +673,7 @@ export function eventList(
   rows: readonly TimelineRow[],
   hidden: ReadonlySet<EventType> = new Set(),
 ): readonly TimelineRow[] {
-  return collapseCycles(onlyTypes(joinSurfaces(rows), hidden));
+  return collapseCycles(onlyTypes(joinRows(rows), hidden));
 }
 
 /** How many rows a list holds, however deeply nested. */
@@ -689,7 +689,7 @@ export function typeCounts(
   rows: readonly TimelineRow[],
 ): ReadonlyMap<EventType, number> {
   const counts = new Map<EventType, number>();
-  for (const row of flattenRows(joinSurfaces(rows)))
+  for (const row of flattenRows(joinRows(rows)))
     counts.set(row.type, (counts.get(row.type) ?? 0) + 1);
   return counts;
 }
@@ -750,6 +750,112 @@ function joinSurfaces(rows: readonly TimelineRow[]): TimelineRow[] {
           ...surfaceRow(row),
           children,
           aliases: (joined.get(id) ?? []).filter((other) => other !== row.id),
+        },
+      ];
+    });
+  return visit(rows);
+}
+
+/** One row per surface, and one per refused edit with the surface it raised. */
+function joinRows(rows: readonly TimelineRow[]): TimelineRow[] {
+  // Read before the surfaces are joined: joining keeps one record of each, which
+  // need not be the one naming the refusal.
+  return joinRefusals(joinSurfaces(rows), surfacesRaisedFor(rows));
+}
+
+/**
+ * The refused edit a record of the reconciler's `edit-rejected` surface was raised
+ * for, as the record itself names it — `rejection`, the refusal's stream and seq —
+ * in the `record_id` the refusal's own row carries. Nothing for any other record:
+ * a surface naming no rejection is a surface like any other.
+ */
+export function rejectionOf(event: TimelineEvent): string | undefined {
+  const rejection = event.fields?.rejection;
+  if (
+    typeof rejection !== "object" ||
+    rejection === null ||
+    Array.isArray(rejection)
+  )
+    return undefined;
+  const { stream, seq } = rejection;
+  return typeof stream === "string" &&
+    typeof seq === "number" &&
+    Number.isInteger(seq)
+    ? `${stream}.${seq}`
+    : undefined;
+}
+
+/**
+ * Every surface a record of the list names as raised for a refused edit the list
+ * also holds, by surface id, to that refusal's row id.
+ */
+function surfacesRaisedFor(
+  rows: readonly TimelineRow[],
+): ReadonlyMap<number, string> {
+  const flat = flattenRows(rows);
+  const refusals = new Set(
+    flat.flatMap((row) =>
+      row.rowKind === "event" && row.event.kind === "edit-rejected"
+        ? [row.id]
+        : [],
+    ),
+  );
+  const raised = new Map<number, string>();
+  if (refusals.size === 0) return raised;
+  for (const row of flat) {
+    if (row.rowKind !== "event") continue;
+    const refusal = rejectionOf(row.event);
+    const surface = surfaceIdOf(row.event);
+    if (refusal !== undefined && surface !== undefined && refusals.has(refusal))
+      raised.set(surface, refusal);
+  }
+  return raised;
+}
+
+/**
+ * One row per refused edit. The surface the reconciler raises for a refusal says the
+ * same thing as the refusal's own row, so where the list holds both the surface is
+ * not listed: its records answer to the refusal's row, which shows that it was read
+ * where it was. A surface whose refusal the list does not hold stays a row.
+ */
+function joinRefusals(
+  rows: readonly TimelineRow[],
+  raisedFor: ReadonlyMap<number, string>,
+): TimelineRow[] {
+  if (raisedFor.size === 0) return [...rows];
+  const flat = flattenRows(rows);
+  const surfaceRows = new Map<
+    string,
+    Extract<TimelineRow, { rowKind: "event" }>
+  >();
+  for (const row of flat) {
+    if (row.rowKind !== "event") continue;
+    const surface = surfaceIdOf(row.event);
+    const refusal = surface === undefined ? undefined : raisedFor.get(surface);
+    if (refusal !== undefined) surfaceRows.set(refusal, row);
+  }
+  const visit = (nested: readonly TimelineRow[]): TimelineRow[] =>
+    nested.flatMap((row) => {
+      const children = visit(row.children);
+      if (row.rowKind !== "event") return [{ ...row, children }];
+      const surface = surfaceIdOf(row.event);
+      if (surface !== undefined && raisedFor.has(surface)) return children;
+      const raised = surfaceRows.get(row.id);
+      if (raised === undefined) return [{ ...row, children }];
+      const read = raised.event.surface_state?.read_at;
+      const applied = row.status ?? "not applied";
+      return [
+        {
+          ...row,
+          children,
+          aliases: [
+            ...(row.aliases ?? []),
+            raised.id,
+            ...(raised.aliases ?? []),
+          ],
+          ...(read === undefined
+            ? { status: `${applied} · unread` }
+            : { status: `${applied} · read`, statusAt: read }),
         },
       ];
     });
@@ -1083,8 +1189,9 @@ export function eventAsRow(event: TimelineEvent): TimelineRow {
  * The records the run made at no node, as the run's own event list reads them, in
  * the order they were recorded.
  *
- * Every record naming a node is read on that node's list and nowhere else, and so
- * is a record of a surface raised about a node — the reply answering a node's
+ * Every record naming a node is read on that node's list and nowhere else — but a
+ * refused edit, which is read on both — and so is a record of a surface raised about
+ * a node — the reply answering a node's
  * question is journalled at no node, and it is that question's row which says it
  * was answered.
  */
@@ -1096,7 +1203,10 @@ export function runEventRows(
     .filter((span) => span.node_id === undefined)
     .flatMap((span) => span.events)
     .filter((event) => {
-      if (event.node_id !== undefined) return false;
+      // A refused edit is the run's as well as its node's, so the run's span lists
+      // it whatever node it names, and so does this list.
+      if (event.node_id !== undefined && event.kind !== "edit-rejected")
+        return false;
       if (event.surface_state?.node !== undefined) return false;
       const id = event.record_id ?? event.id;
       if (seen.has(id)) return false;
@@ -1288,6 +1398,19 @@ export function editAuthor(event: TimelineEvent): string | undefined {
   return event.kind.startsWith("edit-") ? event.author : undefined;
 }
 
+/**
+ * What a refused edit is called in a list: the one line the engine summarised the
+ * refusal in, where the record carries one. A record written before the engine wrote
+ * one is called what it always was.
+ */
+export function refusalSummary(event: TimelineEvent): string | undefined {
+  if (event.kind !== "edit-rejected") return undefined;
+  const summary = event.fields?.summary;
+  return typeof summary === "string" && summary.length > 0
+    ? summary
+    : undefined;
+}
+
 /** The author an edit names, appended to whatever the row is called. */
 function byAuthor(label: string, event: TimelineEvent): string {
   const author = editAuthor(event);
@@ -1329,6 +1452,7 @@ function eventRow(event: TimelineEvent): TimelineRow {
           ? event.description
           : undefined) ??
         commandStarted(event) ??
+        refusalSummary(event) ??
         heldLabel(event) ??
         (event.kind === "retry-requested"
           ? "Retry requested"

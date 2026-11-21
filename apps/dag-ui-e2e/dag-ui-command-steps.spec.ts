@@ -83,7 +83,7 @@ async function served(page: Page): Promise<{
   return { origin: server.origin, facts, status: detail.graph.node_status };
 }
 
-test("draws each command step with its kind and outcome, and shows the edits the run refused", async ({
+test("draws each command step with its kind and outcome, and nothing over the graph for the edits the run refused", async ({
   page,
 }) => {
   const { origin, facts, status } = await served(page);
@@ -119,15 +119,11 @@ test("draws each command step with its kind and outcome, and shows the edits the
     page.getByRole("article", { name: "build: done", exact: true }),
   ).not.toContainText("command-");
 
-  const refused = page.getByRole("region", { name: "Refused edits" });
-  await expect(refused).toBeVisible();
-  await expect(refused.getByRole("listitem")).toHaveText([
-    /^planner\s*refused: decline: node 'lint': the reason cannot be blank$/u,
-    new RegExp(
-      `^planner\\s*refused: add: the plan-edit hook \`${facts.hook}\` refused node 'deploy'`,
-      "u",
-    ),
-  ]);
+  // The edits the run refused are events of the run, read in its event list
+  // (`dag-ui-refusals.spec.ts`), and nothing is drawn over the graph for them.
+  await expect(page.getByRole("region", { name: "Refused edits" })).toHaveCount(
+    0,
+  );
 
   expect(thrown).toEqual([]);
   expect(unanswered).toEqual([]);

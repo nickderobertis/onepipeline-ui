@@ -441,7 +441,15 @@ function boardSeed(plans, createdPrefix) {
   };
 }
 
-/** The run `start` launched, driven until it waits on a person. */
+/**
+ * The run `start` launched, driven until it waits on a person.
+ *
+ * Since onepipeline 0.116 the attached launch hands the run to a retained driver
+ * that waits on the decision and moves the run on once a person makes it, so a
+ * journey that answers a step sees the steps it frees raised after it. The
+ * driver ends with the world: `fixture-server.ts` stops each run it holds before
+ * the workspace is removed.
+ */
 function start(workspace, token, plan) {
   const printed = engine(
     workspace,
@@ -1517,6 +1525,9 @@ export function humanItemsWorld(workspace, name) {
       journal: join(at.runs, "human-items"),
       board: join(at.board, "state.json"),
       acting: join(workspace, ACTING),
+      // The session every run of the world is launched as, which is the one the
+      // engine lets end it.
+      launcher: SUPERVISOR_SESSION,
       cwd: at.work,
       environment: worldEnvironment(workspace, token),
       removed: foreignVariables(),

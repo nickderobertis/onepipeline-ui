@@ -1188,7 +1188,7 @@ fn the_schema_version_the_envelope_carries_is_the_one_the_contract_names() {
     // The timeline's own meaning moves on its own, so the document names it on its
     // own: a bump nobody wrote a paragraph for is a payload a client is told
     // nothing about.
-    assert_eq!(TIMELINE_SCHEMA_VERSION, 16);
+    assert_eq!(TIMELINE_SCHEMA_VERSION, 17);
     assert!(
         contract_text().contains(&format!("Timeline schema {TIMELINE_SCHEMA_VERSION}")),
         "docs/contract.md names no timeline schema {TIMELINE_SCHEMA_VERSION}"
@@ -1220,6 +1220,15 @@ fn the_fields_and_review_kinds_a_timeline_schema_added_are_the_ones_the_contract
         assert!(
             timeline_schema_paragraph(schema).contains(&format!("**`{field}`**")),
             "docs/contract.md's timeline schema {schema} adds no `{field}`"
+        );
+    }
+    for &(schema, kind, field) in timeline_schema::TIMELINE_KIND_ADDITIONS {
+        let paragraph = timeline_schema_paragraph(schema);
+        assert!(
+            schema <= u64::from(TIMELINE_SCHEMA_VERSION)
+                && paragraph.contains(&format!("**`{field}`**"))
+                && paragraph.contains(&format!("`{kind}`")),
+            "docs/contract.md's timeline schema {schema} adds no `{field}` to `{kind}`"
         );
     }
     // The one bump that re-keyed a field rather than adding one says so.

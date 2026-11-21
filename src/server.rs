@@ -422,7 +422,7 @@ async fn artifact(State(serving): Store, Path((run, id)): Path<(String, String)>
         Ok(id) => id,
         Err(error) => return error.into_response(),
     };
-    answer(move || serving.store.artifact(&run, &id)).await
+    answer(move || serving.hub.artifact(&run, &id)).await
 }
 
 async fn events(

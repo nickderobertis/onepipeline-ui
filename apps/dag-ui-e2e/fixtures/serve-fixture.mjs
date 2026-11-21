@@ -20,7 +20,7 @@
  *                     [--shutdown-corpus [--live-dispatch-pid PID]
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --command-steps-corpus
- *                      | --event-list-corpus
+ *                      | --refusals-corpus | --event-list-corpus
  *                      | --transcripts-corpus
  *                      | --held-turn-corpus | --large-run-views-corpus
  *                      | --node-timeline-corpus
@@ -35,6 +35,8 @@
  *                                                  --review-loop-corpus, the
  *                                                  command steps' with
  *                                                  --command-steps-corpus, the
+ *                                                  refused edits' with
+ *                                                  --refusals-corpus, the
  *                                                  event lists' with
  *                                                  --event-list-corpus, and the
  *                                                  held turn's with
@@ -96,6 +98,7 @@ import {
   buildPreservedRuns,
   buildProjectCentricRuns,
   buildReadabilityRuns,
+  buildRefusalsRuns,
   buildReviewLoopRuns,
   buildRuns,
   buildShutdownRuns,
@@ -115,6 +118,7 @@ import {
   readabilityFacts,
   recordActivity,
   recordWords,
+  refusalsFacts,
   removePageRuns,
   removeRun,
   reviewLoopFacts,
@@ -514,6 +518,7 @@ function parseArgs(argv) {
     "--review-corpus",
     "--review-loop-corpus",
     "--command-steps-corpus",
+    "--refusals-corpus",
     "--event-list-corpus",
     "--held-turn-corpus",
     "--large-run-views-corpus",
@@ -892,6 +897,8 @@ if (args.stall) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
       } else if (args["command-steps-corpus"]) {
         corpus = { build: buildCommandStepsRuns, facts: commandStepsFacts };
+      } else if (args["refusals-corpus"]) {
+        corpus = { build: buildRefusalsRuns, facts: refusalsFacts };
       } else if (args["event-list-corpus"]) {
         corpus = { build: buildEventListRuns, facts: eventListFacts };
       } else if (args["large-run-views-corpus"]) {
