@@ -234,6 +234,28 @@ impl Serving {
     }
 
     /// [`start_in_as_with_env_removing`](Self::start_in_as_with_env_removing),
+    /// reading the server's own log, for a journey where what the operator is
+    /// told is the behaviour under test.
+    pub fn start_in_as_with_env_removing_logged(
+        workspace: TempDir,
+        session: &str,
+        environment: &[(&str, &str)],
+        removed: &[String],
+    ) -> Self {
+        let binary = assert_cmd::cargo::cargo_bin("onepipeline-api");
+        Self::spawn_from(
+            &binary,
+            workspace,
+            environment,
+            removed,
+            true,
+            None,
+            Some(session),
+            &[],
+        )
+    }
+
+    /// [`start_in_as_with_env_removing`](Self::start_in_as_with_env_removing),
     /// with `arguments` after the ones every server here is started with.
     pub fn start_in_as_with_env_removing_and_args(
         workspace: TempDir,
