@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.87.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.87.1...v0.87.2) - 2026-11-21
+
+### Fixed
+
+- *(deps)* link the engine and store whose Linear batch reads accept issue keys ([#860](https://github.com/nickderobertis/onepipeline-ui/pull/860))
+
 ## [0.87.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.87.0...v0.87.1) - 2026-11-21
 
 ### Added
