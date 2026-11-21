@@ -118,6 +118,25 @@ const OVERDUE_INTERVALS: u32 = 4;
 /// costs nothing.
 pub const TRACE_ENV: &str = "ONEPIPELINE_UI_LIVE_TRACE";
 
+/// The environment variable naming a file whose presence holds the poller
+/// between two ticks, for a journey that changes the store in more than one
+/// write and must not have a tick see some of them: a journal append and the
+/// receipt that follows it, which a tick between the two reads as a whole
+/// re-read. Finding the file before a tick, the poller writes
+/// [`poll_held`]'s file and ticks again only once the file is gone, so a
+/// journey that has seen that file knows no tick runs until it removes its
+/// own. Unset, nothing is looked at.
+pub const POLL_HOLD_ENV: &str = "ONEPIPELINE_UI_POLL_HOLD";
+
+/// The file the poller writes once it is held by [`POLL_HOLD_ENV`]'s `hold`:
+/// the hold's name with `.held` added.
+#[must_use]
+pub fn poll_held(hold: &Path) -> PathBuf {
+    let mut held = hold.as_os_str().to_owned();
+    held.push(".held");
+    PathBuf::from(held)
+}
+
 /// How long a run opened for a page's document is kept for the subscription that
 /// page makes: a page that never subscribes lets it go then.
 pub const PREPARED_HOLD: Duration = Duration::from_secs(30);
@@ -161,6 +180,8 @@ struct Shared {
     /// so two looks never send one change twice.
     human_items: Mutex<HumanItemsReading>,
     polling: AtomicBool,
+    /// [`POLL_HOLD_ENV`]'s file, when one is named.
+    poll_hold: Option<PathBuf>,
     trace: Option<PathBuf>,
     refold: Duration,
     /// The least age a fold reaches before it may be taken again.
@@ -1571,6 +1592,7 @@ impl Hub {
                 .map_or(PREPARED_HOLD, Duration::from_millis),
             human_items: Mutex::new(HumanItemsReading::default()),
             polling: AtomicBool::new(false),
+            poll_hold: std::env::var_os(POLL_HOLD_ENV).map(PathBuf::from),
             trace: std::env::var_os(TRACE_ENV).map(PathBuf::from),
             refold: std::env::var(TELEMETRY_REFOLD_ENV)
                 .ok()
@@ -2061,7 +2083,22 @@ impl Hub {
                 }
                 return;
             }
+            if let Some(hold) = &self.0.poll_hold {
+                self.wait_out(hold);
+            }
             self.tick();
+        }
+    }
+
+    /// Between ticks, wait while `hold` is there, having said so beside it.
+    fn wait_out(&self, hold: &Path) {
+        if !hold.exists() {
+            return;
+        }
+        // A journey that cannot be told it is held waits on its own patience.
+        let _ = std::fs::write(poll_held(hold), b"");
+        while hold.exists() && !self.0.stopping.load(Ordering::Relaxed) {
+            std::thread::sleep(self.0.store.poll());
         }
     }
 
