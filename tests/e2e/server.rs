@@ -20272,24 +20272,42 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
                     )
                 })
                 .collect();
+            // Whole, because the wait holds on a refusal Linux's attempts record and
+            // macOS's did not: each record's `calls` says which store operations it
+            // made, so whether the refused write was never asked for or was let
+            // through is read off it rather than guessed.
             let projections: Vec<String> = records(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE)
                 .iter()
-                .map(|projection| {
+                .map(Value::to_string)
+                .collect();
+            // What the board was asked, in order: each request's operation and its
+            // first variable, which for a mutation is the input type naming the write,
+            // then the names of the variables it sent, which tell its reads apart.
+            let requests: Vec<String> = board.state()["requests"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .map(|request| {
+                    let query = request["query"].as_str().unwrap_or("-").trim_start();
+                    let variables: Vec<&str> = request["variables"]
+                        .as_object()
+                        .map(|variables| variables.keys().map(String::as_str).collect())
+                        .unwrap_or_default();
                     format!(
-                        "{} {} {} {}",
-                        projection["at"].as_str().unwrap_or("-"),
-                        projection["outcome"].as_str().unwrap_or("-"),
-                        projection["kind"].as_str().unwrap_or("-"),
-                        projection["reason"].as_str().unwrap_or("-"),
+                        "{} {}",
+                        query.split(',').next().unwrap_or(query),
+                        variables.join(",")
                     )
                 })
                 .collect();
             let log = fs::read_to_string(root.join(run).join("driver.log")).unwrap_or_default();
             format!(
-                "\nthe handed driver {handed_pid} is {}\njournal:\n{}\nprojections:\n{}\ndriver.log:\n{log}",
+                "\nthe handed driver {handed_pid} is {}\njournal:\n{}\nprojections:\n{}\nboard requests:\n{}\ndriver.log:\n{log}",
                 if process_is_live(handed_pid) { "live" } else { "gone" },
                 journal.join("\n"),
                 projections.join("\n"),
+                requests.join("\n"),
             )
         },
     );
