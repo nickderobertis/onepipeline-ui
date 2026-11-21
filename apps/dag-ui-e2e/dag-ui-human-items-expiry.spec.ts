@@ -222,6 +222,31 @@ test("an item that expires at a time a few seconds out says when, leaves the ope
     /^Its expiry time .* was reached/u,
     `At ${clockOf(at)}`,
   );
+
+  // Its detail names the engine, not a person, as what retired it, and why.
+  await card(page, title)
+    .getByRole("button", { name: `Details: ${title}` })
+    .click();
+  const pane = detailPane(page);
+  await expect(
+    pane
+      .getByRole("region", { name: "History" })
+      .getByText("Expired by the engine"),
+  ).toBeVisible();
+  const metadata = pane.getByRole("definition");
+  await expect(metadata.filter({ hasText: /^By the engine · / })).toHaveCount(
+    1,
+  );
+  await expect(
+    metadata.filter({ hasText: /^Its expiry time .* was reached/u }),
+  ).toHaveCount(1);
+  await expect(metadata.filter({ hasText: `At ${clockOf(at)}` })).toHaveCount(
+    1,
+  );
+  for (const label of ["Expired", "Reason", "Condition that held"])
+    await expect(
+      pane.getByRole("term").filter({ hasText: new RegExp(`^${label}$`, "u") }),
+    ).toHaveCount(1);
 });
 
 /**
@@ -393,6 +418,50 @@ function check(
     ...more,
   };
 }
+
+test("a check's interval reads in its largest whole unit, and one it leaves out reads as the engine's own default", async ({
+  page,
+}) => {
+  const facts = await serveWorld("expiry");
+  const pending = "process.stdout.write(JSON.stringify({ expired: false }));\n";
+  const unstated = {
+    title: "Rotate the staging certificates once the new issuer is trusted",
+    condition: check(facts, "unstated", pending, {
+      interval_seconds: undefined,
+    }),
+  };
+  const hours = {
+    title: "Retire the old status page once its traffic stops",
+    condition: check(facts, "hours", pending, { interval_seconds: 7200 }),
+  };
+  const ids = [unstated, hours].map((item, index) =>
+    raise(facts, {
+      dedup_key: `interval-${index}`,
+      kind: "task",
+      title: item.title,
+      body: "Waiting on a check.",
+      expiry: [item.condition],
+    }),
+  );
+  // The engine keeps its default to itself; its own words for the item are the
+  // one place it says it, so the page's default is held to them here.
+  const shown = execFileSync(
+    facts.engine,
+    ["human-items", "show", ids[0] ?? ""],
+    {
+      cwd: facts.cwd,
+      env: worldEnv(facts),
+      encoding: "utf8",
+    },
+  );
+  expect(shown).toContain("(every 60 s,");
+
+  await openPage(page);
+  await expect(card(page, unstated.title)).toContainText(
+    "checked every minute",
+  );
+  await expect(card(page, hours.title)).toContainText("checked every 2 hours");
+});
 
 /** The failing check's error: several lines, as `df` prints its complaint. */
 const DISK_ERROR = [
@@ -673,6 +742,7 @@ test("the page opens on open items alone, State Expired lists the expired one in
     label: expired.getByText("Expired", { exact: true }),
   };
   for (const palette of ["dark", "light"]) {
+    // llmlint: ignore[tests_mirror_real_usage] the page ships no theme control: it is served dark, and the design system's light palette is the document without its `dark` class, which is the palette this journey's criterion names; everything else is read from what the browser rendered.
     await page.evaluate(
       (dark) => document.documentElement.classList.toggle("dark", dark),
       palette === "dark",

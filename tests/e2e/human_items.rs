@@ -3920,6 +3920,41 @@ fn a_held_human_items_view_sweeps_a_due_expiry_and_patches_it_out() {
     );
 }
 
+/// A tab holding only State Expired is swept for too: the item due is in no view a
+/// tab holds, so only a poller that sweeps for a view of any state but open moves
+/// it into the one that is.
+#[test]
+fn a_held_expired_view_alone_is_swept_and_gains_the_item_that_came_due() {
+    let world = World::new();
+    let at = instant_from_now(3);
+    let id = raised_expiring(&world, "into-expired", &at);
+    let server = world.serve(Some("manager-of-items"));
+    let mut tab = HumanItemsTab::open(
+        &server,
+        json!({ "type": "human-items", "filter": { "state": "expired" } }),
+    );
+    assert_eq!(tab.state["visible"]["items"], json!([]));
+
+    // No route is asked and no CLI runs: a read of either would sweep it itself.
+    while tab.state["visible"]["items"]
+        .as_array()
+        .is_some_and(Vec::is_empty)
+    {
+        assert!(
+            tab.receive(PATIENCE).is_some(),
+            "the stream went quiet with {id} not yet expired: {}",
+            tab.state["visible"]
+        );
+    }
+    assert_eq!(
+        ids(tab.state["visible"]["items"].as_array().expect("items")),
+        std::slice::from_ref(&id)
+    );
+    assert!(journal_records(&world)
+        .iter()
+        .any(|record| expires(record, &id)));
+}
+
 /// Without an Action items view, the poller sweeps nothing: the server starts
 /// once the item is due, so the first poll of a server that swept regardless
 /// would sweep it, and the rows sent for two runs written afterwards prove those

@@ -496,9 +496,10 @@ struct HumanItemsReading {
 /// waits on for up to its timeout never holds a tick.
 #[derive(Default)]
 struct Sweeps {
-    /// When the last sweep started.
+    /// When the last sweep started: the next is due an interval after it.
     started: Option<Instant>,
-    /// Whether one is running now.
+    /// Whether one is running now, so a check slower than the interval never has
+    /// a second sweep started beside it.
     running: bool,
     /// What the last finished sweep came to, until a tick takes it.
     finished: Option<Result<onepipeline::human_items::HumanItemExpirySweep, ApiError>>,
@@ -2161,6 +2162,11 @@ impl Hub {
         if !could.now() {
             return;
         }
+        // The interval and the one-at-a-time guard have no journey of their own:
+        // telling a throttled sweep from an unthrottled one is telling outcomes
+        // apart by elapsed time, which the journeys here must not do. The check
+        // journeys cover the sweeps it lets through instead, one of them over a
+        // check that runs to its timeout while the tab it patches stays live.
         let mut sweeps = lock(&reading.sweeps);
         let due = sweeps
             .started
@@ -2182,6 +2188,9 @@ impl Hub {
                 sweeps.running = false;
                 sweeps.finished = Some(swept);
             });
+        // Untested: a refused spawn needs the process at its thread limit, which
+        // takes the server's other threads down with it. It is the same release
+        // of the guard as a finished sweep's, so the next due tick tries again.
         if let Err(error) = spawned {
             lock(&reading.sweeps).running = false;
             eprintln!("onepipeline-api: no thread could sweep human items for expiry: {error}");

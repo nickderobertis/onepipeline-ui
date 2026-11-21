@@ -186,7 +186,11 @@ export function historyWords(entry: HumanItemHistoryEntry): string {
   return `${HISTORY_ACTIONS[entry.action]} by ${party}`;
 }
 
-/** How often a check runs when its condition names no interval: the engine's. */
+/**
+ * How often a check runs when its condition names no interval: the engine's,
+ * which it does not export. `dag-ui-human-items-expiry.spec.ts` holds this to the
+ * interval the engine's own `human-items show` prints for such a check.
+ */
 const DEFAULT_CHECK_INTERVAL_SECONDS = 60;
 
 function counted(count: number, unit: string): string {
