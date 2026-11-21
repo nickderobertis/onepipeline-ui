@@ -601,35 +601,35 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "983b709dc0f6099b4d2c0f1af2feadbbaf755f76ccdb12dd0aaf79821921d3f3"
+      "hash": "f3502a8bdee82fbb236638fca1c20d7c1c513168e76fc6df644e29b6d3f8bbbe"
     },
     {
       "name": "20-recorded-overall",
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "b8311440c0e1035032dedbae7d91878e7342db83547b41aff7f1131a8a5cab64"
+      "hash": "d966f17b57c37cc259af8f8d63c7e7f0012679951032654101b06676735321f6"
     },
     {
       "name": "20-recorded-overall",
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "0cbbcac36abbc4f24cb4548fec65d7a948761c2a952e2f5099c926c83d2da09f"
+      "hash": "ed4a52fd64e2f938d4744ea22f6e58b79e4602e7a8db03dc58e0b488397576a9"
     },
     {
       "name": "20-recorded-overall",
       "toggles": {
         "viewport": "1920x1080"
       },
-      "hash": "14c0613f72efbd80ad7a3245f24fb14e44aeb15d7626a57a10383d8c7ee97a3e"
+      "hash": "f889d96c5a36ca01dd34662298f13c6e263b1992b0a6d0116fea89732ad11483"
     },
     {
       "name": "20-recorded-overall",
       "toggles": {
         "viewport": "390x844"
       },
-      "hash": "30139fcfeec57c2eba15b7bd4865f8063d44ff1adf674cc645c9a7529e079e6d"
+      "hash": "faa4b623d9c77ba5ac38ed1db3e789cedc4cc3426c7858662653d2c219ec325b"
     },
     {
       "name": "21-remote",
@@ -1126,63 +1126,63 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "e0dbb869532324d341c34284ea527fd76a9c2695d56cdc9f7d2e7ecaea1c0789"
+      "hash": "cbad1e0b798915004939cf4d8717873f02f5b3c7dd9efc9eaa0ace4ca412b78c"
     },
     {
       "name": "36-refusal-rows",
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "1f057d88fa659ab2630f35b553a01f1aa794d61a0f82782a9d2cfe7057e5dac9"
+      "hash": "2fca9609e8067e289e8e79f8b2977a6d1db84d8e423208158715725709509f79"
     },
     {
       "name": "36-refusal-rows",
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "98589b10c9e441adf4f9546879229e3b473bb29aa531c00f261c7bb67f8a98ab"
+      "hash": "6e4f8db4fe1fd7ca53e886fb80f937984cbcff6a39d3e9f36ab115ce5a11dc4c"
     },
     {
       "name": "36-refusal-rows",
       "toggles": {
         "viewport": "1920x1080"
       },
-      "hash": "46cdcfcc2ba691276b8f323c2671e0f113e152f88c95a255b65b2f440d98d8d8"
+      "hash": "77851a4e80718707a31a3164bf03af37f7c0d059608fd261034cc85f1f5cad65"
     },
     {
       "name": "36-refusal-rows",
       "toggles": {
         "viewport": "390x844"
       },
-      "hash": "2321221875b7f5712832634932e7296a013d49b3e8c0ce0b98cf1faaa10ee1d5"
+      "hash": "37213548fae8c178508ef59f4eeff75a922f0f35c2aff0446af88c422bf3a110"
     },
     {
       "name": "37-refusal-detail",
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "6b311994412ff60c85934103e5b717b92efbc328dea7f70b80757c8a3b8396fb"
+      "hash": "54dc2c5e0075fe7df6f0ee0c389d73451f8746a062c510b9af816d64b30fca74"
     },
     {
       "name": "37-refusal-detail",
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "508418971965eb10e283e70a21ea6de4452f97b4ffca7165a2dcae1a1aac82b3"
+      "hash": "aea57e60152efb1a6c7ab29d51ece6ec3378d5a8c32e01e0f8c590c709467813"
     },
     {
       "name": "37-refusal-detail",
       "toggles": {
         "viewport": "1440x900"
       },
-      "hash": "4fe5bcaeb185d1bbc84856fa070b138f02ba610cbc7e0a7201c584cb82620244"
+      "hash": "af4ae3a55f9598322a6c63a1042a4f6b2b3f8a808c2bae4e5b053b3a23f58b18"
     },
     {
       "name": "37-refusal-detail",
       "toggles": {
         "viewport": "1920x1080"
       },
-      "hash": "05cad9de837518cf9196fbe6863589c53a97ec7f448cdd3ddb5ba002ebd6cb5a"
+      "hash": "4663ec44ac93bf487ba982a704840a18ad6ea2e3d9428b2dcb4092137869cac5"
     },
     {
       "name": "37-refusal-detail",
