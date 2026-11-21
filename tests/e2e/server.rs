@@ -16273,12 +16273,22 @@ fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
     let serving = Serving::start_in_as(workspace, fixture_run::SESSION);
     let detail = || http::get(serving.address, &format!("/api/v2/runs/{run}")).json();
     let status = |node: &str| detail()["graph"]["node_status"][node].clone();
+    // An adoption that returns on a decision hands the run, since onepipeline
+    // 0.116, to a driver that waits on it and would itself go on after the
+    // attestation below; each step is one driver of this journey's, so that
+    // waiting driver is let go before the next attestation.
     let drive = |until: &str, settled: &dyn Fn() -> bool| {
         let pid = serving.drive_fixture(run);
         let driver = RetainedDriver(pid);
         eventually(until, settled);
         eventually("the driver let go and was reaped", || !process_is_live(pid));
         drop(driver);
+        if let Some(waiting) = launch_record(&root, run)["pid"]
+            .as_u64()
+            .and_then(|pid| u32::try_from(pid).ok())
+        {
+            let_go(&root, run, waiting);
+        }
     };
     let attest = |node: &str| {
         engine_attest(&serving.runs_root(), run, node)
@@ -16819,14 +16829,25 @@ fn started_and_let_go(root: &Path, launched: &[u8]) -> String {
 }
 
 /// Wait until the driver `pid` of `run` under `root` has let go of the run, ending
-/// it once it waits on a decision, as [`started_and_let_go`] says.
+/// it once it waits on a decision and has gone quiet, as [`started_and_let_go`]
+/// says.
 #[cfg(unix)]
 fn let_go(root: &Path, run: &str, pid: u32) {
+    // What a waiting driver's observer queues after the pause lands a moment
+    // later, so it is ended only once its journal has stopped growing too —
+    // ended sooner, two launches of one plan keep different surfaces.
+    const QUIET_POLLS: u32 = 5;
+    let journal = root.join(run).join("events.jsonl");
+    let mut last = None;
+    let mut quiet = 0;
     eventually("the launched driver let go of the run", || {
         if !process_is_live(pid) {
             return true;
         }
-        if waits_on_a_decision(root, run) && drives(pid, run) {
+        let length = fs::metadata(&journal).map(|meta| meta.len()).ok();
+        quiet = if length == last { quiet + 1 } else { 0 };
+        last = length;
+        if quiet >= QUIET_POLLS && waits_on_a_decision(root, run) && drives(pid, run) {
             let raw = i32::try_from(pid).expect("a pid the kernel issued");
             // SAFETY: `kill` takes a pid and a signal and touches no memory of
             // this process; the pid was just read as this run's own driver.
