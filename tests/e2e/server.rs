@@ -23510,7 +23510,11 @@ fn a_refused_edits_complete_refusal_is_served_whole_by_the_kept_files_name() {
     let kept = hook["fields"]["full_reason"]
         .as_str()
         .expect("the record's own full_reason");
-    assert!(kept.ends_with(&format!("/{name}")), "{kept} is not {name}");
+    assert_eq!(
+        Path::new(kept).file_name().and_then(|file| file.to_str()),
+        Some(name),
+        "{kept} is not {name}"
+    );
     let artifact = http::get(
         serving.address,
         &format!("/api/v2/runs/{run}/artifacts/{name}"),
