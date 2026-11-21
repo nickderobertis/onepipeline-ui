@@ -120,12 +120,29 @@ const HoverReport = createContext<Report>(() => undefined);
 /**
  * The `onHover` a `Timeline` this app draws is handed: the entry the package resolved,
  * reported to the layer by the element it drew for it.
+ *
+ * A plot that goes away under a reading — Escape leaving the node view with the
+ * pointer still — is never left by the pointer, so the package reports no `null`
+ * for it; the plot's own unmount clears the reading it last reported instead.
  */
 export function useTimelineHoverReport(): (
   hover: TimelineHover<unknown> | null,
 ) => void {
   const report = useContext(HoverReport);
-  return useCallback((hover) => report(hover?.element ?? null), [report]);
+  const reporting = useRef(false);
+  useEffect(
+    () => () => {
+      if (reporting.current) report(null);
+    },
+    [report],
+  );
+  return useCallback(
+    (hover) => {
+      reporting.current = hover !== null;
+      report(hover?.element ?? null);
+    },
+    [report],
+  );
 }
 
 /**

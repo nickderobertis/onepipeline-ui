@@ -359,7 +359,7 @@ function GraphExecution({
   const [zoom, setZoom] = useState<readonly [number, number]>();
   const [rowsOpen, setRowsOpen] = useState(false);
   const [openRows, setOpenRows] = useState<ReadonlySet<string>>(new Set());
-  const range = zoom ?? graph.plotted;
+  const range = zoom ?? graph.range;
   const [runRecordsAsked, setRunRecordsAsked] = useState(false);
   // A zoom is a person asking about a stretch: the run-level records in it are read
   // now; the rows of a node arrive when its row is opened.
