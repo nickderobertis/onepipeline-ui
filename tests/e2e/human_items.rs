@@ -442,26 +442,39 @@ impl World {
         run
     }
 
-    /// Wait until the driver retained for `run` has raised the item of each of
-    /// `steps`. Since onepipeline 0.116 a decision a person makes moves the run
-    /// on in that driver, which raises the next steps' items a moment after the
-    /// answer that freed them.
-    fn raised(&self, run: &str, steps: &[&str]) {
-        let deadline = Instant::now() + PATIENCE;
-        loop {
-            let listed = self.listed(&["--run", run]);
-            if steps.iter().all(|step| {
-                listed
-                    .iter()
-                    .any(|view| view["item"]["dedup_key"] == format!("run:{run}#{step}"))
-            }) {
-                return;
+    /// End the detached driver an attached `start` hands `run` to as it returns,
+    /// leaving the run waiting on its decisions with nothing driving it — the
+    /// state a driver lost to its host leaves behind. The engine's retained
+    /// driver goes on raising and re-projecting the items a decision releases in
+    /// its own time, so a journey pinning the journal's exact sequence numbers
+    /// lets it go first. `SIGKILL`, so it journals nothing on its way out and
+    /// the journal is the one a lost driver leaves.
+    fn let_go_of(&self, run: &str) {
+        let deadline = Instant::now() + Duration::from_secs(60);
+        let pid = loop {
+            if let Some(adopted) = self.events_of(run, "driver-adopted").last() {
+                break adopted["payload"]["pid"]
+                    .as_i64()
+                    .and_then(|pid| i32::try_from(pid).ok())
+                    .expect("a driver pid");
             }
             assert!(
                 Instant::now() < deadline,
-                "the driver never raised {steps:?} of {run}"
+                "nothing took {run} over from the attached start"
             );
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        // SAFETY: the pid is the one this world's own engine journalled for
+        // the driver it retained; neither call passes memory to libc.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+        }
+        while unsafe { libc::kill(pid, 0) } == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "the driver of {run} outlived SIGKILL"
+            );
+            std::thread::sleep(Duration::from_millis(50));
         }
     }
 
@@ -1559,14 +1572,26 @@ fn a_run_stopped_or_settled_retires_only_its_own_holds_and_tells_their_owner() {
         );
         assert_eq!(response.status, 200, "{}", response.body);
     };
+    // The driver `start --attach` retains goes on driving after each decision,
+    // so a later step's item is raised by that driver in its own time rather
+    // than by an `adopt` here, which the engine refuses while it is active.
     let gate = |node: &str| {
-        id_of(
-            world
+        let key = format!("run:{settled}#{node}");
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Some(view) = world
                 .listed(&["--run", &settled])
                 .iter()
-                .find(|v| v["item"]["dedup_key"] == format!("run:{settled}#{node}"))
-                .expect("the step's item"),
-        )
+                .find(|v| v["item"]["dedup_key"] == key)
+            {
+                break id_of(view);
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the retained driver never raised {key}"
+            );
+            std::thread::sleep(Duration::from_millis(100));
+        }
     };
     complete(&host);
     complete(&gate("notes"));
@@ -1580,41 +1605,27 @@ fn a_run_stopped_or_settled_retires_only_its_own_holds_and_tells_their_owner() {
             json!({"scope": "work", "run": settled, "node": "notes"}),
         ),
     );
-    // Since onepipeline 0.116 the run's driver is retained past each decision
-    // and drives on by itself, refusing an `adopt` while it does, so the
-    // journey waits on that driver instead of re-adopting the run: through
-    // `watch` until the next step's decision is pending, then until the run
-    // settles. The settlement is written before the driver retires the run's
-    // holds on its way out, so the retirement is waited for on its own.
-    let watch_until = |until: &str, ending: i32| {
-        let output = world.cli(
-            Some(owner),
-            &["watch", &settled, "--until", until, "--timeout", "60"],
-        );
-        assert_eq!(
-            output.status.code(),
-            Some(ending),
-            "`watch --until {until}` ended otherwise: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    };
     complete(&gate("sign"));
-    watch_until("surface", onepipeline::error::EXIT_SURFACE_WAITING);
     complete(&gate("ship"));
-    watch_until("settled", 0);
+    world.ok(
+        Some(owner),
+        &["watch", &settled, "--until", "settled", "--timeout", "60"],
+    );
     assert!(
         world.root.join(&settled).join("result.json").is_file(),
         "the run settled"
     );
-    let deadline = Instant::now() + PATIENCE;
-    while world.stored(&settles)["state"] == "open" {
+    // The driver retires the run's holds as it lets go of the settled run,
+    // which may be just after the watch saw it settle.
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while world.stored(&settles)["state"] != "dismissed" {
         assert!(
             Instant::now() < deadline,
-            "the settled run's driver never retired its hold"
+            "the settled run never retired its hold: {}",
+            world.stored(&settles)
         );
         std::thread::sleep(Duration::from_millis(100));
     }
-    assert_eq!(world.stored(&settles)["state"], "dismissed");
     assert_eq!(
         world.stored(&settles)["resolution"]["reason"],
         "the run ended"
@@ -2883,6 +2894,7 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
     let owner = "claude-code-supervising-session";
     let plan = release_plan(&world, "golden");
     let run = world.start(owner, &plan);
+    world.let_go_of(&run);
     let canary = id_of(
         world
             .listed(&[])
@@ -2925,15 +2937,11 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
         ),
         (
             "human-item-answer.json",
-            {
-                let answered = http::post(
-                    server.address,
-                    &format!("/api/human-items/{canary}/answer"),
-                    r#"{"text":"eu-west"}"#,
-                );
-                world.raised(&run, &["deploy"]);
-                answered
-            },
+            http::post(
+                server.address,
+                &format!("/api/human-items/{canary}/answer"),
+                r#"{"text":"eu-west"}"#,
+            ),
         ),
         (
             "human-item-answers.json",
@@ -2945,15 +2953,11 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
         ),
         (
             "human-item-complete.json",
-            {
-                let completed = http::post(
-                    server.address,
-                    &format!("/api/human-items/{gate}/complete"),
-                    "{}",
-                );
-                world.raised(&run, &["build", "lint", "docs"]);
-                completed
-            },
+            http::post(
+                server.address,
+                &format!("/api/human-items/{gate}/complete"),
+                "{}",
+            ),
         ),
         (
             "human-item-dismiss.json",
@@ -2981,46 +2985,15 @@ fn every_human_item_route_serves_the_payload_its_golden_pins() {
         ),
     ];
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
-    // The driver retained for the run writes to the same store as the routes,
-    // raising the steps each decision frees as it gets to them, so where a
-    // route's write lands in the store's sequence is the driver's timing. What
-    // holds whatever it does: each write is the store's own `human-items:<n>`,
-    // and each is later than the one before it.
-    let mut previous = 0;
     for (name, response) in goldens {
         assert_eq!(response.status, 200, "{name}: {}", response.body);
         let mut served = response.json();
         pin_clock(&mut served);
-        let path = dir.join(name);
-        let golden: Value =
-            serde_json::from_str(&std::fs::read_to_string(&path).unwrap_or_default())
-                .unwrap_or(Value::Null);
-        for (written, pinned) in event_ids(&mut served).into_iter().zip(
-            event_ids(&mut golden.clone())
-                .into_iter()
-                .map(|id| id.clone())
-                .chain(std::iter::repeat(Value::Null)),
-        ) {
-            let sequence = written
-                .as_str()
-                .and_then(|id| id.strip_prefix("human-items:"))
-                .and_then(|n| n.parse::<u64>().ok())
-                .unwrap_or_else(|| {
-                    panic!("{name}: an event id that is not the store's: {written}")
-                });
-            assert!(
-                sequence > previous,
-                "{name}: {written} is not after human-items:{previous}"
-            );
-            previous = sequence;
-            if !pinned.is_null() {
-                *written = pinned;
-            }
-        }
         let served = format!(
             "{}\n",
             serde_json::to_string_pretty(&served).expect("serialize")
         );
+        let path = dir.join(name);
         if std::env::var_os("UPDATE_CONTRACT_FIXTURES").is_some() {
             std::fs::write(&path, &served).expect("write the golden");
         }
@@ -3087,24 +3060,6 @@ fn the_served_human_items_view_and_its_frame_are_the_golden_the_contract_pins() 
 }
 
 /// Every timestamp the clock chose, pinned.
-/// Every `event_id` a route's response carries, in document order.
-fn event_ids(value: &mut Value) -> Vec<&mut Value> {
-    match value {
-        Value::Object(map) => map
-            .iter_mut()
-            .flat_map(|(key, held)| {
-                if key == "event_id" {
-                    vec![held]
-                } else {
-                    event_ids(held)
-                }
-            })
-            .collect(),
-        Value::Array(values) => values.iter_mut().flat_map(event_ids).collect(),
-        _ => Vec::new(),
-    }
-}
-
 fn pin_clock(value: &mut Value) {
     match value {
         Value::Object(map) => {

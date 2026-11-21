@@ -462,7 +462,52 @@ function start(workspace, token, plan) {
     .reverse()
     .find((line) => line.startsWith("{"));
   if (last === undefined) throw new Error(`start printed ${printed}`);
-  return settlementSchema.parse(JSON.parse(last)).run_id;
+  const run = settlementSchema.parse(JSON.parse(last)).run_id;
+  letGo(workspace, run);
+  return run;
+}
+
+/**
+ * End the driver an attached `start` hands `run` to as it returns, leaving the
+ * run waiting on its people with nothing driving it — the state a driver lost
+ * to its host leaves. That driver goes on raising and re-projecting the items
+ * each answer releases in its own time, so a world that is built once and
+ * copied for later journeys lets it go: what the world holds is then what the
+ * journeys' own requests made of it. `SIGKILL`, so it journals nothing on its
+ * way out.
+ */
+function letGo(workspace, run) {
+  const journal = join(paths(workspace).runs, run, "events.jsonl");
+  const deadline = Date.now() + 60_000;
+  const handedTo = () =>
+    readFileSync(journal, "utf8")
+      .split("\n")
+      .filter((line) => line.startsWith("{"))
+      .map((line) => JSON.parse(line))
+      .filter((record) => record.kind === "driver-adopted")
+      .map((record) => record.payload.pid)
+      .at(-1);
+  let pid = handedTo();
+  while (pid === undefined) {
+    if (Date.now() > deadline)
+      throw new Error(`nothing took ${run} over from the attached start`);
+    sleep(20);
+    pid = handedTo();
+  }
+  process.kill(pid, "SIGKILL");
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  while (alive()) {
+    if (Date.now() > deadline)
+      throw new Error(`the driver of ${run} outlived SIGKILL`);
+    sleep(20);
+  }
 }
 
 function raise(workspace, token, session, input) {

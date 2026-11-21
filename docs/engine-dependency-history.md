@@ -889,6 +889,20 @@ re-exported engine types do not change; it serves nothing new. Its oneagentgraph
 onejudge, oneharness-core, onemessagebus and onevcs requirements are the ones 0.115.0
 resolved.
 
+0.116.0 is the engine that links onevcs 0.68.0, whose adoption rules let a plan's
+release wait name only what the consuming host installs: start, plan checks and live
+edits refuse an `uninstalled` or `default-taken` wait with a pointer to `consumes`. It
+also redoes a changed completed task and its eligible completed dependents by default
+(`--keep-changed` opts out; launch-config schema 15), keeps a retained driver going
+after a reply, attestation or live edit rather than needing an `adopt`, hands a
+registered check the project id, and adds `unpublished --project <ID> --discard
+[--dry-run]`. This crate moves to it so that a host can adopt those planning and
+follow-up rules together with a read API linking the same engine; it serves the
+journal, decisions and results those write through the linked SDK as it finds them, and
+calls none of the new verbs. The move is announced as a break: the re-exported engine
+types change. Its oneagentgraph, onejudge, oneharness-core, onemessagebus and
+onetaskgraph requirements are the ones 0.115.1 resolved.
+
 0.116.1 is the engine whose refused edits say what they were: every `edit-rejected` it
 writes carries a one-line `summary`, the `node` its command names (and is labelled with
 it), and `full_reason`, the id of an artifact of the record keeping the complete refusal
@@ -898,7 +912,6 @@ it was raised for as `rejection`. This crate moves to it so the browser shows a 
 an attributed event with its complete text, under timeline schema 17: the reference
 vocabulary gains `refusal`, an artifact the engine kept in the run's reports directory is
 named on the wire by its file name and served whole by the artifact route, and the run's
-own span lists every refusal whatever node it names. It moves onevcs from 0.67.3 to
-0.68.0, as the engine's lock does. The move is announced as a break: the re-exported
-engine types change. Its oneagentgraph, onejudge, oneharness-core, onemessagebus and
-onetaskgraph requirements are the ones 0.115.1 resolved.
+own span lists every refusal whatever node it names. A patch move within 0.116, so the
+re-exported engine types do not change. Its oneagentgraph, onejudge, oneharness-core,
+onemessagebus, onetaskgraph and onevcs requirements are the ones 0.116.0 resolved.
