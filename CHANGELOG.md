@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.87.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.87.0...v0.87.1) - 2026-11-21
+
+### Added
+
+- *(dag-ui)* open conversation items at the item, hover readings everywhere, refused edits as one-line events ([#851](https://github.com/nickderobertis/onepipeline-ui/pull/851))
+
 ## [0.87.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.86.0...v0.87.0) - 2026-11-21
 
 ### Added
