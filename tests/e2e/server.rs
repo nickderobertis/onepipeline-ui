@@ -20172,6 +20172,11 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
         .env(onepipeline_ui::store::RUNS_DIR_ENV, &root)
         .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
         .env("CACHE_BOARD_TOKEN", &board.token)
+        // The plan-store user layer `Serving` gives its server, so the launch and
+        // the driver it hands the run to read the store this journey configures
+        // and none of the host's: an operator's layer that names a write policy
+        // has the board refuse every projection, which no other host does.
+        .env("XDG_CONFIG_HOME", dir.join("config"))
         .output()
         .expect("launch the remote approval plan");
     assert!(
@@ -20233,8 +20238,9 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     };
     let handed = handed_off(&root, run, 1);
     let handed_pid = handed.0;
-    // The board refuses that projection as it refused the launch's, and the
-    // driver journals the refusal as a finding after recording the attempt.
+    // The board takes that projection as it took the launch's: nothing this
+    // journey configures declares a write policy, so the store screens nothing
+    // and refuses nothing, and the driver records the attempt once it landed.
     eventually_explaining(
         "the driver the launch handed the run to projected it",
         || {
@@ -20252,13 +20258,11 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
             records(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE)
                 .iter()
                 .any(|projection| {
-                    projection["at"]
-                        .as_str()
-                        .is_some_and(|at| at >= since.as_str())
+                    projection["outcome"] == "projected"
+                        && projection["at"]
+                            .as_str()
+                            .is_some_and(|at| at >= since.as_str())
                 })
-                && journal[adopted..]
-                    .iter()
-                    .any(|record| record["kind"] == "planner-surface-queued")
         },
         || {
             let journal: Vec<String> = records("events.jsonl")
@@ -20272,10 +20276,9 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
                     )
                 })
                 .collect();
-            // Whole, because the wait holds on a refusal Linux's attempts record and
-            // macOS's did not: each record's `calls` says which store operations it
-            // made, so whether the refused write was never asked for or was let
-            // through is read off it rather than guessed.
+            // Whole, because each record's `outcome`, `class` and `calls` say whether
+            // an attempt landed and which store operations it made, so an attempt the
+            // store refused is read off it rather than guessed.
             let projections: Vec<String> = records(onepipeline::cli::WRITEBACK_PROJECTIONS_FILE)
                 .iter()
                 .map(Value::to_string)
@@ -20362,11 +20365,15 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
 
     // A mistyped run id is refused before anything is adopted.
 
+    let config_home = dir.join("config").display().to_string();
     cli_reply(
         &serving.runs_root(),
         run,
         &json!({"version": 2, "commands": [{"op": "settle", "id": "approve", "outcome": "done", "evidence": "Approved in the browser"}]}).to_string(),
-        &[("CACHE_BOARD_TOKEN", board.token.as_str())],
+        &[
+            ("CACHE_BOARD_TOKEN", board.token.as_str()),
+            ("XDG_CONFIG_HOME", config_home.as_str()),
+        ],
     )
     .expect("the engine applies the settlement");
     let before_adoption = board.state()["requests"]
