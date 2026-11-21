@@ -665,6 +665,9 @@ being photographed.
 | `20-recorded-overall` | execution ending at settlement, and the run's own events with the completion 41 hours later among them |
 | `22-node-timeline-crosshair` | the node timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
 | `23-overall-timeline-crosshair` | the overall timeline's axis markers, and its crosshair reading the time and the elapsed time under the pointer |
+| `36-conversation-item` | an agent message opened from the node's events: its conversation alone, scrolled to that item and outlined in the selection accent |
+| `37-refusal-rows` | refused edits as rows of the run's event list, each its one-line summary by its author and not applied |
+| `38-refusal-detail` | a refused edit's detail: its author, summary, node and command, and its complete refusal read whole |
 | `24-held-graph` | a run holding finished work for releases: a held-unlanded and a draft node, each card naming what it awaits |
 | `25-held-node` | the draft node's view, naming every release it awaits in full above the settlement's detail |
 | `26-action-items` | Action items: six long realistic cards under their priority headings, each saying when it was raised, Sort in the filter row or beside the folded filters at phone width, and the questions' answer boxes |
@@ -676,9 +679,6 @@ being photographed.
 | `32-action-items-reopen-unavailable` | Reopen greyed for a review with no undo, its question mark pressed and the reason showing |
 | `34-action-items-history` | an item's history in the detail: raised and completed by the manager, completed and noted by you, every time as an age |
 | `35-action-items-dismissed-reason` | a dismissed item under State: Dismissed, the reason saved with it on its card beside Reopen |
-| `36-conversation-item` | an agent message opened from the node's events: its conversation alone, scrolled to that item and outlined in the selection accent |
-| `37-refusal-rows` | refused edits as rows of the run's event list, each its one-line summary by its author and not applied |
-| `38-refusal-detail` | a refused edit's detail: its author, summary, node and command, and its complete refusal read whole |
 
 The tier asserts nothing beyond having reached each surface with its real reads landed:
 it is the operator's eyes, and `e2e/dag-ui-navigation.spec.ts` is what holds the
