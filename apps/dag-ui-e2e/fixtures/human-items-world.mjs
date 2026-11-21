@@ -441,7 +441,18 @@ function boardSeed(plans, createdPrefix) {
   };
 }
 
-/** The run `start` launched, driven until it waits on a person. */
+/**
+ * The run `start` launched, driven until it waits on a person, and left there with
+ * nothing driving it.
+ *
+ * Since onepipeline 0.116 an attached launch that returns on a decision hands the
+ * run to a retained driver that waits on it — and on nothing else, for as long as
+ * the decision stays unmade. A world is a fixture of the person's queue, not of a
+ * host driving runs: that driver would outlive the world, hold the next world built
+ * at the same path, and make every answer a journey gives move the run on beside
+ * what it asserts. So the world ends the driver it was handed, as the run stood
+ * before the engine retained one.
+ */
 function start(workspace, token, plan) {
   const printed = engine(
     workspace,
@@ -454,7 +465,44 @@ function start(workspace, token, plan) {
     .reverse()
     .find((line) => line.startsWith("{"));
   if (last === undefined) throw new Error(`start printed ${printed}`);
-  return settlementSchema.parse(JSON.parse(last)).run_id;
+  const run = settlementSchema.parse(JSON.parse(last)).run_id;
+  letGo(workspace, run);
+  return run;
+}
+
+const launchSchema = z.looseObject({ pid: z.number().int().nonnegative() });
+
+/**
+ * End the retained driver `run`'s launch record names, once it is this engine's
+ * `drive-run` of that run — the pid alone could by now be anything's. The driver
+ * installs no handler for SIGTERM, so it is gone at once and writes nothing; the
+ * run then reads as undriven, still paused on its decision.
+ */
+function letGo(workspace, run) {
+  const { pid } = launchSchema.parse(
+    JSON.parse(
+      readFileSync(join(paths(workspace).runs, run, "launch.json"), "utf8"),
+    ),
+  );
+  if (pid === 0) return;
+  // Empty once the process has exited, though not yet reaped.
+  const driving = () => {
+    let argv;
+    try {
+      argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+    } catch {
+      return false;
+    }
+    return argv[0] === ENGINE && argv[1] === "drive-run" && argv[2] === run;
+  };
+  if (!driving()) return;
+  process.kill(pid, "SIGTERM");
+  const deadline = Date.now() + 10_000;
+  while (driving()) {
+    if (Date.now() > deadline)
+      throw new Error(`run ${run}'s driver ${pid} outlived SIGTERM`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  }
 }
 
 function raise(workspace, token, session, input) {
