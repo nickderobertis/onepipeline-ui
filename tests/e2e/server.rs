@@ -15718,11 +15718,7 @@ fn a_node_held_on_an_unanswered_source_renders_and_adopts_with_or_without_its_ca
         // decision, which records its own adoption: one adoption and its
         // hand-off, each from a driver of its own. That driver is let go here so
         // that it does not outlive the journey.
-        let waiting = launch_record(&root, run)["pid"]
-            .as_u64()
-            .and_then(|pid| u32::try_from(pid).ok())
-            .expect("the waiting driver's pid");
-        let_go(&root, run, waiting);
+        let_go_waiting(&root, run);
         let events = events_on(
             &http::get(
                 serving.address,
@@ -15977,6 +15973,9 @@ fn an_adopted_run_reads_a_plan_store_whose_github_projects_source_projects_metad
     });
     eventually("the driver let go and was reaped", || !process_is_live(pid));
     drop(driver);
+    // The adoption returned on the action's decision; the driver it handed the
+    // run to would refuse the next adoption, so the run is let go first.
+    let_go_waiting(&root, run);
     let records = projections();
     assert!(!records.is_empty(), "no projection was attempted");
     for record in &records {
@@ -16283,12 +16282,7 @@ fn an_adopted_run_settles_a_plan_spanning_two_sources_where_each_task_lives() {
         eventually(until, settled);
         eventually("the driver let go and was reaped", || !process_is_live(pid));
         drop(driver);
-        if let Some(waiting) = launch_record(&root, run)["pid"]
-            .as_u64()
-            .and_then(|pid| u32::try_from(pid).ok())
-        {
-            let_go(&root, run, waiting);
-        }
+        let_go_waiting(&root, run);
     };
     let attest = |node: &str| {
         engine_attest(&serving.runs_root(), run, node)
@@ -16736,7 +16730,7 @@ fn launch_rendered_over_local_md_store(
     );
 
     let run = started_and_let_go(
-        &root,
+        root,
         &onepipeline(&[
             "start",
             &format!(
@@ -16809,69 +16803,84 @@ fn provisioned_onepipeline_with_env(
 }
 
 /// The run a detached `start` or `adopt` under `root` printed as `launched`, once
-/// the driver it left has let go of it.
-///
-/// A driver that settles the run exits by itself. One that reaches a decision
-/// does not: since onepipeline 0.116 it waits on that decision for as long as it
-/// stays unmade, and continues the run itself once a reply or an attestation
-/// arrives, refusing an adoption meanwhile. These journeys adopt the run through
-/// the read API's host or the CLI once they have made the decision, so a driver
-/// found waiting is ended — it installs no handler for SIGTERM and writes
-/// nothing more — which leaves the run as a waiting driver that exited left it
-/// before 0.116: paused on its decision, with nothing driving it.
+/// the driver it left has let go of it, as [`let_go`] says.
 #[cfg(unix)]
 fn started_and_let_go(root: &Path, launched: &[u8]) -> String {
     let launched: Value = serde_json::from_slice(launched).expect("start prints its launch");
     let run = launched["run_id"].as_str().expect("a run id").to_owned();
-    let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    let_go(root, &run, pid);
+    let_go(root, &run);
     run
 }
 
-/// Wait until the driver `pid` of `run` under `root` has let go of the run, ending
-/// it once it waits on a decision and has gone quiet, as [`started_and_let_go`]
-/// says.
+/// Wait until nothing drives `run` under `root`.
+///
+/// A driver that settles the run exits by itself. One that reaches a decision
+/// does not: since onepipeline 0.116 it waits on that decision for as long as it
+/// stays unmade, continues the run itself once a reply or an attestation
+/// arrives, and refuses an adoption meanwhile. These journeys make the decision
+/// and then adopt the run, so a run found waiting is ended through the engine's
+/// own `stop` — the way its refusal of an adoption says to — once its journal
+/// has gone quiet: what the waiting driver's observer queues after the pause
+/// lands a moment later, and a stop any sooner leaves two launches of one plan
+/// with different surfaces. Driven or not is the engine's `status` reading.
 #[cfg(unix)]
-fn let_go(root: &Path, run: &str, pid: u32) {
-    // What a waiting driver's observer queues after the pause lands a moment
-    // later, so it is ended only once its journal has stopped growing too —
-    // ended sooner, two launches of one plan keep different surfaces.
+fn let_go(root: &Path, run: &str) {
     const QUIET_POLLS: u32 = 5;
     let journal = root.join(run).join("events.jsonl");
     let mut last = None;
     let mut quiet = 0;
+    let mut stopped = false;
     eventually("the launched driver let go of the run", || {
-        if !process_is_live(pid) {
+        let status = engine_status(root, run);
+        if status["driven"] != json!(true) {
             return true;
         }
         let length = fs::metadata(&journal).map(|meta| meta.len()).ok();
         quiet = if length == last { quiet + 1 } else { 0 };
         last = length;
-        if quiet >= QUIET_POLLS && waits_on_a_decision(root, run) && drives(pid, run) {
-            let raw = i32::try_from(pid).expect("a pid the kernel issued");
-            // SAFETY: `kill` takes a pid and a signal and touches no memory of
-            // this process; the pid was just read as this run's own driver.
-            unsafe { libc::kill(raw, libc::SIGTERM) };
+        if !stopped && quiet >= QUIET_POLLS && waits_on_a_decision(root, run, &status) {
+            let output = std::process::Command::new(sibling::binary())
+                .args(["stop", run])
+                .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
+                .env(onepipeline_ui::cli::SESSION_ENV, fixture_run::SESSION)
+                .output()
+                .expect("the provisioned onepipeline runs");
+            assert!(
+                output.status.success(),
+                "`onepipeline stop {run}` refused: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            stopped = true;
         }
         false
     });
 }
 
-/// Whether the engine reads `run` under `root` as paused on a waiting human
-/// action, by its own `status`, and the driver has journaled each one's `waiting`
-/// settlement — `status` reads the pause off the decision record the driver writes
-/// just before it, and a driver ended in between leaves an action nothing can
-/// attest.
+/// Let go of whatever still drives `run` under `root`, as [`let_go`] says: since
+/// onepipeline 0.116 the driver an attached launch or adoption hands its decision
+/// to, which would itself go on after the journey's next decision.
 #[cfg(unix)]
-fn waits_on_a_decision(root: &Path, run: &str) -> bool {
+fn let_go_waiting(root: &Path, run: &str) {
+    let_go(root, run);
+}
+
+/// The engine's own `status` of `run` under `root`, or `null` when it gives none.
+#[cfg(unix)]
+fn engine_status(root: &Path, run: &str) -> Value {
     let output = std::process::Command::new(sibling::binary())
         .args(["status", run, "--json"])
         .env(onepipeline_ui::store::RUNS_DIR_ENV, root)
         .output()
         .expect("the provisioned onepipeline runs");
-    let Ok(status) = serde_json::from_slice::<Value>(&output.stdout) else {
-        return false;
-    };
+    serde_json::from_slice(&output.stdout).unwrap_or(Value::Null)
+}
+
+/// Whether `status` reads `run` under `root` as paused on a waiting human
+/// action, and the driver has journaled each one's `waiting` settlement —
+/// `status` reads the pause off the decision record the driver writes just before
+/// it, and a run stopped in between leaves an action nothing can attest.
+#[cfg(unix)]
+fn waits_on_a_decision(root: &Path, run: &str, status: &Value) -> bool {
     let Some(waiting) = status["paused"]["human_actions"].as_array() else {
         return false;
     };
@@ -16880,36 +16889,16 @@ fn waits_on_a_decision(root: &Path, run: &str) -> bool {
         journal
             .lines()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .filter(|record| {
+            .rfind(|record| {
                 record["kind"] == json!("node-settled") && &record["labels"]["node"] == node
             })
-            .last()
             .map(|record| record["payload"]["status"].clone())
     };
-    output.status.success()
-        && status["word"] == json!("PAUSED")
+    status["word"] == json!("PAUSED")
         && !waiting.is_empty()
         && waiting
             .iter()
             .all(|node| last_settled(node) == Some(json!("waiting")))
-}
-
-/// Whether `pid` is still the provisioned engine's driver of `run` — the
-/// pid alone could by now name anything.
-#[cfg(unix)]
-fn drives(pid: u32, run: &str) -> bool {
-    std::process::Command::new("ps")
-        .args(["-o", "args=", "-p", &pid.to_string()])
-        .output()
-        .is_ok_and(|ps| {
-            let args = String::from_utf8_lossy(&ps.stdout);
-            let mut words = args.split_whitespace();
-            words
-                .next()
-                .is_some_and(|program| program.ends_with("onepipeline"))
-                && words.next() == Some("drive-run")
-                && words.next() == Some(run)
-        })
 }
 
 /// The launch record of `run` under `root`, as the engine last wrote it.
@@ -17144,7 +17133,7 @@ fn launch_copied_from_plan_task_renderings(
         .to_string();
 
     let run = started_and_let_go(
-        &root,
+        root,
         &onepipeline(&[
             "start",
             &home,
@@ -20181,11 +20170,7 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     // The launch returned on the approval and, since onepipeline 0.116, handed
     // the run to a driver that waits on it; the adoption below is what this
     // journey is about, so that driver is let go first.
-    let waiting = launch_record(&root, run)["pid"]
-        .as_u64()
-        .and_then(|pid| u32::try_from(pid).ok())
-        .expect("the waiting driver's pid");
-    let_go(&root, run, waiting);
+    let_go_waiting(&root, run);
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
         fixture_run::SESSION,
@@ -20484,11 +20469,7 @@ fn an_adopted_run_moves_the_card_of_its_plans_completed_task_to_done() {
     // The launch returned on the approval and, since onepipeline 0.116, handed
     // the run to a driver that waits on it; the adoption below is what this
     // journey is about, so that driver is let go first.
-    let waiting = launch_record(&root, run)["pid"]
-        .as_u64()
-        .and_then(|pid| u32::try_from(pid).ok())
-        .expect("the waiting driver's pid");
-    let_go(&root, run, waiting);
+    let_go_waiting(&root, run);
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
         fixture_run::SESSION,
@@ -22612,8 +22593,7 @@ fn a_landing_an_adopted_run_makes_moves_the_card_of_the_issue_it_closes() {
     let launched: Value =
         serde_json::from_slice(&launched.stdout).expect("start prints its launch");
     let run = launched["run_id"].as_str().expect("a run id").to_owned();
-    let pid = u32::try_from(launched["pid"].as_u64().expect("the driver's pid")).expect("a pid");
-    let_go(&root, &run, pid);
+    let_go(&root, &run);
 
     let serving = Serving::start_in_as_with_env_removing(
         workspace,
