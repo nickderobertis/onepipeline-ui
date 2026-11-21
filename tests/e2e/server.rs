@@ -1186,7 +1186,7 @@ fn the_node_timeline_describes_the_dispatch_that_did_the_work() {
     assert_eq!(response.status, 200);
     let body = response.json();
     assert_enveloped(&body);
-    assert_eq!(body["timeline_schema_version"], json!(16));
+    assert_eq!(body["timeline_schema_version"], json!(17));
     let spans = body["spans"].as_array().expect("spans");
     let dispatch = spans
         .iter()
@@ -5525,7 +5525,7 @@ fn a_notes_turn_is_served_where_the_record_names_one_and_nowhere_else() {
         &format!("/api/v2/runs/{}/timeline?scope=run", fixture_run::RUN_ID),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(16));
+    assert_eq!(timeline["timeline_schema_version"], json!(17));
     // Every appended record is stamped at one instant, after everything the
     // live run wrote, so they are its last four edits in the order appended.
     let appended: Vec<Value> = events_on(&timeline)
@@ -7179,7 +7179,7 @@ fn a_green_change_kept_a_draft_for_review_is_served_done_with_its_change_request
         ),
     )
     .json();
-    assert_eq!(timeline["timeline_schema_version"], json!(16));
+    assert_eq!(timeline["timeline_schema_version"], json!(17));
     let drafted = review_events(&timeline, "change-drafted");
     assert_eq!(drafted.len(), 1, "{timeline}");
     assert_eq!(
