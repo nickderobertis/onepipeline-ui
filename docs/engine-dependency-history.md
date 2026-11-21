@@ -902,3 +902,16 @@ journal, decisions and results those write through the linked SDK as it finds th
 calls none of the new verbs. The move is announced as a break: the re-exported engine
 types change. Its oneagentgraph, onejudge, oneharness-core, onemessagebus and
 onetaskgraph requirements are the ones 0.115.1 resolved.
+
+0.117.0 is the engine whose human items expire: an asker declares time, run, node and
+check conditions on an item, and the engine retires an open item as `expired` once one
+holds, recording the condition and its reason. `HumanItemState` gains `expired`, the
+event action `human-item-expired`, `HumanItem` its `expiry`, `HumanItemResolution` its
+`condition`, and `HumanItemView` and `HumanItemDetail` their `checks`; `query` and `show`
+sweep before they answer, and `HumanItems::expire_due` is the sweep. This crate moves to
+it so that Action items shows, filters and reopens expired items and an open item's
+failing check, and so that its live loop sweeps on its own cadence while an Action items
+view is held, retiring an item on a page nothing else reads. The move is announced as a
+break: the re-exported human-item types gain fields and variants. Its oneagentgraph,
+onejudge, oneharness-core, onemessagebus, onetaskgraph and onevcs requirements are the
+ones 0.116.0 resolved.

@@ -9,6 +9,7 @@ import {
   humanItemReceiptSchema,
   humanItemViewSchema,
 } from "./human-items.js";
+import { isRequirementChoice } from "./human-items-codegen.js";
 
 /**
  * The drift gate between the browser's parsers and the engine's exported
@@ -36,6 +37,17 @@ function shape(node: unknown, defs: Schema): unknown {
   if (!isSchema(node)) throw new Error(`not a schema: ${JSON.stringify(node)}`);
   if (typeof node.$ref === "string")
     return shape(defs[node.$ref.replace("#/$defs/", "")], defs);
+  // Exactly one of two fields, say: which are required, not another shape.
+  if (
+    Array.isArray(node.oneOf) &&
+    node.type !== undefined &&
+    isRequirementChoice(node.oneOf)
+  ) {
+    const shaped = Object.fromEntries(
+      Object.entries(node).filter(([key]) => key !== "oneOf"),
+    );
+    return shape(shaped, defs);
+  }
   const members = Array.isArray(node.oneOf)
     ? node.oneOf
     : Array.isArray(node.anyOf)

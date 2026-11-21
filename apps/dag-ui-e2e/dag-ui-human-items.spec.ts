@@ -806,6 +806,7 @@ test("lists every open item of the host in the engine's order, as compact full-w
     "Answered",
     "Completed",
     "Dismissed",
+    "Expired",
   ]);
   await expect(filters.getByLabel("Blocking").getByRole("option")).toHaveText([
     "Any",

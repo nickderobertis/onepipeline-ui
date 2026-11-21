@@ -39,6 +39,9 @@ const ANNOTATIONS = new Set([
   "allOf",
   "$defs",
   "default",
+  // A tuple's leading items held to more than its `items` says: validation of
+  // values the array's own `items` already shapes.
+  "prefixItems",
 ]);
 
 const RENDERED = new Set([
@@ -106,8 +109,32 @@ function object(schema: Schema, at: string): string {
   return `{ ${fields.join(" ")} }`;
 }
 
+/**
+ * Whether `members` only say which of an object's fields are required: a
+ * constraint, as `allOf` of `if`/`then` is — exactly one of two fields — and no
+ * alternative shape of its own.
+ */
+export function isRequirementChoice(members: readonly unknown[]): boolean {
+  return members.every(
+    (member) =>
+      isSchema(member) &&
+      Object.keys(member).length === 1 &&
+      Array.isArray(member.required),
+  );
+}
+
 function render(node: unknown, at: string): string {
   if (!isSchema(node)) throw new Error(`${at}: not a schema`);
+  if (
+    Array.isArray(node.oneOf) &&
+    node.type !== undefined &&
+    isRequirementChoice(node.oneOf)
+  ) {
+    const shaped = Object.fromEntries(
+      Object.entries(node).filter(([key]) => key !== "oneOf"),
+    );
+    return render(shaped, at);
+  }
   for (const key of Object.keys(node))
     if (!ANNOTATIONS.has(key) && !RENDERED.has(key))
       throw new Error(`${at}: a keyword the generator cannot render: ${key}`);

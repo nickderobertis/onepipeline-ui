@@ -20,8 +20,8 @@ use std::path::{Path, PathBuf};
 
 use onepipeline::human_items::{
     Actor, HumanItemAction, HumanItemBatchAnswer, HumanItemBatchReceipt, HumanItemDetail,
-    HumanItemFilter, HumanItemInput, HumanItemReceipt, HumanItemRefusal, HumanItemState,
-    HumanItemView, HumanItems as Engine, MAX_BATCH_ANSWERS,
+    HumanItemExpirySweep, HumanItemFilter, HumanItemInput, HumanItemReceipt, HumanItemRefusal,
+    HumanItemState, HumanItemView, HumanItems as Engine, MAX_BATCH_ANSWERS,
 };
 use onepipeline::provenance::Provenance;
 use serde::{Deserialize, Serialize};
@@ -127,6 +127,14 @@ impl HumanItems {
         let items = engine.query(filter).map_err(refusal)?;
         let detail = item.and_then(|id| engine.show(id.as_str()).ok());
         Ok((items, detail))
+    }
+
+    /// The engine's one expiry sweep: every open item whose time, run or node
+    /// condition holds, or whose due check answers that it holds, is expired. What
+    /// is due, and the claim that keeps two sweepers from running one check twice,
+    /// are the engine's.
+    pub(crate) fn expire_due(&self) -> Result<HumanItemExpirySweep, ApiError> {
+        self.engine()?.expire_due().map_err(refusal)
     }
 
     /// The journal the engine keeps every item in, which moves on every write.

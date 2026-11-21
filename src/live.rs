@@ -28,7 +28,13 @@
 //! over no run at all. While a tab holds it, each tick looks at the metadata of
 //! the engine's human-item journal, and only once that moved reads each distinct
 //! view through the engine and sends what differs. Without such a tab, none of it
-//! runs.
+//! runs. While one is held the poller also asks the engine to sweep expiry, at most
+//! once every [`EXPIRY_SWEEP_INTERVAL`] and off its own thread: an item whose time,
+//! run, node or check condition came to hold is retired by that sweep, which moves
+//! the journal, so a page left open is the one reader that need be running for the
+//! item to leave it. A sweep reads the journal, so it is made only when it could
+//! change a held view: never over an untouched journal no shown item's expiry
+//! names, and for time conditions only once one has passed (`SweepDue`).
 
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -112,6 +118,25 @@ const OVERDUE_INTERVALS: u32 = 4;
 /// costs nothing.
 pub const TRACE_ENV: &str = "ONEPIPELINE_UI_LIVE_TRACE";
 
+/// The environment variable naming a file whose presence holds the poller
+/// between two ticks, for a journey that changes the store in more than one
+/// write and must not have a tick see some of them: a journal append and the
+/// receipt that follows it, which a tick between the two reads as a whole
+/// re-read. Finding the file before a tick, the poller writes
+/// [`poll_held`]'s file and ticks again only once the file is gone, so a
+/// journey that has seen that file knows no tick runs until it removes its
+/// own. Unset, nothing is looked at.
+pub const POLL_HOLD_ENV: &str = "ONEPIPELINE_UI_POLL_HOLD";
+
+/// The file the poller writes once it is held by [`POLL_HOLD_ENV`]'s `hold`:
+/// the hold's name with `.held` added.
+#[must_use]
+pub fn poll_held(hold: &Path) -> PathBuf {
+    let mut held = hold.as_os_str().to_owned();
+    held.push(".held");
+    PathBuf::from(held)
+}
+
 /// How long a run opened for a page's document is kept for the subscription that
 /// page makes: a page that never subscribes lets it go then.
 pub const PREPARED_HOLD: Duration = Duration::from_secs(30);
@@ -155,6 +180,8 @@ struct Shared {
     /// so two looks never send one change twice.
     human_items: Mutex<HumanItemsReading>,
     polling: AtomicBool,
+    /// [`POLL_HOLD_ENV`]'s file, when one is named.
+    poll_hold: Option<PathBuf>,
     trace: Option<PathBuf>,
     refold: Duration,
     /// The least age a fold reaches before it may be taken again.
@@ -466,6 +493,11 @@ impl Visible {
     }
 }
 
+/// The least time between two expiry sweeps the poller asks the engine for: how
+/// fresh this server keeps Action items, which is this server's choice. What is
+/// due, and which sweeper runs a due check, are the engine's.
+pub const EXPIRY_SWEEP_INTERVAL: Duration = Duration::from_secs(10);
+
 /// Every human-item view a subscription shows, and what the engine's journal
 /// looked like when they were last read.
 #[derive(Default)]
@@ -475,20 +507,117 @@ struct HumanItemsReading {
     /// Whether the last read was refused, so a refusal is reported once per
     /// spell rather than every tick it lasts.
     failing: bool,
+    /// The poller's expiry sweeps, and what the last one finished with.
+    sweeps: Arc<Mutex<Sweeps>>,
+    /// Whether the last sweep was refused, reported once per spell as a read is.
+    sweep_failing: bool,
 }
 
-/// One human-item view: what it selects, and the `visible` its tabs hold.
+/// The expiry sweep the poller runs off its own thread, so a check the engine
+/// waits on for up to its timeout never holds a tick.
+#[derive(Default)]
+struct Sweeps {
+    /// When the last sweep started: the next is due an interval after it.
+    started: Option<Instant>,
+    /// Whether one is running now, so a check slower than the interval never has
+    /// a second sweep started beside it.
+    running: bool,
+    /// What the last finished sweep came to, until a tick takes it.
+    finished: Option<Result<onepipeline::human_items::HumanItemExpirySweep, ApiError>>,
+}
+
+/// One human-item view: what it selects, the `visible` its tabs hold, and when a
+/// sweep could next change it.
 struct HeldHumanItems {
     filter: HumanItemFilter,
     item: Option<HumanItemId>,
     visible: Value,
+    due: SweepDue,
 }
 
 impl HeldHumanItems {
-    /// The `visible` this view shows now, as the engine reads it.
-    fn read(&self, items: &crate::human_items::HumanItems) -> Result<Value, ApiError> {
+    /// The `visible` this view shows now, as the engine reads it, and when a sweep
+    /// could next change what it shows.
+    fn read(&self, items: &crate::human_items::HumanItems) -> Result<(Value, SweepDue), ApiError> {
         let (listed, detail) = items.view(&self.filter, self.item.as_ref())?;
-        Ok(json!({ "type": "human-items", "items": listed, "detail": detail }))
+        let due = SweepDue::of(
+            &self.filter,
+            listed
+                .iter()
+                .map(|view| &view.item)
+                .chain(detail.as_ref().map(|detail| &detail.item)),
+        );
+        Ok((
+            json!({ "type": "human-items", "items": listed, "detail": detail }),
+            due,
+        ))
+    }
+}
+
+/// When an expiry sweep could next change what a held view shows. A sweep reads
+/// the journal, so the poller makes one only when it could: never while no open
+/// item a view shows carries expiry, and for time conditions alone only once the
+/// earliest of them has passed. A run, node or check condition can come to hold
+/// without the journal moving, so it is swept every [`EXPIRY_SWEEP_INTERVAL`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SweepDue {
+    /// No open item shown carries expiry.
+    Never,
+    /// Only time conditions, the earliest of which comes due then.
+    At(SystemTime),
+    /// Every interval.
+    Always,
+}
+
+impl SweepDue {
+    /// What a view of `filter` listing `shown` asks of the sweep. A view of any
+    /// state but open can gain an item that expires out of a view no tab holds, so
+    /// it is swept every interval.
+    fn of<'a>(
+        filter: &HumanItemFilter,
+        shown: impl Iterator<Item = &'a onepipeline::human_items::HumanItem>,
+    ) -> Self {
+        use onepipeline::human_items::{HumanItemExpiryCondition, HumanItemState};
+        if filter
+            .state
+            .is_some_and(|state| state != HumanItemState::Open)
+        {
+            return Self::Always;
+        }
+        let conditions = shown
+            .filter(|item| item.state == HumanItemState::Open)
+            .flat_map(|item| item.expiry.iter());
+        let mut due = Self::Never;
+        for condition in conditions {
+            let at = match condition {
+                HumanItemExpiryCondition::Time { at: Some(at), .. } => {
+                    time::OffsetDateTime::parse(at, &time::format_description::well_known::Rfc3339)
+                        .ok()
+                        .map(SystemTime::from)
+                }
+                _ => None,
+            };
+            due = due.and(at.map_or(Self::Always, Self::At));
+        }
+        due
+    }
+
+    /// The sooner of the two.
+    fn and(self, other: Self) -> Self {
+        match (self, other) {
+            (Self::Always, _) | (_, Self::Always) => Self::Always,
+            (Self::Never, due) | (due, Self::Never) => due,
+            (Self::At(one), Self::At(two)) => Self::At(one.min(two)),
+        }
+    }
+
+    /// Whether a sweep could change anything now.
+    fn now(self) -> bool {
+        match self {
+            Self::Never => false,
+            Self::At(at) => SystemTime::now() >= at,
+            Self::Always => true,
+        }
     }
 }
 
@@ -1463,6 +1592,7 @@ impl Hub {
                 .map_or(PREPARED_HOLD, Duration::from_millis),
             human_items: Mutex::new(HumanItemsReading::default()),
             polling: AtomicBool::new(false),
+            poll_hold: std::env::var_os(POLL_HOLD_ENV).map(PathBuf::from),
             trace: std::env::var_os(TRACE_ENV).map(PathBuf::from),
             refold: std::env::var(TELEMETRY_REFOLD_ENV)
                 .ok()
@@ -1953,7 +2083,22 @@ impl Hub {
                 }
                 return;
             }
+            if let Some(hold) = &self.0.poll_hold {
+                self.wait_out(hold);
+            }
             self.tick();
+        }
+    }
+
+    /// Between ticks, wait while `hold` is there, having said so beside it.
+    fn wait_out(&self, hold: &Path) {
+        if !hold.exists() {
+            return;
+        }
+        // A journey that cannot be told it is held waits on its own patience.
+        let _ = std::fs::write(poll_held(hold), b"");
+        while hold.exists() && !self.0.stopping.load(Ordering::Relaxed) {
+            std::thread::sleep(self.0.store.poll());
         }
     }
 
@@ -2009,8 +2154,84 @@ impl Hub {
                 .iter()
                 .any(|visible| matches!(visible, Visible::HumanItems(shown) if shown == key))
         });
+        self.take_sweep(&mut reading);
         // Reported once a spell by the refresh itself, and tried again next tick.
         let _ = self.refresh_human_items(&mut reading);
+        self.sweep_expiry(&reading);
+    }
+
+    /// Take what the last expiry sweep came to.
+    ///
+    /// An expiry the sweep wrote moved the journal, so the refresh after this reads
+    /// it like any other write. A check's outcome is kept beside the journal rather
+    /// than in it, so a sweep that ran one has the views read again whatever the
+    /// journal's stamp says. A refused sweep is said once a spell, and started
+    /// again when the next is due.
+    fn take_sweep(&self, reading: &mut HumanItemsReading) {
+        let finished = lock(&reading.sweeps).finished.take();
+        match finished {
+            Some(Ok(sweep)) => {
+                reading.sweep_failing = false;
+                if sweep.checks_run > 0 || !sweep.expired.is_empty() {
+                    reading.stamp = None;
+                }
+            }
+            Some(Err(error)) => {
+                if !reading.sweep_failing {
+                    eprintln!(
+                        "onepipeline-api: human items could not be swept for expiry, and are swept again every {} s: {error}",
+                        EXPIRY_SWEEP_INTERVAL.as_secs()
+                    );
+                }
+                reading.sweep_failing = true;
+            }
+            None => {}
+        }
+    }
+
+    /// Start the next expiry sweep once one is due and could change what a held
+    /// Action items view shows (see [`SweepDue`]).
+    fn sweep_expiry(&self, reading: &HumanItemsReading) {
+        let could = reading
+            .views
+            .values()
+            .fold(SweepDue::Never, |due, held| due.and(held.due));
+        if !could.now() {
+            return;
+        }
+        // The interval and the one-at-a-time guard have no journey of their own:
+        // telling a throttled sweep from an unthrottled one is telling outcomes
+        // apart by elapsed time, which the journeys here must not do. The check
+        // journeys cover the sweeps it lets through instead, one of them over a
+        // check that runs to its timeout while the tab it patches stays live.
+        let mut sweeps = lock(&reading.sweeps);
+        let due = sweeps
+            .started
+            .is_none_or(|started| started.elapsed() >= EXPIRY_SWEEP_INTERVAL);
+        if sweeps.running || !due {
+            return;
+        }
+        sweeps.running = true;
+        sweeps.started = Some(Instant::now());
+        drop(sweeps);
+        let (items, _) = self.0.store.human_items();
+        let items = items.clone();
+        let shared = Arc::clone(&reading.sweeps);
+        let spawned = std::thread::Builder::new()
+            .name("expiry-sweep".to_owned())
+            .spawn(move || {
+                let swept = items.expire_due();
+                let mut sweeps = lock(&shared);
+                sweeps.running = false;
+                sweeps.finished = Some(swept);
+            });
+        // Untested: a refused spawn needs the process at its thread limit, which
+        // takes the server's other threads down with it. It is the same release
+        // of the guard as a finished sweep's, so the next due tick tries again.
+        if let Err(error) = spawned {
+            lock(&reading.sweeps).running = false;
+            eprintln!("onepipeline-api: no thread could sweep human items for expiry: {error}");
+        }
     }
 
     /// `view`'s `visible` as of now, read once if no subscription shows it yet.
@@ -2036,8 +2257,9 @@ impl Hub {
             filter: filter.clone(),
             item: item.clone(),
             visible: Value::Null,
+            due: SweepDue::Never,
         };
-        held.visible = held.read(items)?;
+        (held.visible, held.due) = held.read(items)?;
         let visible = held.visible.clone();
         reading.views.insert(key, held);
         Ok(visible)
@@ -2064,7 +2286,8 @@ impl Hub {
         let mut refused = None;
         for (key, held) in &mut reading.views {
             match held.read(items) {
-                Ok(visible) => {
+                Ok((visible, due)) => {
+                    held.due = due;
                     let mut ops = Vec::new();
                     if let Err(refused) = crate::patch::diff(&held.visible, &visible, &mut ops) {
                         eprintln!("onepipeline-api: human items could not be patched: {refused}");

@@ -1269,6 +1269,159 @@ function buildAttest(workspace, token) {
   };
 }
 
+/**
+ * A launched plan of one `kind: human` step, which the expiry journeys settle
+ * through the engine's own driver: the run whose node and ending their items'
+ * conditions name.
+ */
+const EXPIRY_PLANS = {
+  retire: [
+    {
+      id: "migrate",
+      title: "Run the schema migration",
+      priority: "high",
+      body: "Run the migration on the staging database and complete this once it reports done.",
+    },
+  ],
+};
+
+function buildExpiry(workspace, token) {
+  const plan = "board:retire";
+  const run = start(workspace, token, plan);
+  return {
+    ids: { migrate: stepItem(workspace, token, run, "migrate") },
+    runs: { retire: run },
+    plans: { retire: plan },
+  };
+}
+
+/**
+ * Sweep the store once through the engine's own read: every condition that holds
+ * now is expired, and every check that is due runs.
+ */
+function sweep(workspace, token) {
+  engine(workspace, token, ["human-items", "list", "--json"]);
+}
+
+/**
+ * A check script under the world's own `checks/` directory, run as
+ * `sh <name>.sh` from there: `body` is the shell it runs.
+ */
+function checkScript(workspace, name, body) {
+  const dir = join(workspace, "checks");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${name}.sh`), `${body}\n`);
+  return { when: "check", command: ["sh", `${name}.sh`], cwd: dir };
+}
+
+/**
+ * One open item and one the engine expired, and nothing else: the page's default
+ * view, its Expired state and the expired treatment beside an open card.
+ */
+function buildExpiryStates(workspace, token) {
+  const ids = {};
+  ids.open = raise(workspace, token, SUPERVISOR_SESSION, {
+    dedup_key: "rotate-signing-key",
+    kind: "task",
+    title: "Rotate the release signing key",
+    body: "The signing key expires next month. Rotate it and record the new fingerprint.",
+    priority: "high",
+    owner: owner(),
+    block: { scope: "nothing" },
+  });
+  ids.expired = raise(workspace, token, SUPERVISOR_SESSION, {
+    dedup_key: "free-capture-disk",
+    kind: "task",
+    title: "Free space on /mnt/capture before the nightly capture writes to it",
+    body: "The capture volume is at 97%. Remove old captures until it has room.",
+    priority: "high",
+    owner: owner(),
+    block: { scope: "nothing" },
+    expiry: [
+      checkScript(
+        workspace,
+        "disk-free",
+        `printf '{"expired": true, "reason": "the disk has space again"}'`,
+      ),
+    ],
+  });
+  sweep(workspace, token);
+  return { ids, runs: {}, plans: {} };
+}
+
+/**
+ * Expiry as the gallery photographs it: open items that will expire on a time and
+ * on a check whose last run failed, and items the engine expired by their checks.
+ * Every word is fixed, and the open item's time is hours after the build or the
+ * instant a capture names, so no build or capture expires it.
+ */
+function buildExpiryGallery(workspace, token) {
+  const ids = {};
+  const at = new Date((NAMED_NOW ?? Date.now()) + 5 * 3_600_000).toISOString();
+  ids.window = raise(workspace, token, SUPERVISOR_SESSION, {
+    dedup_key: "hold-release-window",
+    kind: "question",
+    title: "Hold the release window for v0.86.0?",
+    body: "The release pull request is green. Hold the window, or let the next one take it.",
+    priority: "urgent",
+    owner: owner(),
+    block: { scope: "nothing" },
+    expiry: [{ when: "time", at, reason: "The release window has passed" }],
+  });
+  ids.failing = raise(workspace, token, SUPERVISOR_SESSION, {
+    dedup_key: "free-capture-disk",
+    kind: "task",
+    title: "Free space on /mnt/capture before the nightly capture writes to it",
+    body: "The capture volume is at 97%. Remove old captures until it has room.",
+    priority: "high",
+    owner: owner(),
+    block: { scope: "nothing" },
+    expiry: [
+      {
+        ...checkScript(
+          workspace,
+          "capture-free",
+          "echo 'df: /mnt/capture: No such file or directory' >&2\nexit 1",
+        ),
+        interval_seconds: 600,
+      },
+    ],
+  });
+  ids.disk = raise(workspace, token, SUPERVISOR_SESSION, {
+    dedup_key: "free-build-disk",
+    kind: "task",
+    title: "Free space on the build host before the next release build",
+    body: "The build volume is nearly full.",
+    priority: "high",
+    owner: owner(),
+    block: { scope: "nothing" },
+    expiry: [
+      checkScript(
+        workspace,
+        "build-free",
+        `printf '{"expired": true, "reason": "the disk has space again"}'`,
+      ),
+    ],
+  });
+  ids.merged = raise(workspace, token, SUPERVISOR_SESSION, {
+    dedup_key: "review-release-pr",
+    kind: "question",
+    title: "Should the release pull request wait for the docs fix?",
+    body: "The docs fix is one review away.",
+    priority: "medium",
+    owner: owner(),
+    block: { scope: "nothing" },
+    expiry: [
+      {
+        ...checkScript(workspace, "pr-merged", `printf '{"expired": true}'`),
+        reason: "The release pull request merged",
+      },
+    ],
+  });
+  sweep(workspace, token);
+  return { ids, runs: {}, plans: {} };
+}
+
 const WORLDS = {
   sessions: { plans: {}, build: buildSessions },
   queue: { plans: QUEUE_PLANS, build: buildQueue },
@@ -1289,6 +1442,9 @@ const WORLDS = {
   provenance: { plans: {}, build: buildProvenance },
   "provenance-gallery": { plans: {}, build: buildProvenanceGallery },
   attest: { plans: ATTEST_PLANS, build: buildAttest },
+  expiry: { plans: EXPIRY_PLANS, build: buildExpiry },
+  "expiry-states": { plans: {}, build: buildExpiryStates },
+  "expiry-gallery": { plans: {}, build: buildExpiryGallery },
 };
 
 /**

@@ -1007,6 +1007,17 @@ test("the Host page's rows take a shown value from the stream, with no new run-l
   await expect(listed.getByText(new RegExp(`^${other} · `))).not.toContainText(
     "ended-stopped",
   );
+  // The rows come from the run list, which can answer before the page opens
+  // its stream: mark the wire only once that one stream is open, so the
+  // stream's own first request is never read as a new one.
+  await expect
+    .poll(() => ({
+      streams: wire.requests.filter((request) =>
+        request.startsWith(`GET ${API_V2_PATHS.events}?`),
+      ).length,
+      open: wire.open,
+    }))
+    .toStrictEqual({ streams: 1, open: 1 });
   const before = wire.requests.length;
 
   stopRun(served, other);

@@ -2,13 +2,16 @@ import {
   HUMAN_ITEM_PRIORITIES,
   HUMAN_ITEM_PRIORITY_LABELS,
   type HumanItem,
+  type HumanItemCheckStatus,
   type HumanItemDetail,
+  type HumanItemExpiryCondition,
   type HumanItemFilter,
   type HumanItemHistoryEntry,
   type HumanItemNode,
   type HumanItemView,
   type Provenance,
 } from "@onepipeline-ui/dag-model";
+import { formatTimestamp } from "../../lib/time";
 
 /**
  * What a reader sees of an action item, derived from the engine's record and
@@ -35,9 +38,16 @@ const STATE_LABELS: { readonly [S in HumanItem["state"]]: string } = {
   answered: "Answered",
   completed: "Completed",
   dismissed: "Dismissed",
+  expired: "Expired",
 };
 
-const STATES = ["open", "answered", "completed", "dismissed"] as const;
+const STATES = [
+  "open",
+  "answered",
+  "completed",
+  "dismissed",
+  "expired",
+] as const;
 
 export const STATE_OPTIONS = STATES.map((state) => ({
   state,
@@ -160,14 +170,154 @@ const HISTORY_ACTIONS: Record<HumanItemHistoryEntry["action"], string> = {
   "human-item-auto-resolved": "Resolved",
   "human-item-reopened": "Reopened",
   "human-item-noted": "Note",
+  "human-item-expired": "Expired",
 };
 
 /**
  * What one entry of the engine's history says, in words: its action and whose
- * words it was — "Raised by the manager", "Answered by you", "Note by you".
+ * words it was — "Raised by the manager", "Answered by you", "Note by you" — and
+ * "Expired by the engine" for the engine's own retirement, which is no one's words.
  */
 export function historyWords(entry: HumanItemHistoryEntry): string {
-  return `${HISTORY_ACTIONS[entry.action]} by ${partyWords(entry.provenance)}`;
+  const party =
+    entry.action === "human-item-expired" && entry.actor === "engine"
+      ? "the engine"
+      : partyWords(entry.provenance);
+  return `${HISTORY_ACTIONS[entry.action]} by ${party}`;
+}
+
+/**
+ * How often a check runs when its condition names no interval: the engine's,
+ * which it does not export. `dag-ui-human-items-expiry.spec.ts` holds this to the
+ * interval the engine's own `human-items show` prints for such a check.
+ */
+const DEFAULT_CHECK_INTERVAL_SECONDS = 60;
+
+function counted(count: number, unit: string): string {
+  return count === 1 ? `${unit}` : `${count} ${unit}s`;
+}
+
+/** An interval in the largest whole unit it is: "10 seconds", "minute", "2 hours". */
+function everyWords(seconds: number): string {
+  if (seconds % 3600 === 0) return counted(seconds / 3600, "hour");
+  if (seconds % 60 === 0) return counted(seconds / 60, "minute");
+  return counted(seconds, "second");
+}
+
+/** A check's argv as it would be typed. */
+function commandWords(command: readonly string[]): string {
+  return command.join(" ");
+}
+
+/**
+ * What an open item will expire on, for one of its conditions: "at 14:00:00",
+ * "when run R ends", "when step N of run R settles", or "when its check C says
+ * so, checked every minute".
+ */
+export function expiresOn(condition: HumanItemExpiryCondition): string {
+  switch (condition.when) {
+    case "time":
+      return condition.at === undefined
+        ? `${everyWords(condition.after_seconds ?? 0)} after it was raised`
+        : `at ${formatTimestamp(condition.at)}`;
+    case "run":
+      return condition.on === "settled"
+        ? `when run ${condition.run} settles`
+        : `when run ${condition.run} ends`;
+    case "node":
+      return `when step ${condition.node} of run ${condition.run} settles`;
+    case "check":
+      return `when its check ${commandWords(condition.command)} says so, checked every ${everyWords(condition.interval_seconds ?? DEFAULT_CHECK_INTERVAL_SECONDS)}`;
+  }
+}
+
+/** The quiet line an open item carrying expiry shows, or nothing. */
+export function expiryLine(item: HumanItem): string | undefined {
+  const conditions = item.expiry ?? [];
+  if (item.state !== "open" || conditions.length === 0) return undefined;
+  return `Expires ${conditions.map(expiresOn).join(", or ")}`;
+}
+
+/**
+ * The condition that held, in plain words: "at 14:00:00", "run R ended", "step N
+ * of run R settled", "its check C".
+ */
+export function heldWords(condition: HumanItemExpiryCondition): string {
+  switch (condition.when) {
+    case "time":
+      return condition.at === undefined
+        ? `${everyWords(condition.after_seconds ?? 0)} after it was raised`
+        : `at ${formatTimestamp(condition.at)}`;
+    case "run":
+      return `run ${condition.run} ${condition.on === "settled" ? "settled" : "ended"}`;
+    case "node":
+      return `step ${condition.node} of run ${condition.run} settled`;
+    case "check":
+      return `its check ${commandWords(condition.command)}`;
+  }
+}
+
+function sentence(words: string): string {
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+/**
+ * Why an expired item expired: the reason its expiry recorded, as a sentence, and
+ * the condition that held. Nothing for an item that did not expire.
+ */
+export function expiredBecause(
+  item: HumanItem,
+): { readonly reason: string; readonly held: string } | undefined {
+  const { resolution } = item;
+  if (item.state !== "expired" || resolution === null) return undefined;
+  const condition = resolution.condition ?? undefined;
+  return {
+    reason: sentence(resolution.reason ?? ""),
+    held: condition === undefined ? "" : sentence(heldWords(condition)),
+  };
+}
+
+/**
+ * A check's last outcome in the result protocol's words: expired, not yet, or
+ * failed with its cause.
+ */
+export function checkOutcomeWords(status: HumanItemCheckStatus): string {
+  switch (status.outcome) {
+    case "holds":
+      return "expired";
+    case "not-yet":
+      return "not yet";
+    case "failed":
+      return `failed: ${status.detail ?? ""}`;
+  }
+}
+
+/** The checks of an open item whose last run failed, each with the engine's detail. */
+export function failingChecks(view: {
+  readonly item: HumanItem;
+  readonly checks?: readonly HumanItemCheckStatus[];
+}): readonly HumanItemCheckStatus[] {
+  if (view.item.state !== "open") return [];
+  return (view.checks ?? []).filter(({ outcome }) => outcome === "failed");
+}
+
+/**
+ * Each of an item's conditions, what it expires on, and for a check that has run
+ * its last outcome: what the detail pane lists.
+ */
+export function expiryConditions(view: {
+  readonly item: HumanItem;
+  readonly checks?: readonly HumanItemCheckStatus[];
+}): readonly {
+  readonly key: string;
+  readonly words: string;
+  readonly last?: HumanItemCheckStatus;
+}[] {
+  return (view.item.expiry ?? []).map((condition, index) => ({
+    key: `${index}`,
+    words: sentence(expiresOn(condition)),
+    last: view.checks?.find((status) => status.condition === index),
+  }));
 }
 
 /**
@@ -203,6 +353,7 @@ export function metadataFields(view: HumanItemView): MetadataField[] {
   };
   const resolved = resolvedLabel[item.state];
   const note = savedNote(item);
+  const because = expiredBecause(item);
   return [
     { label: "Priority", value: priorityLabel(item) },
     { label: "Kind", value: kindLabel(item) },
@@ -222,6 +373,14 @@ export function metadataFields(view: HumanItemView): MetadataField[] {
           },
         ]),
     ...(note === undefined ? [] : [{ label: note.label, value: note.text }]),
+    // The engine retired it: no person's words, and the condition that held.
+    ...(because === undefined
+      ? []
+      : [
+          { label: "Expired", at: item.updated_at, party: "the engine" },
+          { label: "Reason", value: because.reason },
+          { label: "Condition that held", value: because.held },
+        ]),
   ];
 }
 

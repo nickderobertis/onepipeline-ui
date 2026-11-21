@@ -72,6 +72,13 @@
             "items": {
               "$ref": "#/$defs/HumanItemHistoryEntry"
             }
+          },
+          "checks": {
+            "description": "The last run of each of its check conditions that has run; omitted when empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemCheckStatus"
+            }
           }
         },
         "additionalProperties": false,
@@ -170,6 +177,14 @@
               }
             ]
           },
+          "expiry": {
+            "description": "When the item stops mattering, each time resolved to its `at` and each check\nholding its `cwd`. Default empty, omitted when empty; a reopen clears it.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemExpiryCondition"
+            },
+            "maxItems": 8
+          },
           "created_at": {
             "description": "Created at.",
             "type": "string"
@@ -232,17 +247,71 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": ["open", "completed", "dismissed"]
+                  "enum": ["open", "completed", "dismissed", "expired"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": ["open", "answered", "dismissed"]
+                  "enum": ["open", "answered", "dismissed", "expired"]
                 },
                 "approval": {
                   "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "expired"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "resolution": {
+                  "properties": {
+                    "actor": {
+                      "const": "engine"
+                    },
+                    "on_behalf_of": {
+                      "type": "null"
+                    },
+                    "text": {
+                      "type": "null"
+                    },
+                    "choice": {
+                      "type": "null"
+                    },
+                    "provenance": {
+                      "const": "manager"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": ["condition"]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "resolution": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "not": {
+                        "required": ["condition"]
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -353,6 +422,31 @@
               "properties": {
                 "choices": {
                   "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "expiry": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": ["after_seconds"]
+                      },
+                      {
+                        "properties": {
+                          "when": {
+                            "const": "check"
+                          }
+                        },
+                        "not": {
+                          "required": ["cwd"]
+                        }
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -523,6 +617,11 @@
             "description": "Dismissed.",
             "type": "string",
             "const": "dismissed"
+          },
+          {
+            "description": "Retired by the engine once one of its expiry conditions held.",
+            "type": "string",
+            "const": "expired"
           }
         ]
       },
@@ -553,6 +652,17 @@
           "provenance": {
             "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
             "$ref": "#/$defs/Provenance"
+          },
+          "condition": {
+            "description": "The expiry condition that held, as the item stored it: present only on an\nexpired item, and omitted otherwise.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HumanItemExpiryCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -570,6 +680,133 @@
             "description": "The user's words, relayed by the manager: binding.",
             "type": "string",
             "const": "user"
+          }
+        ]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
           }
         ]
       },
@@ -768,6 +1005,59 @@
             "description": "human-item-noted",
             "type": "string",
             "const": "human-item-noted"
+          },
+          {
+            "description": "human-item-expired",
+            "type": "string",
+            "const": "human-item-expired"
+          }
+        ]
+      },
+      "HumanItemCheckStatus": {
+        "description": "The last run of one check condition of an item.",
+        "type": "object",
+        "properties": {
+          "condition": {
+            "description": "The index of the check in the item's `expiry`.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "last_run_at": {
+            "description": "When it last ran, RFC 3339.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "outcome": {
+            "description": "What that run came to.",
+            "$ref": "#/$defs/HumanItemCheckOutcome"
+          },
+          "detail": {
+            "description": "Why it failed, followed by at most the last 2048 bytes of its stderr; null on any\nother outcome.",
+            "type": ["string", "null"]
+          }
+        },
+        "additionalProperties": false,
+        "required": ["condition", "last_run_at", "outcome", "detail"]
+      },
+      "HumanItemCheckOutcome": {
+        "description": "What a check's last run came to, in the result protocol's words.",
+        "oneOf": [
+          {
+            "description": "It exited 0 and printed `{\"expired\": true}`: the condition holds.",
+            "type": "string",
+            "const": "holds"
+          },
+          {
+            "description": "It exited 0 and printed `{\"expired\": false}`.",
+            "type": "string",
+            "const": "not-yet"
+          },
+          {
+            "description": "Anything else: the item stays open and the failure is shown on it.",
+            "type": "string",
+            "const": "failed"
           }
         ]
       },
@@ -923,6 +1213,14 @@
           }
         ]
       },
+      "expiry": {
+        "description": "When the item stops mattering, each time resolved to its `at` and each check\nholding its `cwd`. Default empty, omitted when empty; a reopen clears it.",
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/HumanItemExpiryCondition"
+        },
+        "maxItems": 8
+      },
       "created_at": {
         "description": "Created at.",
         "type": "string"
@@ -985,17 +1283,71 @@
         "then": {
           "properties": {
             "state": {
-              "enum": ["open", "completed", "dismissed"]
+              "enum": ["open", "completed", "dismissed", "expired"]
             }
           }
         },
         "else": {
           "properties": {
             "state": {
-              "enum": ["open", "answered", "dismissed"]
+              "enum": ["open", "answered", "dismissed", "expired"]
             },
             "approval": {
               "type": "null"
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "properties": {
+            "state": {
+              "const": "expired"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "resolution": {
+              "properties": {
+                "actor": {
+                  "const": "engine"
+                },
+                "on_behalf_of": {
+                  "type": "null"
+                },
+                "text": {
+                  "type": "null"
+                },
+                "choice": {
+                  "type": "null"
+                },
+                "provenance": {
+                  "const": "manager"
+                },
+                "reason": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
+              },
+              "required": ["condition"]
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "resolution": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "not": {
+                    "required": ["condition"]
+                  }
+                }
+              ]
             }
           }
         }
@@ -1106,6 +1458,31 @@
           "properties": {
             "choices": {
               "maxItems": 0
+            }
+          }
+        }
+      },
+      {
+        "properties": {
+          "expiry": {
+            "items": {
+              "not": {
+                "anyOf": [
+                  {
+                    "required": ["after_seconds"]
+                  },
+                  {
+                    "properties": {
+                      "when": {
+                        "const": "check"
+                      }
+                    },
+                    "not": {
+                      "required": ["cwd"]
+                    }
+                  }
+                ]
+              }
             }
           }
         }
@@ -1276,6 +1653,11 @@
             "description": "Dismissed.",
             "type": "string",
             "const": "dismissed"
+          },
+          {
+            "description": "Retired by the engine once one of its expiry conditions held.",
+            "type": "string",
+            "const": "expired"
           }
         ]
       },
@@ -1306,6 +1688,17 @@
           "provenance": {
             "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
             "$ref": "#/$defs/Provenance"
+          },
+          "condition": {
+            "description": "The expiry condition that held, as the item stored it: present only on an\nexpired item, and omitted otherwise.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HumanItemExpiryCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -1323,6 +1716,133 @@
             "description": "The user's words, relayed by the manager: binding.",
             "type": "string",
             "const": "user"
+          }
+        ]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
           }
         ]
       },
@@ -1408,6 +1928,14 @@
             "type": "null"
           }
         ]
+      },
+      "expiry": {
+        "description": "When the item stops mattering: 1 to 8 conditions, any one holding expiring it.\nDefault empty, omitted when empty.",
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/HumanItemExpiryCondition"
+        },
+        "maxItems": 8
       }
     },
     "additionalProperties": false,
@@ -1598,6 +2126,133 @@
         },
         "additionalProperties": false,
         "required": ["board_copy", "key"]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
+          }
+        ]
       }
     }
   },
@@ -1668,6 +2323,14 @@
                 "type": "null"
               }
             ]
+          },
+          "expiry": {
+            "description": "When the item stops mattering: 1 to 8 conditions, any one holding expiring it.\nDefault empty, omitted when empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemExpiryCondition"
+            },
+            "maxItems": 8
           },
           "action": {
             "type": "string",
@@ -1852,7 +2515,7 @@
         "required": ["action", "id", "actor", "on_behalf_of"]
       },
       {
-        "description": "Reopen a completed or dismissed item, taking its resolution back.",
+        "description": "Reopen a completed, dismissed or expired item, taking its resolution back; an\nexpired item's conditions go with it.",
         "type": "object",
         "properties": {
           "id": {
@@ -2057,6 +2720,133 @@
         "additionalProperties": false,
         "required": ["board_copy", "key"]
       },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
+          }
+        ]
+      },
       "Provenance": {
         "description": "Whose words a ruling is. Serialized as the lowercase word; absent, `manager`.",
         "oneOf": [
@@ -2121,7 +2911,7 @@
         "enum": [null, "urgent", "high", "medium", "low"]
       },
       "state": {
-        "description": "State.",
+        "description": "State: open, answered, completed, dismissed or expired.",
         "anyOf": [
           {
             "$ref": "#/$defs/HumanItemState"
@@ -2187,6 +2977,11 @@
             "description": "Dismissed.",
             "type": "string",
             "const": "dismissed"
+          },
+          {
+            "description": "Retired by the engine once one of its expiry conditions held.",
+            "type": "string",
+            "const": "expired"
           }
         ]
       }
@@ -2209,6 +3004,13 @@
       "reopen": {
         "description": "Whether it can be reopened.",
         "$ref": "#/$defs/HumanItemReopen"
+      },
+      "checks": {
+        "description": "The last run of each of its check conditions that has run; omitted when empty.",
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/HumanItemCheckStatus"
+        }
       }
     },
     "additionalProperties": false,
@@ -2307,6 +3109,14 @@
               }
             ]
           },
+          "expiry": {
+            "description": "When the item stops mattering, each time resolved to its `at` and each check\nholding its `cwd`. Default empty, omitted when empty; a reopen clears it.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemExpiryCondition"
+            },
+            "maxItems": 8
+          },
           "created_at": {
             "description": "Created at.",
             "type": "string"
@@ -2369,17 +3179,71 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": ["open", "completed", "dismissed"]
+                  "enum": ["open", "completed", "dismissed", "expired"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": ["open", "answered", "dismissed"]
+                  "enum": ["open", "answered", "dismissed", "expired"]
                 },
                 "approval": {
                   "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "expired"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "resolution": {
+                  "properties": {
+                    "actor": {
+                      "const": "engine"
+                    },
+                    "on_behalf_of": {
+                      "type": "null"
+                    },
+                    "text": {
+                      "type": "null"
+                    },
+                    "choice": {
+                      "type": "null"
+                    },
+                    "provenance": {
+                      "const": "manager"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": ["condition"]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "resolution": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "not": {
+                        "required": ["condition"]
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -2490,6 +3354,31 @@
               "properties": {
                 "choices": {
                   "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "expiry": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": ["after_seconds"]
+                      },
+                      {
+                        "properties": {
+                          "when": {
+                            "const": "check"
+                          }
+                        },
+                        "not": {
+                          "required": ["cwd"]
+                        }
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -2660,6 +3549,11 @@
             "description": "Dismissed.",
             "type": "string",
             "const": "dismissed"
+          },
+          {
+            "description": "Retired by the engine once one of its expiry conditions held.",
+            "type": "string",
+            "const": "expired"
           }
         ]
       },
@@ -2690,6 +3584,17 @@
           "provenance": {
             "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
             "$ref": "#/$defs/Provenance"
+          },
+          "condition": {
+            "description": "The expiry condition that held, as the item stored it: present only on an\nexpired item, and omitted otherwise.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HumanItemExpiryCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -2707,6 +3612,133 @@
             "description": "The user's words, relayed by the manager: binding.",
             "type": "string",
             "const": "user"
+          }
+        ]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
           }
         ]
       },
@@ -2835,6 +3867,54 @@
             }
           }
         ]
+      },
+      "HumanItemCheckStatus": {
+        "description": "The last run of one check condition of an item.",
+        "type": "object",
+        "properties": {
+          "condition": {
+            "description": "The index of the check in the item's `expiry`.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "last_run_at": {
+            "description": "When it last ran, RFC 3339.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "outcome": {
+            "description": "What that run came to.",
+            "$ref": "#/$defs/HumanItemCheckOutcome"
+          },
+          "detail": {
+            "description": "Why it failed, followed by at most the last 2048 bytes of its stderr; null on any\nother outcome.",
+            "type": ["string", "null"]
+          }
+        },
+        "additionalProperties": false,
+        "required": ["condition", "last_run_at", "outcome", "detail"]
+      },
+      "HumanItemCheckOutcome": {
+        "description": "What a check's last run came to, in the result protocol's words.",
+        "oneOf": [
+          {
+            "description": "It exited 0 and printed `{\"expired\": true}`: the condition holds.",
+            "type": "string",
+            "const": "holds"
+          },
+          {
+            "description": "It exited 0 and printed `{\"expired\": false}`.",
+            "type": "string",
+            "const": "not-yet"
+          },
+          {
+            "description": "Anything else: the item stays open and the failure is shown on it.",
+            "type": "string",
+            "const": "failed"
+          }
+        ]
       }
     }
   },
@@ -2868,6 +3948,13 @@
         "type": "array",
         "items": {
           "$ref": "#/$defs/HumanItemHistoryEntry"
+        }
+      },
+      "checks": {
+        "description": "The last run of each of its check conditions that has run; omitted when empty.",
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/HumanItemCheckStatus"
         }
       }
     },
@@ -2967,6 +4054,14 @@
               }
             ]
           },
+          "expiry": {
+            "description": "When the item stops mattering, each time resolved to its `at` and each check\nholding its `cwd`. Default empty, omitted when empty; a reopen clears it.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemExpiryCondition"
+            },
+            "maxItems": 8
+          },
           "created_at": {
             "description": "Created at.",
             "type": "string"
@@ -3029,17 +4124,71 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": ["open", "completed", "dismissed"]
+                  "enum": ["open", "completed", "dismissed", "expired"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": ["open", "answered", "dismissed"]
+                  "enum": ["open", "answered", "dismissed", "expired"]
                 },
                 "approval": {
                   "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "expired"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "resolution": {
+                  "properties": {
+                    "actor": {
+                      "const": "engine"
+                    },
+                    "on_behalf_of": {
+                      "type": "null"
+                    },
+                    "text": {
+                      "type": "null"
+                    },
+                    "choice": {
+                      "type": "null"
+                    },
+                    "provenance": {
+                      "const": "manager"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": ["condition"]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "resolution": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "not": {
+                        "required": ["condition"]
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -3150,6 +4299,31 @@
               "properties": {
                 "choices": {
                   "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "expiry": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": ["after_seconds"]
+                      },
+                      {
+                        "properties": {
+                          "when": {
+                            "const": "check"
+                          }
+                        },
+                        "not": {
+                          "required": ["cwd"]
+                        }
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -3320,6 +4494,11 @@
             "description": "Dismissed.",
             "type": "string",
             "const": "dismissed"
+          },
+          {
+            "description": "Retired by the engine once one of its expiry conditions held.",
+            "type": "string",
+            "const": "expired"
           }
         ]
       },
@@ -3350,6 +4529,17 @@
           "provenance": {
             "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
             "$ref": "#/$defs/Provenance"
+          },
+          "condition": {
+            "description": "The expiry condition that held, as the item stored it: present only on an\nexpired item, and omitted otherwise.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HumanItemExpiryCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -3367,6 +4557,133 @@
             "description": "The user's words, relayed by the manager: binding.",
             "type": "string",
             "const": "user"
+          }
+        ]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
           }
         ]
       },
@@ -3565,6 +4882,59 @@
             "description": "human-item-noted",
             "type": "string",
             "const": "human-item-noted"
+          },
+          {
+            "description": "human-item-expired",
+            "type": "string",
+            "const": "human-item-expired"
+          }
+        ]
+      },
+      "HumanItemCheckStatus": {
+        "description": "The last run of one check condition of an item.",
+        "type": "object",
+        "properties": {
+          "condition": {
+            "description": "The index of the check in the item's `expiry`.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "last_run_at": {
+            "description": "When it last ran, RFC 3339.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "outcome": {
+            "description": "What that run came to.",
+            "$ref": "#/$defs/HumanItemCheckOutcome"
+          },
+          "detail": {
+            "description": "Why it failed, followed by at most the last 2048 bytes of its stderr; null on any\nother outcome.",
+            "type": ["string", "null"]
+          }
+        },
+        "additionalProperties": false,
+        "required": ["condition", "last_run_at", "outcome", "detail"]
+      },
+      "HumanItemCheckOutcome": {
+        "description": "What a check's last run came to, in the result protocol's words.",
+        "oneOf": [
+          {
+            "description": "It exited 0 and printed `{\"expired\": true}`: the condition holds.",
+            "type": "string",
+            "const": "holds"
+          },
+          {
+            "description": "It exited 0 and printed `{\"expired\": false}`.",
+            "type": "string",
+            "const": "not-yet"
+          },
+          {
+            "description": "Anything else: the item stays open and the failure is shown on it.",
+            "type": "string",
+            "const": "failed"
           }
         ]
       }
@@ -3603,6 +4973,13 @@
           "reopen": {
             "description": "Whether it can be reopened.",
             "$ref": "#/$defs/HumanItemReopen"
+          },
+          "checks": {
+            "description": "The last run of each of its check conditions that has run; omitted when empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemCheckStatus"
+            }
           }
         },
         "additionalProperties": false,
@@ -3701,6 +5078,14 @@
               }
             ]
           },
+          "expiry": {
+            "description": "When the item stops mattering, each time resolved to its `at` and each check\nholding its `cwd`. Default empty, omitted when empty; a reopen clears it.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemExpiryCondition"
+            },
+            "maxItems": 8
+          },
           "created_at": {
             "description": "Created at.",
             "type": "string"
@@ -3763,17 +5148,71 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": ["open", "completed", "dismissed"]
+                  "enum": ["open", "completed", "dismissed", "expired"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": ["open", "answered", "dismissed"]
+                  "enum": ["open", "answered", "dismissed", "expired"]
                 },
                 "approval": {
                   "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "expired"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "resolution": {
+                  "properties": {
+                    "actor": {
+                      "const": "engine"
+                    },
+                    "on_behalf_of": {
+                      "type": "null"
+                    },
+                    "text": {
+                      "type": "null"
+                    },
+                    "choice": {
+                      "type": "null"
+                    },
+                    "provenance": {
+                      "const": "manager"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": ["condition"]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "resolution": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "not": {
+                        "required": ["condition"]
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -3884,6 +5323,31 @@
               "properties": {
                 "choices": {
                   "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "expiry": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": ["after_seconds"]
+                      },
+                      {
+                        "properties": {
+                          "when": {
+                            "const": "check"
+                          }
+                        },
+                        "not": {
+                          "required": ["cwd"]
+                        }
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -4054,6 +5518,11 @@
             "description": "Dismissed.",
             "type": "string",
             "const": "dismissed"
+          },
+          {
+            "description": "Retired by the engine once one of its expiry conditions held.",
+            "type": "string",
+            "const": "expired"
           }
         ]
       },
@@ -4084,6 +5553,17 @@
           "provenance": {
             "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
             "$ref": "#/$defs/Provenance"
+          },
+          "condition": {
+            "description": "The expiry condition that held, as the item stored it: present only on an\nexpired item, and omitted otherwise.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HumanItemExpiryCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -4101,6 +5581,133 @@
             "description": "The user's words, relayed by the manager: binding.",
             "type": "string",
             "const": "user"
+          }
+        ]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
           }
         ]
       },
@@ -4227,6 +5834,54 @@
                 }
               }
             }
+          }
+        ]
+      },
+      "HumanItemCheckStatus": {
+        "description": "The last run of one check condition of an item.",
+        "type": "object",
+        "properties": {
+          "condition": {
+            "description": "The index of the check in the item's `expiry`.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "last_run_at": {
+            "description": "When it last ran, RFC 3339.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "outcome": {
+            "description": "What that run came to.",
+            "$ref": "#/$defs/HumanItemCheckOutcome"
+          },
+          "detail": {
+            "description": "Why it failed, followed by at most the last 2048 bytes of its stderr; null on any\nother outcome.",
+            "type": ["string", "null"]
+          }
+        },
+        "additionalProperties": false,
+        "required": ["condition", "last_run_at", "outcome", "detail"]
+      },
+      "HumanItemCheckOutcome": {
+        "description": "What a check's last run came to, in the result protocol's words.",
+        "oneOf": [
+          {
+            "description": "It exited 0 and printed `{\"expired\": true}`: the condition holds.",
+            "type": "string",
+            "const": "holds"
+          },
+          {
+            "description": "It exited 0 and printed `{\"expired\": false}`.",
+            "type": "string",
+            "const": "not-yet"
+          },
+          {
+            "description": "Anything else: the item stays open and the failure is shown on it.",
+            "type": "string",
+            "const": "failed"
           }
         ]
       }
@@ -4291,6 +5946,13 @@
           "reopen": {
             "description": "Whether it can be reopened.",
             "$ref": "#/$defs/HumanItemReopen"
+          },
+          "checks": {
+            "description": "The last run of each of its check conditions that has run; omitted when empty.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemCheckStatus"
+            }
           }
         },
         "additionalProperties": false,
@@ -4389,6 +6051,14 @@
               }
             ]
           },
+          "expiry": {
+            "description": "When the item stops mattering, each time resolved to its `at` and each check\nholding its `cwd`. Default empty, omitted when empty; a reopen clears it.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemExpiryCondition"
+            },
+            "maxItems": 8
+          },
           "created_at": {
             "description": "Created at.",
             "type": "string"
@@ -4451,17 +6121,71 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": ["open", "completed", "dismissed"]
+                  "enum": ["open", "completed", "dismissed", "expired"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": ["open", "answered", "dismissed"]
+                  "enum": ["open", "answered", "dismissed", "expired"]
                 },
                 "approval": {
                   "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "expired"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "resolution": {
+                  "properties": {
+                    "actor": {
+                      "const": "engine"
+                    },
+                    "on_behalf_of": {
+                      "type": "null"
+                    },
+                    "text": {
+                      "type": "null"
+                    },
+                    "choice": {
+                      "type": "null"
+                    },
+                    "provenance": {
+                      "const": "manager"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": ["condition"]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "resolution": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "not": {
+                        "required": ["condition"]
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -4572,6 +6296,31 @@
               "properties": {
                 "choices": {
                   "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "expiry": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": ["after_seconds"]
+                      },
+                      {
+                        "properties": {
+                          "when": {
+                            "const": "check"
+                          }
+                        },
+                        "not": {
+                          "required": ["cwd"]
+                        }
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -4742,6 +6491,11 @@
             "description": "Dismissed.",
             "type": "string",
             "const": "dismissed"
+          },
+          {
+            "description": "Retired by the engine once one of its expiry conditions held.",
+            "type": "string",
+            "const": "expired"
           }
         ]
       },
@@ -4772,6 +6526,17 @@
           "provenance": {
             "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
             "$ref": "#/$defs/Provenance"
+          },
+          "condition": {
+            "description": "The expiry condition that held, as the item stored it: present only on an\nexpired item, and omitted otherwise.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HumanItemExpiryCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -4789,6 +6554,133 @@
             "description": "The user's words, relayed by the manager: binding.",
             "type": "string",
             "const": "user"
+          }
+        ]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
           }
         ]
       },
@@ -4915,6 +6807,54 @@
                 }
               }
             }
+          }
+        ]
+      },
+      "HumanItemCheckStatus": {
+        "description": "The last run of one check condition of an item.",
+        "type": "object",
+        "properties": {
+          "condition": {
+            "description": "The index of the check in the item's `expiry`.",
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          },
+          "last_run_at": {
+            "description": "When it last ran, RFC 3339.",
+            "type": "string",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "outcome": {
+            "description": "What that run came to.",
+            "$ref": "#/$defs/HumanItemCheckOutcome"
+          },
+          "detail": {
+            "description": "Why it failed, followed by at most the last 2048 bytes of its stderr; null on any\nother outcome.",
+            "type": ["string", "null"]
+          }
+        },
+        "additionalProperties": false,
+        "required": ["condition", "last_run_at", "outcome", "detail"]
+      },
+      "HumanItemCheckOutcome": {
+        "description": "What a check's last run came to, in the result protocol's words.",
+        "oneOf": [
+          {
+            "description": "It exited 0 and printed `{\"expired\": true}`: the condition holds.",
+            "type": "string",
+            "const": "holds"
+          },
+          {
+            "description": "It exited 0 and printed `{\"expired\": false}`.",
+            "type": "string",
+            "const": "not-yet"
+          },
+          {
+            "description": "Anything else: the item stays open and the failure is shown on it.",
+            "type": "string",
+            "const": "failed"
           }
         ]
       },
@@ -5003,6 +6943,14 @@
           "$ref": "#/$defs/HumanItemChoice"
         },
         "maxItems": 6
+      },
+      "expiry": {
+        "description": "When the raised item stops mattering, held to a raised item's rules, which the plan\nloader holds them to and names the node in refusing; an `after_seconds` is resolved\nwhen the node's item is raised. Default empty, omitted when empty.",
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/HumanItemExpiryCondition"
+        },
+        "maxItems": 8
       }
     },
     "additionalProperties": false,
@@ -5048,6 +6996,133 @@
         },
         "additionalProperties": false,
         "required": ["id", "title", "description"]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
+          }
+        ]
       }
     }
   },
@@ -5325,6 +7400,35 @@
           },
           "required": ["by"]
         }
+      },
+      {
+        "if": {
+          "properties": {
+            "action": {
+              "const": "human-item-expired"
+            }
+          }
+        },
+        "then": {
+          "properties": {
+            "item": {
+              "properties": {
+                "state": {
+                  "enum": ["expired"]
+                }
+              }
+            },
+            "resolution": {
+              "type": "object"
+            },
+            "by": {
+              "type": "null"
+            },
+            "batch": {
+              "type": "null"
+            }
+          }
+        }
       }
     ],
     "$defs": {
@@ -5385,6 +7489,11 @@
             "description": "human-item-noted",
             "type": "string",
             "const": "human-item-noted"
+          },
+          {
+            "description": "human-item-expired",
+            "type": "string",
+            "const": "human-item-expired"
           }
         ]
       },
@@ -5481,6 +7590,14 @@
               }
             ]
           },
+          "expiry": {
+            "description": "When the item stops mattering, each time resolved to its `at` and each check\nholding its `cwd`. Default empty, omitted when empty; a reopen clears it.",
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/HumanItemExpiryCondition"
+            },
+            "maxItems": 8
+          },
           "created_at": {
             "description": "Created at.",
             "type": "string"
@@ -5543,17 +7660,71 @@
             "then": {
               "properties": {
                 "state": {
-                  "enum": ["open", "completed", "dismissed"]
+                  "enum": ["open", "completed", "dismissed", "expired"]
                 }
               }
             },
             "else": {
               "properties": {
                 "state": {
-                  "enum": ["open", "answered", "dismissed"]
+                  "enum": ["open", "answered", "dismissed", "expired"]
                 },
                 "approval": {
                   "type": "null"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "expired"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "resolution": {
+                  "properties": {
+                    "actor": {
+                      "const": "engine"
+                    },
+                    "on_behalf_of": {
+                      "type": "null"
+                    },
+                    "text": {
+                      "type": "null"
+                    },
+                    "choice": {
+                      "type": "null"
+                    },
+                    "provenance": {
+                      "const": "manager"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    }
+                  },
+                  "required": ["condition"]
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "resolution": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "not": {
+                        "required": ["condition"]
+                      }
+                    }
+                  ]
                 }
               }
             }
@@ -5664,6 +7835,31 @@
               "properties": {
                 "choices": {
                   "maxItems": 0
+                }
+              }
+            }
+          },
+          {
+            "properties": {
+              "expiry": {
+                "items": {
+                  "not": {
+                    "anyOf": [
+                      {
+                        "required": ["after_seconds"]
+                      },
+                      {
+                        "properties": {
+                          "when": {
+                            "const": "check"
+                          }
+                        },
+                        "not": {
+                          "required": ["cwd"]
+                        }
+                      }
+                    ]
+                  }
                 }
               }
             }
@@ -5814,6 +8010,11 @@
             "description": "Dismissed.",
             "type": "string",
             "const": "dismissed"
+          },
+          {
+            "description": "Retired by the engine once one of its expiry conditions held.",
+            "type": "string",
+            "const": "expired"
           }
         ]
       },
@@ -5844,6 +8045,17 @@
           "provenance": {
             "description": "Whose words it is: the manager's own, or the user's relayed. Omitted while\nit is the manager's, and absent from every record written before the field\nexisted, which reads as the manager's.",
             "$ref": "#/$defs/Provenance"
+          },
+          "condition": {
+            "description": "The expiry condition that held, as the item stored it: present only on an\nexpired item, and omitted otherwise.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/HumanItemExpiryCondition"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "additionalProperties": false,
@@ -5861,6 +8073,133 @@
             "description": "The user's words, relayed by the manager: binding.",
             "type": "string",
             "const": "user"
+          }
+        ]
+      },
+      "HumanItemExpiryCondition": {
+        "description": "One declared condition under which an open item stops mattering, tagged by `when`.",
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "time"
+              },
+              "at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "after_seconds": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when"],
+            "oneOf": [
+              {
+                "required": ["at"]
+              },
+              {
+                "required": ["after_seconds"]
+              }
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "run"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "on": {
+                "enum": ["settled", "ended"]
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "on"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "node"
+              },
+              "run": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "node": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "run", "node"],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "when": {
+                "const": "check"
+              },
+              "command": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "minItems": 1,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  }
+                ]
+              },
+              "cwd": {
+                "type": "string",
+                "pattern": "^(/|\\\\|[A-Za-z]:[\\\\/])"
+              },
+              "timeout_seconds": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 60
+              },
+              "interval_seconds": {
+                "type": "integer",
+                "minimum": 10,
+                "maximum": 86400
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              }
+            },
+            "required": ["when", "command"],
+            "additionalProperties": false
           }
         ]
       },

@@ -987,6 +987,37 @@ const SURFACES: readonly Surface[] = [
       );
     },
   },
+  {
+    name: "36-action-items-expired",
+    title:
+      "Action items: items the engine expired, under State: Expired, each with why",
+    open: async (page) => {
+      const list = await openActionItems(page, "expiry-gallery");
+      const folded = page.getByRole("button", { name: /^Filters/u });
+      if (await folded.isVisible()) await folded.click();
+      await page
+        .getByRole("group", { name: "Filter action items" })
+        .getByLabel("State", { exact: true })
+        .selectOption("expired");
+      if (await folded.isVisible()) await folded.click();
+      await expect(list.getByRole("article")).toHaveCount(2);
+      await expect(list.getByText(/^The disk has space again/u)).toBeVisible();
+      await settleReads(page);
+    },
+  },
+  {
+    name: "37-action-items-failing-check",
+    title:
+      "Action items: an open item whose expiry check is failing, and one that expires at a time",
+    open: async (page) => {
+      const list = await openActionItems(page, "expiry-gallery");
+      await expect(list.getByRole("article")).toHaveCount(2);
+      await expect(
+        list.getByText(/^Check failed: the check exited with status 1/u),
+      ).toBeVisible();
+      await expect(list.getByText(/^Expires at /u)).toBeVisible();
+    },
+  },
 ];
 
 /**

@@ -38,6 +38,8 @@ const QUIET: Duration = Duration::from_millis(300);
 struct Live {
     serving: Serving,
     trace: PathBuf,
+    /// The file that holds the poller between ticks (`ONEPIPELINE_UI_POLL_HOLD`).
+    hold: PathBuf,
     _trace_dir: tempfile::TempDir,
 }
 
@@ -58,8 +60,11 @@ impl Live {
         let trace_dir = tempfile::tempdir().expect("a trace directory");
         let trace = trace_dir.path().join("live.jsonl");
         let trace_text = trace.to_str().expect("utf-8").to_owned();
+        let hold = trace_dir.path().join("poll.hold");
+        let hold_text = hold.to_str().expect("utf-8").to_owned();
         let mut environment = vec![
             (onepipeline_ui::live::TRACE_ENV, trace_text.as_str()),
+            (onepipeline_ui::live::POLL_HOLD_ENV, hold_text.as_str()),
             (onepipeline_ui::live::TELEMETRY_REFOLD_ENV, "0"),
         ];
         environment.extend_from_slice(extra);
@@ -67,8 +72,26 @@ impl Live {
         Self {
             serving,
             trace,
+            hold,
             _trace_dir: trace_dir,
         }
+    }
+
+    /// Run `write` with the poller held between two ticks, so no tick sees the
+    /// store part way through it — a journal grown before its receipt is, which
+    /// a tick reads as a whole re-read. Only a running poller can be held: a
+    /// server with a subscription has one.
+    fn between_ticks(&self, write: impl FnOnce()) {
+        let held = onepipeline_ui::live::poll_held(&self.hold);
+        fs::write(&self.hold, b"").expect("hold the poller");
+        let deadline = Instant::now() + PATIENCE;
+        while !held.exists() {
+            assert!(Instant::now() < deadline, "the poller never held");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        write();
+        fs::remove_file(&held).expect("clear the poller's word that it held");
+        fs::remove_file(&self.hold).expect("release the poller");
     }
 
     fn address(&self) -> std::net::SocketAddr {
@@ -3973,7 +3996,8 @@ fn after_a_heads_read_an_appended_repetition_counts_once_as_a_whole_read_counts_
         headed.first_answers()
     );
     let mut seen = headed.refreshes().len();
-    live_journal::append_lines(&journal, &after);
+    // Between ticks, so the append is seen with its receipt or not at all.
+    headed.between_ticks(|| live_journal::append_lines(&journal, &after));
     let refreshed = headed.next_refresh(run, &mut seen);
     assert_eq!(refreshed["refresh"], "appended", "{refreshed}");
     assert_eq!(refreshed["records"], 2, "{refreshed}");
