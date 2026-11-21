@@ -322,7 +322,10 @@ function raiseOnRun(facts: Facts, run: string) {
  */
 for (const { name, isolated } of [
   { name: "with only the page's server left to sweep them", isolated: true },
-  { name: "under the driver that sweeps them as it settles", isolated: false },
+  {
+    name: "under the driver that sweeps them as it settles",
+    isolated: false,
+  },
 ])
   test(`items expiring on a run's node, its settling and its end leave the open page once the driver ends the run, ${name}`, async ({
     page,
@@ -567,12 +570,19 @@ if (readFileSync(${JSON.stringify(mode)}, "utf8") === "holds") {
   expect(served.item.expiry ?? []).toEqual([]);
 });
 
-/** The computed colours and opacities a card's look is made of. */
-function looks(article: Locator) {
-  return article.evaluate((element) => {
-    const surface = element.querySelector(".otg-card__surface");
-    const title = element.querySelector(".otg-card__title");
-    if (surface === null || title === null) throw new Error("no card surface");
+/**
+ * The computed colours and opacities a card's look is made of. Its surface is
+ * the card's own child holding its heading, reached from the card and that
+ * heading rather than from a class the design system names.
+ */
+async function looks(article: Locator) {
+  const handle = await article.elementHandle();
+  if (handle === null) throw new Error("the card is not on the page");
+  return article.getByRole("heading").evaluate((title, card) => {
+    let surface: Element | null = title;
+    while (surface !== null && surface.parentElement !== card)
+      surface = surface.parentElement;
+    if (surface === null) throw new Error("no card surface holds the title");
     const of = (node: Element) => getComputedStyle(node);
     return {
       surface: of(surface).backgroundColor,
@@ -580,20 +590,23 @@ function looks(article: Locator) {
       titleColor: of(title).color,
       titleOpacity: of(title).opacity,
     };
-  });
+  }, handle);
 }
 
 /**
  * The contrast against the card's own surface of the text `located` holds, from
  * the colours the browser rendered: its colour, faded by its own opacity and
- * every ancestor's up to the card, over the card's opaque background.
+ * every ancestor's up to the card, over the card's opaque background. The
+ * surface is the card's child holding that text, as `looks` finds it.
  */
 async function contrastOn(article: Locator, located: Locator): Promise<number> {
   const handle = await article.elementHandle();
   if (handle === null) throw new Error("the card is not on the page");
   return located.evaluate((element, card) => {
-    const surface = card.querySelector(".otg-card__surface");
-    if (surface === null) throw new Error("no card surface");
+    let surface: Element | null = element;
+    while (surface !== null && surface.parentElement !== card)
+      surface = surface.parentElement;
+    if (surface === null) throw new Error("no card surface holds the text");
     const channels = (color: string) => {
       const parts = color.match(/[\d.]+/gu)?.map(Number) ?? [];
       return { rgb: parts.slice(0, 3), alpha: parts[3] ?? 1 };
