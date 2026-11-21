@@ -9110,7 +9110,9 @@ pub fn rendered(run: &RunId, rendered: String) -> Value {
 /// moving that requirement across a pre-1.0 minor breaks this crate. Linking
 /// onepipeline 0.114.0 was such a break: a consumer upgrading across it must
 /// align its own engine dependency with onepipeline 0.114 to pass a
-/// `RunStatus` here.
+/// `RunStatus` here. Linking onepipeline 0.116.0 was such a break too: a
+/// consumer upgrading across it must align its own engine dependency with
+/// onepipeline 0.116.
 #[must_use]
 pub fn status(run: &RunId, status: &onepipeline::verbs::RunStatus, rendered: String) -> Value {
     let (count, oldest_seconds) = status.view.unread_surfaces();
