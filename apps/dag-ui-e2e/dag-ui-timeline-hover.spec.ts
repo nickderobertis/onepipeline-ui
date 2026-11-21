@@ -8,7 +8,8 @@ import { backdrop, computedColour, contrast, over } from "./rendered-colour";
  * two timelines a person reads a run by: a node's, and the run's Overall graph
  * timeline. Over the refusals corpus (`fixtures/runs.mjs`, `buildRefusalsRuns`),
  * whose last node settled before the monitor sent three more refusals naming it,
- * so each plot holds several markers after its last bar.
+ * so each plot holds several markers after its last bar of work — on Overall, over
+ * the recorded silence it draws to the run's settlement.
  *
  * One walk, run on both: over bars, over empty lanes, along the marker row past
  * the last bar, and off the plot. At every position over the plot the reading is
@@ -52,56 +53,132 @@ interface Point {
   readonly x: number;
   readonly y: number;
   readonly where: string;
+  /** The marker the pointer is on, which the package must resolve it to. */
+  readonly marker?: Marker;
 }
+
+interface Box {
+  readonly x: number;
+  readonly y: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+interface Bar extends Box {
+  /** A stretch the run recorded nothing in, which Overall draws as `Idle · …`. */
+  readonly silence: boolean;
+}
+
+interface Marker extends Box {
+  /** The marker's accessible name, which says what it marks. */
+  readonly label: string;
+}
+
+interface Laid {
+  readonly plot: Box;
+  readonly bars: readonly Bar[];
+  readonly markers: readonly Marker[];
+}
+
+/**
+ * The right edge of the plot's last bar of work. Overall's plot ends at the run's
+ * settlement and draws every stretch of it no work covers as an `Idle` span, the
+ * last one reaching the plot's end, so a bar lies under every instant there; the
+ * markers a person reads past the run's work lie past its last work bar, over that
+ * recorded silence. With no work drawn at all, that is the plot's own left edge.
+ */
+const lastBarOf = (laid: Laid): number =>
+  Math.max(
+    laid.plot.x,
+    ...laid.bars.filter((bar) => !bar.silence).map((bar) => bar.x + bar.width),
+  );
+
+/** The markers drawn past the plot's last bar, left to right. */
+const markersAfter = (laid: Laid): readonly Marker[] =>
+  laid.markers
+    .filter((marker) => marker.x > lastBarOf(laid))
+    .sort((left, right) => left.x - right.x);
+
+/**
+ * The plot as drawn once it has stopped moving — records still arriving re-lay it
+ * out — and holds at least `markers` past its last bar. A layout is settled when
+ * two readings half a second apart agree, and one with fewer markers past the last
+ * bar is waited past rather than taken, because the run's own records, which are
+ * those markers, can arrive after the bars have stopped moving.
+ */
+// llmlint: ignore-block[e2e_uses_accessible_selectors] where the walk goes is read off the geometry of every bar and glyph the package draws, which it marks `data-timeline-entry` and which no role query lists apart from the plot's other buttons; nothing here is clicked or asserted by selector.
+async function settledLayout(plot: Locator, markers: number): Promise<Laid> {
+  let previous = "";
+  let laid: Laid | undefined;
+  await expect
+    .poll(
+      async () => {
+        const now = await plot.evaluate((element): Laid => {
+          const box = (node: Element): Box => {
+            const rect = node.getBoundingClientRect();
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+            };
+          };
+          const entries = [
+            ...element.querySelectorAll("[data-timeline-entry]"),
+          ];
+          return {
+            plot: box(element),
+            bars: entries
+              .filter((entry) => entry.hasAttribute("aria-describedby"))
+              .map((entry) => ({
+                ...box(entry),
+                silence: /^Idle · /u.test(
+                  entry.getAttribute("aria-label") ?? "",
+                ),
+              })),
+            markers: entries
+              .filter((entry) => !entry.hasAttribute("aria-describedby"))
+              .map((entry) => ({
+                ...box(entry),
+                label: entry.getAttribute("aria-label") ?? "",
+              })),
+          };
+        });
+        const reading = JSON.stringify(
+          [now.plot, ...now.bars, ...now.markers].map((entry) =>
+            Math.round(entry.x),
+          ),
+        );
+        const settled = reading === previous;
+        previous = reading;
+        laid = now;
+        if (!settled || now.bars.length === 0) return -1;
+        return markersAfter(now).length;
+      },
+      {
+        message: `the plot settles with bars and ${markers} markers past its last bar`,
+        intervals: [500],
+        timeout: 30_000,
+      },
+    )
+    .toBeGreaterThanOrEqual(markers);
+  if (laid === undefined) throw new Error("the plot was never read");
+  return laid;
+}
+// llmlint: ignore-end[e2e_uses_accessible_selectors]
 
 /**
  * Where the walk goes over `plot`: the middle of each bar, the lanes beside the
  * bars where nothing is drawn, and along the marker row past the last bar — on
  * each marker there and between them.
  */
-// llmlint: ignore-block[e2e_uses_accessible_selectors] where the walk goes is read off the geometry of every bar and glyph the package draws, which it marks `data-timeline-entry` and which no role query lists apart from the plot's other buttons; nothing here is clicked or asserted by selector.
-async function walkOver(plot: Locator): Promise<readonly Point[]> {
-  // Taken once the plot has stopped moving: records still arriving re-lay it out.
-  let previous = "";
-  await expect
-    .poll(
-      async () => {
-        const now = JSON.stringify(
-          await plot.evaluate((element) =>
-            [...element.querySelectorAll("[data-timeline-entry]")].map(
-              (entry) => Math.round(entry.getBoundingClientRect().x),
-            ),
-          ),
-        );
-        const settled = now === previous;
-        previous = now;
-        return settled;
-      },
-      { intervals: [500], timeout: 15_000 },
-    )
-    .toBe(true);
-  const laid = await plot.evaluate((element) => {
-    const box = (node: Element) => {
-      const rect = node.getBoundingClientRect();
-      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-    };
-    const entries = [...element.querySelectorAll("[data-timeline-entry]")];
-    const bars = entries.filter((entry) =>
-      entry.hasAttribute("aria-describedby"),
-    );
-    const markers = entries.filter(
-      (entry) => !entry.hasAttribute("aria-describedby"),
-    );
-    return {
-      plot: box(element),
-      bars: bars.map(box),
-      markers: markers.map(box),
-    };
-  });
-  const lastBar = Math.max(...laid.bars.map((bar) => bar.x + bar.width));
-  const after = laid.markers
-    .filter((marker) => marker.x > lastBar)
-    .sort((left, right) => left.x - right.x);
+async function walkOver(plot: Locator): Promise<{
+  readonly laid: Laid;
+  readonly points: readonly Point[];
+}> {
+  const laid = await settledLayout(plot, 3);
+  const lastBar = lastBarOf(laid);
+  const after = markersAfter(laid);
   expect(laid.bars.length, "the plot draws bars").toBeGreaterThan(0);
   expect(
     after.length,
@@ -114,7 +191,7 @@ async function walkOver(plot: Locator): Promise<readonly Point[]> {
       y: bar.y + bar.height / 2,
       where: "over a bar",
     });
-  const lane = laid.bars[0];
+  const lane = laid.bars.find((bar) => !bar.silence) ?? laid.bars[0];
   if (lane !== undefined) {
     const right = laid.plot.x + laid.plot.width;
     points.push({
@@ -132,7 +209,8 @@ async function walkOver(plot: Locator): Promise<readonly Point[]> {
     points.push({
       x: marker.x + marker.width / 2,
       y: marker.y + marker.height / 2,
-      where: `on marker ${index + 1} past the last bar`,
+      where: `on marker ${index + 1} past the last bar (${marker.label})`,
+      marker,
     });
     const next = after[index + 1];
     if (next !== undefined)
@@ -142,9 +220,17 @@ async function walkOver(plot: Locator): Promise<readonly Point[]> {
         where: `between markers ${index + 1} and ${index + 2}`,
       });
   }
-  return points;
+  return { laid, points };
 }
-// llmlint: ignore-end[e2e_uses_accessible_selectors]
+
+/** Whether a recorded-silence span is drawn under `marker`'s x. */
+const underSilence = (laid: Laid, marker: Marker): boolean =>
+  laid.bars.some(
+    (bar) =>
+      bar.silence &&
+      bar.x <= marker.x + marker.width / 2 &&
+      marker.x + marker.width / 2 <= bar.x + bar.width,
+  );
 
 /** The reading the package's resolved entry carries: its own text, or its glyph's. */
 async function resolvedReading(plot: Locator): Promise<string> {
@@ -171,17 +257,55 @@ async function resolvedReading(plot: Locator): Promise<string> {
  * Walk `timeline`'s plot with the real pointer and hold the reading and the
  * crosshair to it at every point, then leave the plot and hold that both go.
  */
-async function walk(page: Page, timeline: Locator): Promise<void> {
+async function walk(
+  page: Page,
+  timeline: Locator,
+  options: {
+    /**
+     * Hold that some run-level marker past the run's work lies under the recorded
+     * silence Overall draws to its settlement, so that pointing at it — the
+     * reported bug — is walked and resolved to the marker, never the span.
+     */
+    readonly runMarkerUnderSilence?: boolean;
+  } = {},
+): Promise<void> {
   // llmlint: ignore[e2e_uses_accessible_selectors] the app replaces the first screen with no visible jump by design, so nothing a person can perceive says which of the two is drawn; this marker is the one difference, and only waiting for the app to have taken over is read from it.
   await expect(page.locator("[data-first-screen]")).toHaveCount(0);
   const plot = plotOf(timeline);
   await expect(plot).toBeVisible();
   await plot.scrollIntoViewIfNeeded();
-  const points = await walkOver(plot);
+  const { laid, points } = await walkOver(plot);
+  if (options.runMarkerUnderSilence === true)
+    expect(
+      points.filter(
+        ({ marker }) =>
+          marker?.label.startsWith("Run-level · ") === true &&
+          underSilence(laid, marker),
+      ).length,
+      "a run-level marker under the Idle span is walked",
+    ).toBeGreaterThan(0);
   let last: number | undefined;
   for (const point of points) {
     await page.mouse.move(point.x, point.y, { steps: 4 });
     await expect(reading(page), `a reading ${point.where}`).toBeVisible();
+    if (point.marker !== undefined) {
+      // The nearest event, not a span drawn under it: the entry the package marks
+      // hovered is the marker itself, where the marker is drawn.
+      // llmlint: ignore[e2e_uses_accessible_selectors] `data-timeline-hovered` is the package's documented mark of the entry it resolved the pointer to; several markers share one accessible name, so the entry is told apart by where it is drawn.
+      const hovered = plot.locator('[data-timeline-hovered="true"]');
+      await expect(hovered, `one entry resolved ${point.where}`).toHaveCount(1);
+      await expect(
+        hovered,
+        `the marker itself is resolved ${point.where}`,
+      ).toHaveAttribute("aria-label", point.marker.label);
+      const resolved = await hovered.boundingBox();
+      if (resolved === null)
+        throw new Error("the resolved entry is not laid out");
+      expect(
+        Math.abs(resolved.x - point.marker.x),
+        `the resolved marker is the one under the pointer ${point.where}`,
+      ).toBeLessThanOrEqual(1);
+    }
     const named = await resolvedReading(plot);
     expect(
       named.length,
@@ -255,7 +379,7 @@ test("the reading follows the pointer over the run's Overall graph timeline the 
       .getByRole("article")
       .first(),
   ).toBeVisible();
-  await walk(page, timeline);
+  await walk(page, timeline, { runMarkerUnderSilence: true });
 });
 
 test("the crosshair and its readout keep their contrast in the view's dark theme", async ({
@@ -269,16 +393,21 @@ test("the crosshair and its readout keep their contrast in the view's dark theme
     ),
     "the view renders its dark theme",
   ).toBe(true);
+  // llmlint: ignore[e2e_uses_accessible_selectors] the app replaces the first screen with no visible jump by design, so nothing a person can perceive says which of the two is drawn; this marker is the one difference, and only waiting for the app to have taken over is read from it.
+  await expect(page.locator("[data-first-screen]")).toHaveCount(0);
   const timeline = page.getByRole("region", { name: "Timeline for ship" });
   const plot = plotOf(timeline);
   await expect(plot).toBeVisible();
-  const box = await plot.boundingBox();
-  if (box === null) throw new Error("the plot is not laid out");
-  await page.mouse.move(box.x + box.width / 3, box.y + box.height / 2, {
-    steps: 4,
-  });
+  await plot.scrollIntoViewIfNeeded();
+  // Over the plot as it finally lies, not where it was before its records arrived.
+  const { plot: box } = await settledLayout(plot, 0);
   const crosshair = crosshairOf(plot);
-  await expect(crosshair).toBeVisible();
+  await expect(async () => {
+    await page.mouse.move(box.x + box.width / 3, box.y + box.height / 2, {
+      steps: 4,
+    });
+    await expect(crosshair).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 15_000 });
   const behind = await backdrop(plot);
   const line = over(
     await computedColour(crosshair, "background-color"),
