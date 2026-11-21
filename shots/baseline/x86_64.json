@@ -1161,14 +1161,14 @@
       "toggles": {
         "viewport": "1024x768"
       },
-      "hash": "f6ade645f17493a675fff4bf07a92c8ad52dca37c9352d3d757014ac6eb02275"
+      "hash": "e9fa69a0f77dab811d28ee97cc38bffe3a609066932354f220fd843d1daa816b"
     },
     {
       "name": "37-refusal-rows",
       "toggles": {
         "viewport": "1280x800"
       },
-      "hash": "b90d308c7153d4389975a6016a4b186df65822c08470bd8dca8ddfa9575e2cba"
+      "hash": "e1d7179c343f2edaecb84f5f9ed405ec91ff861157e80924867fcda9856ff5b4"
     },
     {
       "name": "37-refusal-rows",
@@ -1182,7 +1182,7 @@
       "toggles": {
         "viewport": "1920x1080"
       },
-      "hash": "a23b244107022b6017acdc35fd04c92bc7c135e753d07d5ffa1186f313555132"
+      "hash": "0f6047c82ac0c9b1e5628315bc343193f92259d08c2cdefecb431d3e4a7c4aae"
     },
     {
       "name": "37-refusal-rows",
