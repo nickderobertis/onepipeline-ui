@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.86.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.85.2...v0.86.0) - 2026-11-21
+
+### Fixed
+
+- *(deps)* [**breaking**] state that the read API's surface follows onepipeline 0.116 ([#854](https://github.com/nickderobertis/onepipeline-ui/pull/854))
+- *(deps)* link the engine whose plan verbs filter checks and override copied metadata ([#850](https://github.com/nickderobertis/onepipeline-ui/pull/850))
+
 ## [0.85.2](https://github.com/nickderobertis/onepipeline-ui/compare/v0.85.1...v0.85.2) - 2026-11-21
 
 ### Added
