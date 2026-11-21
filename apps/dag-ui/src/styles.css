@@ -670,19 +670,6 @@ p {
   border: 1px solid transparent;
   border-radius: 4px;
   background: var(--card);
-  /* A busy node lists ten thousand of these, and laying every one of them out when
-     the read lands was a second or more of a complete load spent on rows nobody can
-     see. A row off screen is skipped and holds its one line's height (18px line, 1px
-     padding and 1px border each side) until it is drawn, after which `auto` keeps
-     the height it was drawn at, so a wrapped row is never mis-sized twice. */
-  content-visibility: auto;
-  contain-intrinsic-size: auto 22px;
-}
-
-/* Skipping a row off screen contains its paint, which would clip a focus ring drawn
-   outside the row's button, so the ring is drawn inside it. */
-.transcript-item button:focus-visible {
-  outline-offset: -2px;
 }
 
 /* The row a reader is on and the row they opened, told apart from the rest by tone
