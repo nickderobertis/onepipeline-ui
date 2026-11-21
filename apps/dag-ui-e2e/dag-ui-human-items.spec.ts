@@ -7033,6 +7033,136 @@ for (const width of [1440, 390] as const)
       expect(line).toContain('"human-item-dismissed"');
   });
 
+test("under every Group by choice Newest and Oldest first order each group by when its items were raised and Default restores the engine's order, and under every filter they order exactly what it leaves", async ({
+  page,
+}) => {
+  const served = await serveWorld("queue");
+  // One more dismissed, so the State filter leaves more than one to order;
+  // it is the one item alone in its source, so every grouping still draws a
+  // group of several.
+  const other = listed(served).find(
+    ({ item }) => item.title === "Rotate the deploy credentials",
+  );
+  cli(served, ["human-items", "dismiss", other?.item.id ?? ""], SUPERVISOR);
+  // Every item in the world, whatever its state, as the engine raised it.
+  const everything = ["open", "answered", "completed", "dismissed"].flatMap(
+    (state) => listed(served, ["--state", state, "--full"]),
+  );
+  expect(new Set(everything.map(({ item }) => item.created_at)).size).toBe(
+    everything.length,
+  );
+  const raisedAt = new Map(
+    everything.map(({ item }) => [item.title, item.created_at]),
+  );
+  const list = await open(page, served, { groupBy: null });
+  const filters = page.getByRole("group", { name: "Filter action items" });
+  const groupBy = filters.getByRole("combobox", { name: "Group by" });
+  /** The list as drawn: a list per heading, or the one list when ungrouped. */
+  const drawn = async (grouped: boolean) =>
+    grouped ? groupedTitles(page) : [await titles(list)];
+  const engineOrder = listed(served).map(({ item }) => item.title);
+
+  for (const field of ["priority", "kind", "source", "blocking", "none"]) {
+    await groupBy.selectOption(field);
+    await sortControl(page).selectOption("default");
+    const grouped = field !== "none";
+    await expect
+      .poll(async () => (await drawn(grouped)).flat().length)
+      .toBe(engineOrder.length);
+    const engine = await drawn(grouped);
+    // Within each group, Default is the engine's own order.
+    for (const group of engine)
+      expect(group).toEqual(
+        engineOrder.filter((title) => group.includes(title)),
+      );
+    const newest = engine.map((group) => byRaised(raisedAt, group, "newest"));
+    const oldest = engine.map((group) => byRaised(raisedAt, group, "oldest"));
+    // Some group holds items raised apart, so the two orders are seen to differ.
+    expect(newest).not.toEqual(oldest);
+    for (const [order, expected] of [
+      ["newest", newest],
+      ["oldest", oldest],
+    ] as const) {
+      await sortControl(page).selectOption(order);
+      await expect.poll(() => drawn(grouped)).toEqual(expected);
+    }
+    await sortControl(page).selectOption("default");
+    await expect.poll(() => drawn(grouped)).toEqual(engine);
+  }
+
+  // Ungrouped, so what a filter leaves is one list to order.
+  /** Choose `value` under `label`, waiting for the read it asks for. */
+  const choose = async (
+    label: string,
+    value: string,
+    selector: Record<string, unknown>,
+  ) => {
+    const asked = subscribedTo(page, selector);
+    await filters.getByLabel(label, { exact: true }).selectOption(value);
+    await asked;
+  };
+  const selected = (args: string[]) =>
+    listed(served, args).map(({ item }) => item.title);
+  const filtered: readonly {
+    readonly name: string;
+    readonly apply: () => Promise<void>;
+    readonly clear: () => Promise<void>;
+    readonly leaves: () => string[];
+  }[] = [
+    {
+      name: "Kind",
+      apply: () => choose("Kind", "task", { kind: "task" }),
+      clear: () => choose("Kind", "", {}),
+      leaves: () => selected(["--kind", "task"]),
+    },
+    {
+      name: "Blocking",
+      apply: () => choose("Blocking", "yes", { blocking: true }),
+      clear: () => choose("Blocking", "", {}),
+      leaves: () => selected(["--blocking", "yes"]),
+    },
+    {
+      name: "Priority",
+      apply: () => choose("Priority", "urgent", { priority: "urgent" }),
+      clear: () => choose("Priority", "", {}),
+      leaves: () => selected(["--priority", "Critical"]),
+    },
+    {
+      name: "State",
+      apply: () => showState(page, "dismissed"),
+      clear: () => showState(page, "open"),
+      leaves: () => selected(["--state", "dismissed"]),
+    },
+    {
+      name: "Source",
+      apply: async () => {
+        await filters
+          .getByLabel("Source", { exact: true })
+          .selectOption("session");
+        const asked = subscribedTo(page, { session: SUPERVISOR });
+        await filters.getByLabel("Source identifier").fill(SUPERVISOR);
+        await asked;
+      },
+      clear: () => choose("Source", "", {}),
+      leaves: () => selected(["--session", SUPERVISOR]),
+    },
+  ];
+  for (const { name, apply, clear, leaves } of filtered) {
+    await sortControl(page).selectOption("default");
+    await apply();
+    const left = leaves();
+    expect(left.length, `${name} leaves more than one item`).toBeGreaterThan(1);
+    await expect.poll(() => titles(list)).toEqual(left);
+    for (const order of ["newest", "oldest"] as const) {
+      await sortControl(page).selectOption(order);
+      await expect
+        .poll(() => titles(list))
+        .toEqual(byRaised(raisedAt, left, order));
+    }
+    await clear();
+  }
+});
+
 /**
  * The gaps between consecutive cards of one group and between consecutive
  * priority groups, as the page before Sort and raised times rendered them over
