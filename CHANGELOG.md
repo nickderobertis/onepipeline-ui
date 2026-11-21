@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.87.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.86.0...v0.87.0) - 2026-11-21
+
+### Added
+
+- *(action-items)* [**breaking**] show expired items, and retire them on an open page without a reload ([#856](https://github.com/nickderobertis/onepipeline-ui/pull/856))
+
 ## [0.86.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.85.2...v0.86.0) - 2026-11-21
 
 ### Fixed
