@@ -960,3 +960,15 @@ its onetaskgraph pin equal to the one that engine links, can adopt the store who
 comes back within its GitHub budget. A patch move within 0.117, so the re-exported engine
 types do not change; it serves nothing new. Its oneagentgraph, onejudge, oneharness-core,
 onemessagebus and onevcs requirements are the ones 0.117.3 resolved.
+
+0.118.0 is the engine that links onetaskgraph 0.15.0, the store release that carries the
+GitHub Projects members-listing read of 0.14.21 onto the 0.15 line, whose status writes
+close the issue a closed card would otherwise leave open, whose board listing walks only
+open items, and whose `TaskUpdate` gains `duplicate_of` — the break, which nothing here
+constructs. This crate moves to it, and to that store release, so that a host holding its
+engine pin equal to the one this read API links, its onetaskgraph pin equal to the one
+that engine links, and its onefollowup at a release linking that same store can adopt the
+board-read fix: no onefollowup links onetaskgraph 0.14.21. It serves nothing new. The move
+is announced as a break: the re-exported engine and plan-store types change. Its
+oneagentgraph, onejudge, oneharness-core, onemessagebus and onevcs requirements are the
+ones 0.117.4 resolved.
