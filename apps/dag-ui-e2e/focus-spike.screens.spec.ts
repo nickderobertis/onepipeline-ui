@@ -60,7 +60,7 @@ async function loaded(page: Page): Promise<void> {
   // The base opens some events (its turn-message among them) as a field list, not a conversation.
   await expect(
     detail(page).getByRole("article", { name: /^Turn / }).first()
-      .or(detail(page).getByRole("region", { name: "Recorded fields" })),
+      .or(detail(page).getByRole("region", { name: "Recorded fields" })).first(),
   ).toBeVisible();
   await page.waitForTimeout(1500);
 }
