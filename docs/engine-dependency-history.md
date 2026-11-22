@@ -950,3 +950,13 @@ move is announced as a break: it is the release that carries this crate from the
 onepipeline 0.116 announced at v0.86.0 to onepipeline 0.117, whose re-exported engine and
 human-item types change (0.117.0 above). Its oneagentgraph, onejudge, oneharness-core,
 onemessagebus, onetaskgraph and onevcs requirements are the ones 0.117.2 resolved.
+
+0.117.4 is the engine that links onetaskgraph 0.14.21, whose `project copy` reads a GitHub
+Projects board's tasks ahead from its members listing rather than with a request per task,
+so a copy that reads no comments spends a page per twenty-three tasks however many the
+board holds; its copy-back writes are unchanged. This crate moves to it, and to that store
+release, so that a host holding its engine pin equal to the one this read API links, and
+its onetaskgraph pin equal to the one that engine links, can adopt the store whose replan
+comes back within its GitHub budget. A patch move within 0.117, so the re-exported engine
+types do not change; it serves nothing new. Its oneagentgraph, onejudge, oneharness-core,
+onemessagebus and onevcs requirements are the ones 0.117.3 resolved.
