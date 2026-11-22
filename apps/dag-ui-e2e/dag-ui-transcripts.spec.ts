@@ -643,8 +643,9 @@ async function expectNothingPinnedOver(page: Page): Promise<void> {
     name: "Conversation timeline",
   });
   await expect(pinned).toBeVisible();
-  // llmlint: ignore-next-line[e2e_uses_accessible_selectors] the panel's scroll viewport is the scroll-area's own slot, which has no role or accessible name; the criterion is the item's box inside it.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the panel's scroll viewport is the scroll-area's own slot, which has no role or accessible name; the criterion is the item's box inside it.
   const viewport = detail(page).locator('[data-slot="scroll-area-viewport"]');
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   await expect
     .poll(
       async () => {

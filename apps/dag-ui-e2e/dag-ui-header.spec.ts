@@ -205,10 +205,11 @@ for (const viewport of VIEWPORTS) {
       // the call where the transcript holds it, else the turn itself.
       const detail = page.getByRole("region", { name: "Timeline item detail" });
       const turn = namedEvent?.tool?.turn ?? "";
-      // llmlint: ignore-next-line[e2e_uses_accessible_selectors] `aria-current` inside the turn's `data-turn-id` is the package's only mark of the opened item, and no role or name says which turn an article is; the article, because the pinned plot marks the turn's bar too.
+      // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` inside the turn's `data-turn-id` is the package's only mark of the opened item, and no role or name says which turn an article is; the article, because the pinned plot marks the turn's bar too.
       const marked = detail.locator(
         `article[data-turn-id="${turn}"][aria-current="true"], article[data-turn-id="${turn}"] [aria-current="true"]`,
       );
+      // llmlint: ignore-end[e2e_uses_accessible_selectors]
       await expect(marked).toHaveCount(1);
       await expect(marked).toBeVisible();
       expect(forbidden).toEqual([]);

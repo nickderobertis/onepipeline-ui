@@ -937,10 +937,11 @@ for (const scope of ["node", "run"] as const) {
       );
     } else {
       // A turn's activity opens its conversation at that entry, marked.
-      // llmlint: ignore-next-line[e2e_uses_accessible_selectors] `aria-current` on `data-event-index` inside the turn's `data-turn-id` is the package's only mark of the opened entry; no role or name tells one entry of a turn from another.
+      // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` on `data-event-index` inside the turn's `data-turn-id` is the package's only mark of the opened entry; no role or name tells one entry of a turn from another.
       const marked = detail.locator(
         `[data-turn-id="${event.tool.turn}"] [data-event-index="${event.tool.index}"][aria-current="true"]`,
       );
+      // llmlint: ignore-end[e2e_uses_accessible_selectors]
       await expect(marked).toBeVisible();
     }
     await page.keyboard.press("Escape");

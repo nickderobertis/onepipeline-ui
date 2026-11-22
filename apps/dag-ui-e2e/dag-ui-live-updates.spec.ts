@@ -817,8 +817,9 @@ test("a span opened while it runs shows its end when the run records it, over wh
       .parse(await served.json()).conversation.state;
   };
   const running = await conversationState();
-  // llmlint: ignore-next-line[e2e_uses_accessible_selectors] the transcript's own header has no role or accessible name of its own; it is the one place the conversation's state is drawn, which is what this journey follows.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the transcript's own header has no role or accessible name of its own; it is the one place the conversation's state is drawn, which is what this journey follows.
   const header = detail.locator(".transcript-header");
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   await expect(header).toContainText(running);
   await expect.poll(() => spanPages.length).toBeGreaterThan(0);
   // The run records the session's end and the node's settlement.

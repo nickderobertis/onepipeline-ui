@@ -264,11 +264,10 @@ async function expectPlaced(
     viewport.top - 0.5,
   );
 
-  // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` inside a turn (`data-turn-id`) is the package's own mark of the opened item, and the criterion is about that one element.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` inside a turn (`data-turn-id`) is the package's own mark of the opened item, and the criterion is about that one element; whether it is open is read inside the page, where its disclosure's `aria-expanded` and the package's `data-state` are what say so and no role query reaches.
   const marked = page
     .getByRole("region", { name: "Timeline item detail" })
     .locator(MARKED);
-  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   await expect(marked).toHaveCount(1);
   const reached = await marked.evaluate((element) => {
     const box = element.getBoundingClientRect();
@@ -285,6 +284,7 @@ async function expectPlaced(
           element.querySelector('[aria-expanded="true"]') !== null),
     };
   });
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   expect(reached.hit, "a tap at its top edge hits it").toBe(true);
   if ("eventIndex" in expected || "toolCallId" in expected)
     expect(reached.open, "the marked entry is open").toBe(true);
@@ -612,10 +612,11 @@ for (const size of [
         },
       );
       // The later turn standing at that place is not drawn as the opened turn.
-      // llmlint: ignore-next-line[e2e_uses_accessible_selectors] the package names each turn's article by its id only through this attribute.
+      // llmlint: ignore-block[e2e_uses_accessible_selectors] the package names each turn's article by its id only through this attribute.
       const later = page.locator(
         `[data-turn-id="${turnId(session, 3)}"] article`,
       );
+      // llmlint: ignore-end[e2e_uses_accessible_selectors]
       await expect(later).toHaveCount(0);
     });
 
@@ -630,6 +631,47 @@ for (const size of [
         turnId(session, 4),
         "gap",
       );
+    });
+
+    test("a reader who scrolls from the note keeps their place when the drawer reflows", async ({
+      page,
+    }) => {
+      const session = facts.sessions.gapped;
+      await opensAt(
+        page,
+        "gapped",
+        { session, kind: "turn-started", turn: 4, role: "assistant" },
+        () => ({ turn: turnId(session, 4), note: NOT_YET }),
+      );
+      const drawer = page.getByRole("region", { name: "Timeline item detail" });
+      const note = drawer.getByRole("note").filter({ hasText: NOT_YET });
+      const pinned = drawer.getByRole("region", {
+        name: "Conversation timeline",
+      });
+      const offset = async () => {
+        const [box, card] = await Promise.all([
+          note.boundingBox(),
+          pinned.boundingBox(),
+        ]);
+        if (box === null || card === null)
+          throw new Error("the note or the pinned card is not laid out");
+        return box.y - (card.y + card.height);
+      };
+      // Where the drawer placed it: under the card, at the card's own padding.
+      const placed = await offset();
+      // The reader scrolls the drawer themselves, then the drawer reflows.
+      await note.hover();
+      await page.mouse.wheel(0, 120);
+      await expect.poll(offset).toBeLessThan(placed - 60);
+      await page.setViewportSize({
+        width: size.width - 40,
+        height: size.height,
+      });
+      await page.waitForTimeout(1_000);
+      expect(
+        await offset(),
+        "the drawer put the note back under the card after the reader scrolled",
+      ).toBeLessThan(placed - 60);
     });
 
     test("a supervisor's message whose next turn has not started is a note until it does", async ({

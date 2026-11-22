@@ -6440,7 +6440,6 @@ export function readabilityFacts() {
   return READABILITY;
 }
 
-// ---------------------------------------------------------------------------
 // The conversation-focus corpus: every kind of row and span that opens a
 // conversation, in the record shapes a host's runs carry — the agent's own
 // `turn-started`, `turn-activity`, `turn-message` and `turn-completed` pointing at
@@ -6449,7 +6448,6 @@ export function readabilityFacts() {
 // carrying a reference in the journal, `oneharness-session` records beside each
 // invocation, and a member that settled with a report holding the judge's rows.
 // `dag-ui-conversation-focus.spec.ts` opens each one and holds what is marked.
-// ---------------------------------------------------------------------------
 
 export const FOCUS_RUN = "dag-ui-conversation-focus";
 /** How many turns the long, live worker conversation has. */
