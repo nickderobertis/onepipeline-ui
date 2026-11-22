@@ -32,7 +32,8 @@ import type {
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { spikeApply, spikeRedirect, spikeTarget } from "./spike-focus";
 import { changeRequestId } from "../../lib/change-request";
 import { argvOf, commandLine } from "../../lib/command-line";
 import { HarnessConversation } from "../../lib/HarnessConversation";
@@ -85,7 +86,9 @@ export function TimelineItemDetail({
 }) {
   const reference = row === undefined ? undefined : referenceOf(row);
   const conversationId =
-    reference?.kind === "conversation" ? reference.value : undefined;
+    reference?.kind === "conversation" && row !== undefined
+      ? spikeRedirect(row, reference.value)
+      : undefined;
   const transcript = useConversation(
     client,
     runId,
@@ -108,8 +111,13 @@ export function TimelineItemDetail({
             </div>
           ) : (
             <>
-              <ItemHeading row={row} />
-              <Separator className="my-4" />
+              {!opensConversation(reference) &&
+                !(row.rowKind === "event" && row.event.kind === "oneharness-session") && (
+                  <>
+                    <ItemHeading row={row} />
+                    <Separator className="my-4" />
+                  </>
+                )}
               <Body
                 client={client}
                 runId={runId}
@@ -327,21 +335,51 @@ function Session({
   const [visible, setVisible] = useState(PAGE_SIZE);
   const availableTurns = transcript.conversation?.conversation.turns ?? [];
   const opened = row.rowKind === "event" ? turnOf(row.event) : undefined;
-  const turns: readonly Turn[] =
-    opened === undefined
-      ? availableTurns
-      : availableTurns.filter(({ id }) => id === opened);
+  void opened;
+  const turns: readonly Turn[] = availableTurns;
+  const spikeRoot = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (transcript.loading || availableTurns.length === 0) return;
+    setVisible(availableTurns.length);
+    const target = spikeTarget(
+      row,
+      availableTurns.map((turn) => ({
+        user: turn.user ?? "",
+        reasoning: (turn.agentEvents ?? []).filter((e) => e.kind === "reasoning").map((e) => e.text),
+        tools: turn.tools.map((tool) => tool.toolCallId ?? ""),
+      })),
+    );
+    if (target === undefined || spikeRoot.current === null) return;
+    const root = spikeRoot.current;
+    const timer = window.setTimeout(() => spikeApply(root, target), 600);
+    return () => window.clearTimeout(timer);
+  }, [transcript.loading, availableTurns, row]);
   const sync = useTimelineScrollSync(
     turns.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
   );
   const pinned = usePinnedHeight("--conversation-pinned");
   if (transcript.loading)
     return (
-      <div aria-live="polite" className="loading-inline">
-        <Skeleton className="h-2 w-40" />
-        <Skeleton className="h-2 w-24" />
-        Loading transcript…
-      </div>
+      <Card className="gap-0 py-3">
+        <CardContent className="px-3">
+          <header className="transcript-header">
+            <div>
+              <p className="eyebrow">
+                {row.dispatch === undefined ? "" : `${row.dispatch.label} · `}
+                {row.rowKind === "span" ? row.displayKind : "Agent"}
+              </p>
+              <h4>{row.rowKind === "span" ? row.displayLabel : "Conversation"}</h4>
+            </div>
+          </header>
+          <Separator className="my-2.5" />
+          <div aria-live="polite" className="loading-inline">
+            <Skeleton className="h-16 w-full" />
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-16 w-full" />
+            Loading turns…
+          </div>
+        </CardContent>
+      </Card>
     );
   // Only when there is nothing to read: a revalidation that failed leaves the
   // transcript already on screen there, which is the whole point of re-reading it
@@ -372,7 +410,7 @@ function Session({
   // The turns sit on the design system's own card surface rather than straight on
   // the page: `TurnCard` paints its own bubbles and nothing behind them.
   return (
-    <Card className="gap-0 py-3">
+    <Card className="gap-0 py-3" ref={spikeRoot}>
       <CardContent className="px-3">
         <header className="transcript-header">
           <div>
@@ -546,12 +584,14 @@ function HarnessSession({
 }) {
   return (
     <>
-      <HarnessConversation
-        artifactId={artifactId}
-        client={client}
-        runId={runId}
-      />
-      <Recorded reference={reference} row={row} />
+      <SpikeHarness>
+        <HarnessConversation
+          artifactId={artifactId}
+          client={client}
+          runId={runId}
+        />
+      </SpikeHarness>
+      {false && <Recorded reference={reference} row={row} />}
     </>
   );
 }
@@ -1470,4 +1510,19 @@ function Operations({ operations }: { readonly operations: unknown }) {
       </ol>
     </>
   );
+}
+
+/** SPIKE: light the harness conversation's prompt once it has drawn. */
+function SpikeHarness({ children }: { readonly children: React.ReactNode }) {
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (root.current?.querySelector("article[data-turn-id]")) {
+        spikeApply(root.current, { turn: 1, part: "prompt" });
+        window.clearInterval(timer);
+      }
+    }, 300);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <div ref={root}>{children}</div>;
 }

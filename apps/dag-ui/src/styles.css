@@ -3866,3 +3866,11 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .record-none {
   color: var(--muted-foreground);
 }
+
+/* SPIKE: the conversation-focus mock's highlight. */
+.spike-focus {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 6px color-mix(in oklab, var(--primary) 22%, transparent);
+  border-radius: 12px;
+}
