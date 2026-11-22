@@ -104,7 +104,8 @@ export function TimelineItemDetail({
     conversationId,
     row === undefined ? undefined : `${transcriptFingerprint(row)}|${rereads}`,
   );
-  const awaited = row !== undefined && absenceOf(row, transcript) === "not-yet";
+  const awaited =
+    row !== undefined && absenceOf(row, transcript, node) === "not-yet";
   useEffect(() => {
     if (!awaited) return;
     const timer = setInterval(
@@ -138,6 +139,7 @@ export function TimelineItemDetail({
             // its transcript loads.
             <Session
               conversationId={reference?.value ?? ""}
+              {...(node === undefined ? {} : { node })}
               row={row}
               transcript={transcript}
             />
@@ -327,6 +329,7 @@ function focusOf(
 function absenceOf(
   row: TimelineRow,
   transcript: Transcript,
+  node: NodeView | undefined,
 ): "not-yet" | "no-longer" | undefined {
   const served = transcript.conversation?.conversation;
   if (served === undefined) return undefined;
@@ -343,17 +346,35 @@ function absenceOf(
   const position = Number(opened.slice(opened.lastIndexOf(".") + 1));
   return Number.isInteger(position) &&
     position >= served.turns.length &&
-    !settled(served.state)
+    recording(row, served.state, node)
     ? "not-yet"
     : "no-longer";
 }
 
+/** The node states nothing records past: every session at such a node has stopped. */
+const STOPPED: ReadonlySet<string> = new Set([
+  "done",
+  "failed",
+  "cancelled",
+  "skipped",
+  "not-completed",
+  "complete-but-draft",
+  "complete-but-held",
+]);
+
 /**
- * Whether a conversation has stopped recording: the run last recorded its member
- * settling, which is the state a stored report's conversations are served in.
+ * Whether the conversation a row opens may still record a turn: a span the run has
+ * not closed, and otherwise one whose member has not settled at a node still being
+ * worked — a run-level session's is the run's own, which is still recording.
  */
-function settled(state: string): boolean {
-  return state === "member-settled";
+function recording(
+  row: TimelineRow,
+  state: string,
+  node: NodeView | undefined,
+): boolean {
+  if (state === "member-settled") return false;
+  if (row.rowKind === "span") return row.endedAt === null;
+  return node === undefined || !STOPPED.has(node.status);
 }
 
 /**
@@ -431,10 +452,12 @@ function RecorderCut({ turn }: { readonly turn: Turn }) {
  */
 function Session({
   conversationId,
+  node,
   row,
   transcript,
 }: {
   readonly conversationId: string;
+  readonly node?: NodeView;
   readonly row: TimelineRow;
   readonly transcript: Transcript;
 }) {
@@ -442,18 +465,21 @@ function Session({
   const served = transcript.conversation;
   const availableTurns = served?.conversation.turns ?? [];
   const opened = row.rowKind === "event" ? turnOf(row.event) : undefined;
-  const absence = absenceOf(row, transcript);
+  const absence = absenceOf(row, transcript, node);
   const turns: readonly Turn[] =
     opened === undefined
       ? availableTurns
       : absence === undefined
         ? availableTurns.filter(({ id }) => id === opened)
         : [];
+  // While the opened turn is not there, the pinned plot draws the turns that are,
+  // so it stands at the height it keeps once the turn arrives and replaces the note.
+  const plotted = turns.length === 0 ? availableTurns : turns;
   const sync = useTimelineScrollSync(
-    turns.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
+    plotted.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
   );
   const pinned = usePinnedHeight("--conversation-focus-offset");
-  const focus = focusOf(row, turns.length === 0 ? availableTurns : turns);
+  const focus = focusOf(row, plotted);
   // The turn whose place the note stands in, when the transcript lacks it.
   const missing = absence === undefined ? undefined : (opened ?? focus?.turnId);
   const author =
@@ -527,11 +553,15 @@ function Session({
               <ConversationPlotHover>
                 <ConversationTimeline
                   cursor={sync.cursor}
-                  {...(focus === undefined || absence !== undefined
+                  {...(focus === undefined
                     ? {}
-                    : { focus })}
+                    : absence === undefined
+                      ? { focus }
+                      : // Expanded as a focus draws it, so the card keeps its
+                        // height when the turn arrives and takes the focus.
+                        { expanded: true })}
                   onSelectTurn={sync.scrollTo}
-                  turns={[...turns]}
+                  turns={[...plotted]}
                 />
               </ConversationPlotHover>
             </div>

@@ -21,6 +21,7 @@
  *                      | --preserved-corpus | --review-corpus
  *                      | --review-loop-corpus | --command-steps-corpus
  *                      | --refusals-corpus | --event-list-corpus
+ *                      | --conversation-focus-corpus
  *                      | --transcripts-corpus
  *                      | --held-turn-corpus | --large-run-views-corpus
  *                      | --node-timeline-corpus
@@ -37,6 +38,8 @@
  *                                                  --command-steps-corpus, the
  *                                                  refused edits' with
  *                                                  --refusals-corpus, the
+ *                                                  conversation focus's with
+ *                                                  --conversation-focus-corpus, the
  *                                                  event lists' with
  *                                                  --event-list-corpus, and the
  *                                                  held turn's with
@@ -92,6 +95,7 @@ import harnessBinaries from "./harness-binaries.json" with { type: "json" };
 import { humanItemsWorld } from "./human-items-world.mjs";
 import {
   buildCommandStepsRuns,
+  buildConversationFocusRuns,
   buildEventListRuns,
   buildHeldTurnRuns,
   buildLargeRunViews,
@@ -105,6 +109,7 @@ import {
   buildTranscriptRuns,
   churnLive,
   commandStepsFacts,
+  conversationFocusFacts,
   eventListFacts,
   facts,
   graphRecordsFor,
@@ -519,6 +524,7 @@ function parseArgs(argv) {
     "--review-loop-corpus",
     "--command-steps-corpus",
     "--refusals-corpus",
+    "--conversation-focus-corpus",
     "--event-list-corpus",
     "--held-turn-corpus",
     "--large-run-views-corpus",
@@ -897,6 +903,11 @@ if (args.stall) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
       } else if (args["command-steps-corpus"]) {
         corpus = { build: buildCommandStepsRuns, facts: commandStepsFacts };
+      } else if (args["conversation-focus-corpus"]) {
+        corpus = {
+          build: buildConversationFocusRuns,
+          facts: conversationFocusFacts,
+        };
       } else if (args["refusals-corpus"]) {
         corpus = { build: buildRefusalsRuns, facts: refusalsFacts };
       } else if (args["event-list-corpus"]) {
