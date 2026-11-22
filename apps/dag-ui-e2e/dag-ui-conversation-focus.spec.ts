@@ -213,12 +213,49 @@ async function expectPlaced(
     0,
   );
   const loaded = painted.slice(first);
-  for (const frame of loaded) {
-    expect(frame.marked, "exactly one item is marked").toBe(1);
+  const entry = "eventIndex" in expected || "toolCallId" in expected;
+  for (const [index, frame] of loaded.entries()) {
+    const at = `frame ${index} of the loaded transcript (t=${Math.round(frame.at)}ms)`;
+    expect(frame.marked, `${at}: exactly one item is marked`).toBe(1);
     expect(
       matches(frame.mark, expected),
-      `marked ${JSON.stringify(frame.mark)}, not ${JSON.stringify(expected)}`,
+      `${at}: marked ${JSON.stringify(frame.mark)}, not ${JSON.stringify(expected)}`,
     ).toBe(true);
+    const { mark, viewport } = frame;
+    if (mark === undefined || viewport === undefined)
+      throw new Error(
+        `${at}: the drawer has no marked item or scroll viewport`,
+      );
+    // A harness record pins no card of its own; Close is what it clears.
+    const edge = harness ? viewport.top : frame.cardBottom;
+    if (edge === undefined)
+      throw new Error(`${at}: the pinned card is not drawn`);
+    const where = `${at}: ${JSON.stringify({ top: mark.top, bottom: mark.bottom, edge, viewport })}`;
+    if (oversized) {
+      expect(
+        Math.abs(mark.top - edge),
+        `${where}: its top is at the card's edge`,
+      ).toBeLessThanOrEqual(1);
+      expect(
+        mark.bottom,
+        `${where}: it fills the visible area`,
+      ).toBeGreaterThan(viewport.bottom);
+    } else {
+      expect(
+        mark.top,
+        `${where}: its top is below the card`,
+      ).toBeGreaterThanOrEqual(edge - 0.5);
+      expect(
+        mark.bottom,
+        `${where}: its bottom is inside the viewport`,
+      ).toBeLessThanOrEqual(viewport.bottom + 0.5);
+    }
+    expect(
+      mark.top,
+      `${where}: its top is inside the viewport`,
+    ).toBeGreaterThanOrEqual(viewport.top - 0.5);
+    expect(mark.hit, `${at}: a tap at its top edge hits it`).toBe(true);
+    if (entry) expect(mark.open, `${at}: the marked entry is open`).toBe(true);
   }
   const tops = new Set(loaded.map((frame) => Math.round(frame.mark?.top ?? 0)));
   expect(
@@ -236,60 +273,16 @@ async function expectPlaced(
     )}`,
   ).toHaveLength(1);
 
-  const last = loaded.at(-1);
-  const mark = last?.mark;
-  const viewport = last?.viewport;
-  if (mark === undefined || viewport === undefined)
-    throw new Error("the drawer has no marked item or scroll viewport");
-  // A harness record pins no card of its own; Close is what it clears.
-  const edge = harness ? viewport.top : last?.cardBottom;
-  if (edge === undefined) throw new Error("the pinned card is not drawn");
-  if (oversized) {
-    expect(
-      Math.abs(mark.top - edge),
-      "its top is at the card's edge",
-    ).toBeLessThanOrEqual(1);
-    expect(mark.bottom, "it fills the visible area").toBeGreaterThan(
-      viewport.bottom,
-    );
-  } else {
-    expect(mark.top, "its top is below the card").toBeGreaterThanOrEqual(
-      edge - 0.5,
-    );
-    expect(
-      mark.bottom,
-      "its bottom is inside the viewport",
-    ).toBeLessThanOrEqual(viewport.bottom + 0.5);
-  }
-  expect(mark.top, "its top is inside the viewport").toBeGreaterThanOrEqual(
-    viewport.top - 0.5,
-  );
-
-  // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` inside a turn (`data-turn-id`) is the package's own mark of the opened item, and the criterion is about that one element; whether it is open is read inside the page, where its disclosure's `aria-expanded` and the package's `data-state` are what say so and no role query reaches.
+  // And the drawer as it stands once sampling ends holds one mark, no other.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` inside a turn (`data-turn-id`) is the package's own mark of the opened item, and the criterion is about that one element.
   const marked = page
     .getByRole("region", { name: "Timeline item detail" })
     .locator(MARKED);
-  await expect(marked).toHaveCount(1);
-  const reached = await marked.evaluate((element) => {
-    const box = element.getBoundingClientRect();
-    const hit = document.elementFromPoint(
-      box.left + box.width / 2,
-      box.top + 2,
-    );
-    const collapsed = element.querySelector('[aria-expanded="false"]');
-    return {
-      hit: hit !== null && element.contains(hit),
-      open:
-        element.getAttribute("data-state") !== "closed" &&
-        (collapsed === null ||
-          element.querySelector('[aria-expanded="true"]') !== null),
-    };
-  });
   // llmlint: ignore-end[e2e_uses_accessible_selectors]
-  expect(reached.hit, "a tap at its top edge hits it").toBe(true);
-  if ("eventIndex" in expected || "toolCallId" in expected)
-    expect(reached.open, "the marked entry is open").toBe(true);
-  return mark.top;
+  await expect(marked).toHaveCount(1);
+  const last = loaded.at(-1)?.mark;
+  if (last === undefined) throw new Error("no loaded frame was sampled");
+  return last.top;
 }
 
 /** Open one record of `node`'s event list, and hold where it lands. */

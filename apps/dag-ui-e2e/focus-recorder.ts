@@ -27,6 +27,10 @@ export interface FocusFrame {
     readonly note?: string;
     readonly top: number;
     readonly bottom: number;
+    /** Whether a tap at the middle of its top edge lands on it, on this frame. */
+    readonly hit: boolean;
+    /** Whether it is drawn open: not closed, and any disclosure inside it expanded. */
+    readonly open: boolean;
   };
   /** The drawer's scroll viewport, and the pinned card's bottom edge within it. */
   readonly viewport?: { readonly top: number; readonly bottom: number };
@@ -97,6 +101,10 @@ export async function startRecording(page: Page): Promise<void> {
         )
         ?.getBoundingClientRect();
       const box = one?.getBoundingClientRect();
+      const tapped =
+        box === undefined
+          ? null
+          : document.elementFromPoint(box.left + box.width / 2, box.top + 2);
       window.__focusFrames?.push({
         source,
         at: performance.now(),
@@ -124,6 +132,11 @@ export async function startRecording(page: Page): Promise<void> {
                     : undefined,
                 top: box.top,
                 bottom: box.bottom,
+                hit: tapped !== null && one.contains(tapped),
+                open:
+                  one.getAttribute("data-state") !== "closed" &&
+                  (one.querySelector('[aria-expanded="false"]') === null ||
+                    one.querySelector('[aria-expanded="true"]') !== null),
               },
             }),
         ...(viewport === undefined
