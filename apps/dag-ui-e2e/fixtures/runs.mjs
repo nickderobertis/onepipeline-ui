@@ -6469,6 +6469,7 @@ const FOCUS_STREAMS = {
   reviewed: "node-scope-1793000000002-4602",
   drafted: "pr-author-1793000000003-4603",
   observer: "dag-scope-1793000000004-4604",
+  stopped: "node-scope-1793000000005-4605",
 };
 const FOCUS_PROJECT = "home-operator-projects-observatory";
 const FOCUS_AREAS = [
@@ -6954,6 +6955,7 @@ export function buildConversationFocusRuns(root) {
       ],
       ["reviewed", "A dispatch a supervisor judged and settled."],
       ["drafted", "Draft the change request for the panels branch."],
+      ["stopped", "A dispatch whose node failed before its next turn started."],
     ],
     start,
   );
@@ -6978,6 +6980,7 @@ export function buildConversationFocusRuns(root) {
   declareGraph(root, FOCUS_STREAMS.reviewed, ["worker"]);
   declareGraph(root, FOCUS_STREAMS.drafted, ["pr-author"]);
   declareGraph(root, FOCUS_STREAMS.observer, ["monitor"]);
+  declareGraph(root, FOCUS_STREAMS.stopped, ["worker"]);
   const pending = {};
 
   // The run's observer, at no node: a run-level session.
@@ -6987,7 +6990,7 @@ export function buildConversationFocusRuns(root) {
 
   // A long worker conversation, still running: every turn judged by the supervisor,
   // whose last message is the prompt of a turn the worker has not started.
-  for (const node of ["panels", "gapped", "reviewed", "drafted"])
+  for (const node of ["panels", "gapped", "reviewed", "drafted", "stopped"])
     journal
       .advance(1)
       .emit("pipeline", "node-dispatched", { ...run, node, persona: "worker" });
@@ -7075,8 +7078,24 @@ export function buildConversationFocusRuns(root) {
       completion_reason: "drafted",
     });
 
+  // A dispatch whose node failed after the supervisor wrote the next prompt and
+  // before the worker started it, with no settlement from the member: only the
+  // node's own end says no later read will bring that turn.
+  const stopped = member("stopped", 5, start + 9_000);
+  stopped.started();
+  stopped.agentTurn(1);
+  stopped.supervisorTurn(1);
+
   journal
-    .advance(3000)
+    .advance(2990)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...run, node: "stopped" },
+      { status: "failed", outcome: "the harness exited" },
+    );
+  journal
+    .advance(10)
     .emit(
       "pipeline",
       "node-settled",
@@ -7098,6 +7117,7 @@ export function buildConversationFocusRuns(root) {
     gapped.journal,
     reviewed.journal,
     drafted.journal,
+    stopped.journal,
   ]);
   writeJson(join(root, "..", FOCUS.pending), pending);
 }

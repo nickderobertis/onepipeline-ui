@@ -25,6 +25,7 @@ import type {
   AgentRole,
   ConversationItem,
   DagConversation,
+  NodeStatus,
   Redirection as RedirectionRecord,
   TimelineEvent,
   TimelineReference,
@@ -346,35 +347,41 @@ function absenceOf(
   const position = Number(opened.slice(opened.lastIndexOf(".") + 1));
   return Number.isInteger(position) &&
     position >= served.turns.length &&
-    recording(row, served.state, node)
+    recording(served.state, node)
     ? "not-yet"
     : "no-longer";
 }
 
-/** The node states nothing records past: every session at such a node has stopped. */
-const STOPPED: ReadonlySet<string> = new Set([
-  "done",
-  "failed",
-  "cancelled",
-  "skipped",
-  "not-completed",
-  "complete-but-draft",
-  "complete-but-held",
-]);
+/**
+ * Whether a session at a node in each status may still record a turn: every
+ * status the server serves is classified here, so the type checker refuses a new
+ * one until it is.
+ */
+const MAY_RECORD: Readonly<Record<NodeStatus, boolean>> = {
+  pending: true,
+  ready: true,
+  running: true,
+  waiting: true,
+  blocked: true,
+  parked: true,
+  unknown: true,
+  done: false,
+  failed: false,
+  cancelled: false,
+  skipped: false,
+  "not-completed": false,
+  "complete-but-draft": false,
+  "complete-but-held": false,
+};
 
 /**
- * Whether the conversation a row opens may still record a turn: a span the run has
- * not closed, and otherwise one whose member has not settled at a node still being
- * worked — a run-level session's is the run's own, which is still recording.
+ * Whether the conversation a row opens may still record a turn: one whose member
+ * has not settled, at a node still being worked — a run-level session's is the
+ * run's own, which is still recording.
  */
-function recording(
-  row: TimelineRow,
-  state: string,
-  node: NodeView | undefined,
-): boolean {
+function recording(state: string, node: NodeView | undefined): boolean {
   if (state === "member-settled") return false;
-  if (row.rowKind === "span") return row.endedAt === null;
-  return node === undefined || !STOPPED.has(node.status);
+  return node === undefined || MAY_RECORD[node.status];
 }
 
 /**

@@ -51,6 +51,7 @@ const factsSchema = z.object({
     reviewed: z.string(),
     drafted: z.string(),
     observer: z.string(),
+    stopped: z.string(),
   }),
   pending: z.string(),
 });
@@ -594,6 +595,21 @@ for (const size of [
         (event) => {
           expect(event.conversation_item?.turn).toBe(turnId(session, turn));
           return { turn: turnId(session, turn), note: NO_LONGER };
+        },
+      );
+    });
+
+    test("a turn a failed node never started is a marked note that it is no longer coming", async ({
+      page,
+    }) => {
+      const session = facts.sessions.stopped;
+      await opensAt(
+        page,
+        "stopped",
+        { session, kind: "turn-message", turn: 1, role: "user" },
+        (event) => {
+          expect(event.conversation_item?.turn).toBe(turnId(session, 2));
+          return { turn: turnId(session, 2), note: NO_LONGER };
         },
       );
     });
