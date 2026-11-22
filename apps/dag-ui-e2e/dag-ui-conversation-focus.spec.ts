@@ -361,7 +361,9 @@ async function arrivesInPlace(
     ).toBeLessThanOrEqual(0.5);
   }
   await expect(page.getByText(NOT_YET)).toHaveCount(0);
-  // The appended records stay appended: the next journey reads the corpus fresh.
+  // The appended records would stay appended; the next journey reads the corpus
+  // fresh, which only a restart writes.
+  await up().stopServing();
   await up().serveRebuilt();
 }
 

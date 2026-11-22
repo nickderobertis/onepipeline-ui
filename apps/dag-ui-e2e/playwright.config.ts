@@ -235,6 +235,7 @@ const OWN_SERVERS = [
   "**/dag-ui-human-items-expiry.spec.ts",
   "**/dag-ui-event-list.spec.ts",
   "**/dag-ui-event-details.spec.ts",
+  "**/dag-ui-conversation-focus.spec.ts",
 ];
 
 export default defineConfig({
