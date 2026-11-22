@@ -54,17 +54,28 @@ export function spikeApply(root: HTMLElement, target: Target): void {
   const turns = root.querySelectorAll<HTMLElement>("article[data-turn-id]");
   const turn = turns[target.turn - 1];
   if (!turn) return;
-  let element: HTMLElement | null = null;
-  if (target.part === "prompt") element = turn.querySelector<HTMLElement>('[aria-label="User message"]')?.closest<HTMLElement>(".rounded-\\[22px_22px_5px_22px\\]") ?? null;
-  if (target.part === "answer") element = turn.querySelector<HTMLElement>('[aria-label="Assistant message"]');
-  if (target.part === "end") element = turn.querySelector<HTMLElement>('dl[aria-label="Usage"]');
-  if (target.part === "tool") element = turn.querySelector<HTMLElement>(`[data-tool-call-id="${target.toolCallId}"]`);
   if (target.part === "reasoning") {
-    const triggers = [...turn.querySelectorAll<HTMLElement>("button")].filter((b) => b.textContent?.trim() === "Reasoning");
-    for (const trigger of triggers) if (trigger.getAttribute("aria-expanded") !== "true") trigger.click();
-    element = [...turn.querySelectorAll<HTMLElement>(".border-dashed")].find((e) => e.textContent?.includes(target.text?.replace(/…$/, "").slice(0, 30) ?? "\u0000")) ?? null;
-    for (const trigger of triggers) if (!element?.contains(trigger)) trigger.click();
+    // Open every reasoning block, find the one clicked once React has rendered it,
+    // then close the rest and place it once that has rendered too.
+    const triggers = () => [...turn.querySelectorAll<HTMLElement>("button")].filter((b) => b.textContent?.trim() === "Reasoning");
+    for (const trigger of triggers()) if (trigger.getAttribute("aria-expanded") !== "true") trigger.click();
+    window.setTimeout(() => {
+      const wanted = target.text?.replace(/…$/, "").slice(0, 30) ?? "\u0000";
+      const element = [...turn.querySelectorAll<HTMLElement>(".border-dashed")].find((e) => e.textContent?.includes(wanted)) ?? null;
+      for (const trigger of triggers()) if (!element?.contains(trigger) && trigger.getAttribute("aria-expanded") === "true") trigger.click();
+      window.setTimeout(() => place(root, element), 200);
+    }, 200);
+    return;
   }
+  let element: HTMLElement | null = null;
+  if (target.part === "prompt") element = turn.querySelector<HTMLElement>(".rounded-\\[22px_22px_5px_22px\\]");
+  if (target.part === "answer") element = [...turn.querySelectorAll<HTMLElement>('[aria-label="Agent message"]')].at(-1) ?? null;
+  if (target.part === "end") element = turn.querySelector<HTMLElement>('[aria-label="Usage"]');
+  if (target.part === "tool") element = turn.querySelector<HTMLElement>(`[data-tool-call-id="${target.toolCallId}"]`);
+  place(root, element);
+}
+
+function place(root: HTMLElement, element: HTMLElement | null): void {
   root.querySelectorAll(".spike-focus").forEach((e) => e.classList.remove("spike-focus"));
   root.querySelectorAll('[aria-current="true"]').forEach((e) => e.removeAttribute("aria-current"));
   if (!element) return;
