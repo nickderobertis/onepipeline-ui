@@ -52,7 +52,7 @@ lane here and heads the conversation opened from it with the same words.
 
 ### A conversation
 
-![A conversation open in the right panel: its heading naming the worker · judge session and reading still running, a plot of that session's own turns, then the turns themselves — a prompt, the model's reply, and a row of input, output, cache and cost readings under it](docs/screens/08-conversation-1440x900.png)
+![A worker · judge conversation opened from its span in the right panel: a plot of that session's own turns pinned at the top, and directly below it the first turn's prompt marked with an outline, then the model's reply and a row of input, output, cache and cost readings under it](docs/screens/08-conversation-1440x900.png)
 
 The third scope. A transcript opens beside the timeline it came from, with that
 session's own turns plotted above them and each turn's tokens and cost read underneath
