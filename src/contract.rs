@@ -381,8 +381,9 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 30;
 /// gains `conversation_item`, `{conversation, turn, part}`: the turn of that
 /// conversation it is and which part of it — `prompt`, `answer` or `end` —
 /// computed from the record's own session and turn number rather than from
-/// whether the transcript holds that turn yet. Additive: every field 17 served
-/// is served unchanged.
+/// whether the transcript holds that turn yet, with `gap: true` where the row at
+/// that position records a different turn. Additive: every field 17 served is
+/// served unchanged.
 pub const TIMELINE_SCHEMA_VERSION: u32 = 18;
 
 /// The largest run-list page any request can ask for.

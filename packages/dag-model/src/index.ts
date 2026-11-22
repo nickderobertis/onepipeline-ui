@@ -1778,6 +1778,12 @@ export const conversationItemSchema = openObject({
   conversation: z.string().min(1),
   turn: z.string().min(1),
   part: z.enum(["prompt", "answer", "end"]),
+  /**
+   * Present, and only ever `true`, where the transcript row at `turn` records a
+   * different turn — a later one, relayed ahead of this one. The turn is then
+   * not in the transcript yet, and nothing there may be marked.
+   */
+  gap: z.literal(true).optional(),
 });
 export type ConversationItem = z.infer<typeof conversationItemSchema>;
 

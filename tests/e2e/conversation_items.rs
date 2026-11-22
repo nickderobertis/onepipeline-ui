@@ -24,6 +24,10 @@ const SETTLED: &str = "node-scope-1790000000001-7001.worker";
 /// The dispatch still running, which has no judge conversation yet.
 const LIVE_STREAM: &str = "node-scope-1790000000002-7002";
 const LIVE: &str = "node-scope-1790000000002-7002.worker";
+/// A dispatch still running whose journal relayed its third turn before its
+/// second: turn 2 is a message alone, so turn 3 sits at turn 2's position.
+const GAP_STREAM: &str = "node-scope-1790000000003-7003";
+const GAP: &str = "node-scope-1790000000003-7003.worker";
 /// How many turns each side of the settled dispatch took.
 const SETTLED_TURNS: u64 = 2;
 
@@ -181,6 +185,16 @@ fn write_run(root: &Path) {
             !settles,
         );
     }
+    // An answer for a turn past what the report and the relayed turn records
+    // hold: a turn the settled transcript no longer serves.
+    relay(
+        &dir,
+        run,
+        SETTLED_STREAM,
+        SETTLED,
+        "turn-message",
+        json!({ "turn": SETTLED_TURNS + 1, "role": "assistant", "text": "a lost answer" }),
+    );
     fixture_run::settle_member(
         &dir,
         &fixture_run::SettledMember {
@@ -198,6 +212,25 @@ fn write_run(root: &Path) {
     // the agent has not started.
     turn(&dir, run, LIVE_STREAM, LIVE, 1, "assistant");
     turn(&dir, run, LIVE_STREAM, LIVE, 1, "user");
+    // The gapped dispatch: turn 1 whole, turn 2's answer alone, turn 3 opened.
+    turn(&dir, run, GAP_STREAM, GAP, 1, "assistant");
+    relay(
+        &dir,
+        run,
+        GAP_STREAM,
+        GAP,
+        "turn-message",
+        json!({ "turn": 2, "role": "assistant", "text": "assistant turn 2 says" }),
+    );
+    relay(
+        &dir,
+        run,
+        GAP_STREAM,
+        GAP,
+        "turn-started",
+        json!({ "turn": 3, "role": "assistant", "started_at": "2026-08-07T12:01:00.000Z",
+                "instruction": "assistant turn 3 is asked" }),
+    );
 }
 
 fn get(serving: &Serving, path: &str) -> Value {
@@ -388,12 +421,33 @@ fn every_turn_level_row_names_the_conversation_item_it_stands_for() {
         "user",
         item(LIVE, format!("{LIVE}.1"), "prompt"),
     );
+    // Ruling `a2`: named from the record even where no transcript row is it.
+    expect(
+        SETTLED,
+        "turn-message",
+        SETTLED_TURNS + 1,
+        "assistant",
+        item(SETTLED, format!("{SETTLED}.{SETTLED_TURNS}"), "answer"),
+    );
+    expect(
+        GAP,
+        "turn-started",
+        3,
+        "assistant",
+        item(GAP, format!("{GAP}.2"), "prompt"),
+    );
+    // Ruling `a2`'s gap: turn 2's position holds turn 3, so the item says so.
+    let mut gapped = item(GAP, format!("{GAP}.1"), "answer");
+    gapped["gap"] = json!(true);
+    expect(GAP, "turn-message", 2, "assistant", gapped);
 
     // Every item a row names whose turn the transcript holds is a turn the
     // conversation route serves under that id.
     let worker = served_turns(&serving, SETTLED);
     let judged = served_turns(&serving, &judge);
     let live = served_turns(&serving, LIVE);
+    let gap = served_turns(&serving, GAP);
+    assert_eq!(gap, [format!("{GAP}.0"), format!("{GAP}.1")]);
     for (route, row) in &rows {
         let Some(named) = row.get("conversation_item") else {
             continue;
@@ -403,14 +457,28 @@ fn every_turn_level_row_names_the_conversation_item_it_stands_for() {
             SETTLED => &worker,
             id if id == judge => &judged,
             LIVE => &live,
+            GAP => &gap,
             _ => continue,
         };
-        // Ruling `a2`: the one item named ahead of the transcript is the live
-        // supervisor's message, whose turn the agent has not started yet.
-        if turn == format!("{LIVE}.1") {
+        // Ruling `a2`: the items named ahead of the transcript, or past it, are
+        // the live supervisor's message, whose turn the agent has not started,
+        // the settled session's lost answer and the gapped session's newest turn.
+        let absent = [
+            format!("{LIVE}.1"),
+            format!("{SETTLED}.{SETTLED_TURNS}"),
+            format!("{GAP}.2"),
+        ];
+        if absent.iter().any(|id| id == turn) {
             assert!(!served.iter().any(|id| id == turn), "{served:?}");
+            assert!(named.get("gap").is_none(), "{route}: {row}");
             continue;
         }
+        // Only the gapped answer is flagged; every other named row is its turn.
+        assert_eq!(
+            named.get("gap").is_some(),
+            turn == format!("{GAP}.1"),
+            "{route}: {row}"
+        );
         assert!(
             served.iter().any(|id| id == turn),
             "{route}: {turn} is not a turn of {served:?}"

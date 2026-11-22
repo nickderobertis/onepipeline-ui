@@ -3454,6 +3454,9 @@ fn conversations_under(
 /// listing, the counting and the numbering all need what is in it.
 struct Transcripts<'a> {
     sessions: Vec<SessionTranscript<'a>>,
+    /// Where each session sits in `sessions`, by its id: a turn-level row looks
+    /// its own session up once per row, and a run holds hundreds of sessions.
+    by_session: BTreeMap<String, usize>,
     /// The members the run's graphs declared, which is what every session's
     /// `agent_role` is read against: folded beside the transcripts because it is
     /// the other half of what a session *is*, and read once for the same reason
@@ -3509,7 +3512,7 @@ impl<'a> Transcripts<'a> {
             }
             grouped.entry(session).or_default().push(event);
         }
-        let sessions = order
+        let sessions: Vec<SessionTranscript<'a>> = order
             .into_iter()
             .filter_map(|session| {
                 // Validated once here rather than at each reading: `session_label`
@@ -3547,7 +3550,23 @@ impl<'a> Transcripts<'a> {
                 })
             })
             .collect();
-        Self { sessions, declared }
+        let by_session = sessions
+            .iter()
+            .enumerate()
+            .map(|(at, folded): (usize, &SessionTranscript<'a>)| {
+                (folded.session.as_str().to_owned(), at)
+            })
+            .collect();
+        Self {
+            sessions,
+            by_session,
+            declared,
+        }
+    }
+
+    /// One session's transcript, by its id.
+    fn session(&self, session: &str) -> Option<&SessionTranscript<'a>> {
+        self.sessions.get(*self.by_session.get(session)?)
     }
 }
 
@@ -7362,15 +7381,24 @@ struct ConversationItem {
     conversation: String,
     turn: String,
     part: TurnPart,
+    /// Whether the transcript row at `turn` records a different turn than the
+    /// one named — a session whose journal relayed a later turn before an
+    /// earlier one, so a later turn sits at that position. Served only when
+    /// true, so a reader marks nothing there rather than the wrong turn.
+    gap: bool,
 }
 
 impl ConversationItem {
     fn to_value(&self) -> Value {
-        json!({
+        let mut item = json!({
             "conversation": self.conversation,
             "turn": self.turn,
             "part": self.part.as_str(),
-        })
+        });
+        if self.gap {
+            item["gap"] = json!(true);
+        }
+        item
     }
 
     /// A conversation span's item: the first turn of the conversation it draws,
@@ -7380,6 +7408,7 @@ impl ConversationItem {
             conversation: conversation.to_owned(),
             turn: format!("{conversation}.0"),
             part: TurnPart::Prompt,
+            gap: false,
         }
     }
 }
@@ -7424,6 +7453,7 @@ fn conversation_item(event: &Envelope, transcripts: &Transcripts<'_>) -> Option<
         conversation: session.to_owned(),
         turn: format!("{session}.{turn}"),
         part,
+        gap: holds_another_turn(transcripts, session, turn),
     };
     if agent_turn(event) {
         let part = match kind {
@@ -7447,9 +7477,25 @@ fn conversation_item(event: &Envelope, transcripts: &Transcripts<'_>) -> Option<
             turn: format!("{id}.{index}"),
             conversation: id,
             part,
+            gap: false,
         }
     });
     Some(judged.unwrap_or_else(|| agent(number - 1, TurnPart::End)))
+}
+
+/// Whether `session`'s transcript serves, at the 0-based `position`, a row that
+/// is not the producer's turn `position + 1` — the mark of a gap in what the
+/// journal relayed, which shifts every later turn to an earlier position. A row
+/// that records no number counts as another turn: nothing says it is this one.
+/// `false` where no row sits there, which is a turn the transcript lacks.
+fn holds_another_turn(transcripts: &Transcripts<'_>, session: &str, position: u64) -> bool {
+    let Some(folded) = transcripts.session(session) else {
+        return false;
+    };
+    usize::try_from(position)
+        .ok()
+        .and_then(|at| folded.rows.get(at))
+        .is_some_and(|row| row.number() != Some(position + 1))
 }
 
 /// Where the judge conversation [`judge_conversation`] serves for `session`
@@ -7460,13 +7506,7 @@ fn conversation_item(event: &Envelope, transcripts: &Transcripts<'_>) -> Option<
 /// A stacked panel runs several judges on one invocation, each a turn of its
 /// own; the first of them is the one a supervisor's record opens.
 fn judge_turn_of(transcripts: &Transcripts<'_>, session: &str, number: u64) -> Option<usize> {
-    let report = &transcripts
-        .sessions
-        .iter()
-        .find(|folded| folded.session.as_str() == session)?
-        .stored
-        .as_ref()?
-        .report;
+    let report = &transcripts.session(session)?.stored.as_ref()?.report;
     judge_interval(report)?;
     judge_links(report)
         .iter()
