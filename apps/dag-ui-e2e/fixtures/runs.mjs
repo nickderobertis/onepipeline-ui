@@ -6759,7 +6759,9 @@ class FocusMember {
         started_at: startedAt,
         origin: turn === 1 ? "task" : "supervisor",
       });
-      for (const event of events.slice(0, -1))
+      // Every entry, the final message too: the engine relays the answer as an
+      // activity like any other, though the transcript serves it as the answer.
+      for (const event of events)
         this.journal
           .advance(1)
           .emit("agentgraph", "turn-activity", this.labels, {

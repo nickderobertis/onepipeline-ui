@@ -397,6 +397,17 @@ for (const size of [
       );
     });
 
+    test("an agent's final message opens at its turn's answer", async ({
+      page,
+    }) => {
+      await opensAt(
+        page,
+        "panels",
+        { session: facts.sessions.panels, kind: "turn-activity", index: 7 },
+        (event) => ({ turn: event.tool?.turn ?? "", part: "answer" }),
+      );
+    });
+
     test("a reasoning item past index 80 in a turn of fifty calls opens at it, open", async ({
       page,
     }) => {

@@ -295,7 +295,8 @@ function turnOf(event: TimelineEvent): string {
 /**
  * Where opening a row puts the reader in its conversation: on the tool call a
  * `turn-activity` record is, by the identity the harness minted for it where the
- * served turn carries that identity, and by the producer's index otherwise; on
+ * served turn carries that identity, and by the producer's index otherwise — the
+ * turn's answer for the final message, which the turn serves as its answer; on
  * the part of its turn any other turn-level row or conversation span names. The
  * focus is kept even where the transcript lacks that turn, because the note that
  * stands in its place is what is marked until it arrives.
@@ -309,9 +310,18 @@ function focusOf(
     const turn = turns.find(({ id }) => id === opened);
     const { index, tool_call_id: toolCallId } = row.event.tool;
     if (turn === undefined) return { turnId: opened, eventIndex: index };
-    return toolCallId !== undefined &&
+    if (
+      toolCallId !== undefined &&
       turn.tools.some((tool) => tool.toolCallId === toolCallId)
-      ? { turnId: turn.id, toolCallId }
+    )
+      return { turnId: turn.id, toolCallId };
+    // The turn's last message is served as its answer rather than as an entry,
+    // so the message no entry holds is that answer.
+    const entry =
+      turn.tools.some((tool) => tool.index === index) ||
+      (turn.agentEvents ?? []).some((event) => event.index === index);
+    return !entry && row.event.fields?.kind === "message"
+      ? { turnId: turn.id, part: "answer" }
       : { turnId: turn.id, eventIndex: index };
   }
   const item = conversationItemOf(row);
