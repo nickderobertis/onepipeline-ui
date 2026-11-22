@@ -7374,6 +7374,7 @@ impl TurnPart {
     }
 }
 
+// llmlint: ignore-block[code_lands_in_the_domain_that_owns_it] the turn ids this names — `<session>.<N-1>` and `<session>.judge.<place>` — are numbered by this crate's own transcript fold in this file (`transcript_turns`, `judge_conversation`), which the SDK neither serves nor defines; computing the item beside that fold is what keeps the two from drifting, and the task and the manager's ruling `a1` (timeline schema 18, `docs/contract.md`) place it in the server.
 /// The conversation item one row or span stands for: `conversation_item` on the
 /// wire, and the conversation its `reference` names. The turn is held as its
 /// 0-based position in that conversation, so its id — the conversation's own with
@@ -7413,7 +7414,6 @@ impl ConversationItem {
         })
     }
 
-    /// Insert this item, where there is one, as `span`'s `conversation_item`.
     fn insert_first_of(span: &mut Map<String, Value>, conversation: &str) {
         if let Some(item) = Self::first_of(conversation) {
             span.insert("conversation_item".into(), item.to_value());
@@ -7520,6 +7520,8 @@ fn judge_turn_of(transcripts: &Transcripts<'_>, session: &str, number: u64) -> O
         .iter()
         .position(|link| u64::from(link.turn_index) == number)
 }
+
+// llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 
 /// One journal envelope as a timeline event.
 fn timeline_event(index: usize, position: usize, event: &Envelope, lens: &Lens<'_>) -> Value {
