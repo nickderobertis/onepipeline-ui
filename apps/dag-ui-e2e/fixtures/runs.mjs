@@ -6438,3 +6438,182 @@ function writeReadableCards(root, runId, when) {
 export function readabilityFacts() {
   return READABILITY;
 }
+
+// ---------------------------------------------------------------------------
+// SPIKE (throwaway, never lands): the conversation-focus visual spike's corpus.
+// One worker conversation long enough to scroll, the supervisor whose messages
+// become its next prompts, a judge, and a drafter's standalone harness session.
+// ---------------------------------------------------------------------------
+export const FOCUS_RUN = "dag-ui-focus-spike";
+export const FOCUS_TURNS = 32;
+export const FOCUS_REASONING_TURN = 17;
+const FOCUS_STREAM = "node-scope-1793000000000-4600";
+const FOCUS_PROJECT = "home-operator-projects-focus-spike";
+const FOCUS_AREAS = [
+  "the run list",
+  "the node header",
+  "the graph legend",
+  "the timeline axis",
+  "the event drawer",
+  "the transcript panel",
+  "the release badge",
+  "the history controls",
+];
+const focusPrompt = (turn) =>
+  turn === 1
+    ? "## What\nTidy the observatory's panels one at a time, committing each.\n\nStart with the run list."
+    : `Good. Turn ${turn - 1} is in. Now move on to ${FOCUS_AREAS[(turn - 1) % FOCUS_AREAS.length]}, and keep each commit to one panel.`;
+const focusAnswer = (turn) =>
+  `Turn ${turn} done: ${FOCUS_AREAS[(turn - 1) % FOCUS_AREAS.length]} is tidied and committed as one change; the panel's tests pass.`;
+
+function focusEvents(turn) {
+  const area = FOCUS_AREAS[(turn - 1) % FOCUS_AREAS.length];
+  const id = (n) => `toolu_focus_${String(turn).padStart(2, "0")}_${n}`;
+  const call = (index, n, name, input) => ({
+    kind: "tool_call", name, input, output: null, index, tool_call_id: id(n),
+    status: "completed",
+  });
+  const result = (index, n, name, output) => ({
+    kind: "tool_result", name, input: null, output, index, tool_call_id: id(n),
+    status: "completed",
+  });
+  const words = (index, kind, output) => ({
+    kind, name: null, input: null, output, index, tool_call_id: null,
+  });
+  return [
+    words(0, "reasoning", `Reading the prompt: this turn is about ${area}. I'll look at its component first.`),
+    call(1, 1, "Read", { file_path: `apps/dag-ui/src/panels/panel-${turn}.tsx` }),
+    result(2, 1, "Read", `1\texport function Panel${turn}() {\n2\t  return <section aria-label="${area}" />;\n3\t}`),
+    words(3, "message", `The component for ${area} is small; tightening its spacing.`),
+    call(4, 2, "Bash", { command: `git commit -am "style: tidy ${area}"` }),
+    result(5, 2, "Bash", `[spike ${turn}abc] style: tidy ${area}\n 1 file changed, 3 insertions(+), 2 deletions(-)`),
+    words(
+      6,
+      "reasoning",
+      turn === FOCUS_REASONING_TURN
+        ? "I'm resolving the merge conflict in the panel's stylesheet: both sides changed the gap, and the newer value is the one the design asks for, so I keep theirs and drop mine."
+        : `The commit landed; checking nothing else in ${area} needs the same change.`,
+    ),
+    words(7, "message", focusAnswer(turn)),
+  ];
+}
+
+function writeFocusHistory(store, { session, historyId, started, prompt, events, text }) {
+  const harness = { harness: "claude-code", variant: "alternate", harness_id: "claude-code:alternate" };
+  const lines = [
+    { type: "run-started", schema_version: "1.11", history_id: historyId, harness_id: harness.harness_id, prompt, started },
+    ...events.map((event) => ({ type: "event", schema_version: "1.9", run_id: historyId, ...harness, event, session_name: session })),
+    {
+      type: "run", schema_version: "1.2", history_id: historyId, session, name: session, labels: {},
+      project: "/home/operator/projects/observatory", timestamp: started, ...harness, model: "a-model",
+      prompt, permission_mode: "default", status: "ok", exit_code: 0, duration_ms: 42000, finished_at: null,
+      observed_tool_ms: 800, text, text_source: "stream-json:result",
+      usage: { input_tokens: 2400, output_tokens: 610, cache_read_tokens: 18000, cache_write_tokens: 900 },
+      session_id: historyId, failure_kind: null,
+    },
+  ];
+  const dir = join(store, FOCUS_PROJECT);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${session}.jsonl`), `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
+}
+
+const focusHistoryId = (kind, n) =>
+  `01a18000-0000-7000-8000-${String(kind * 1000 + n).padStart(12, "0")}`;
+
+export function buildFocusSpikeRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const store = join(root, "..", "focus-history");
+  const start = now() - 50 * 60 * 1000;
+  const { dir, journal } = plannedRun(root, FOCUS_RUN, [
+    ["panels", "Tidy the observatory's panels, one commit each."],
+    ["drafted", "A change request drafter's standalone harness session."],
+  ], start);
+  const run = { run_id: FOCUS_RUN };
+  const usage = { input_tokens: 2400, output_tokens: 610, cache_read_tokens: 18000, cache_write_tokens: 900, cost_usd: 0.31 };
+  const worker = { ...run, node: "panels", member: "worker", persona: "worker", session: `${FOCUS_STREAM}.worker` };
+  const judge = { ...run, node: "panels", member: "worker", persona: "worker", role: "judge", session: `${FOCUS_STREAM}.judge` };
+  const supervisor = { ...run, node: "panels", member: "supervisor", persona: "supervisor", session: `${FOCUS_STREAM}.supervisor` };
+  journal.advance(1).emit("pipeline", "node-dispatched", { ...run, node: "panels", persona: "worker" });
+  journal.advance(1).emit("agentgraph", "member-started", worker, {});
+
+  const relayed = (labels, kind, n, prompt, events, text) => {
+    const session = `${labels.session}-${String(n).padStart(2, "0")}`;
+    const historyId = focusHistoryId(kind, n);
+    const startedAt = stamp(journal.at);
+    writeFocusHistory(store, { session, historyId, started: startedAt, prompt, events, text });
+    const at = (extra = {}) => ({
+      history_dir: store, history_project: FOCUS_PROJECT, history_session: session, history_id: historyId, ...extra,
+    });
+    const turn = journal.nextTurn(labels.session);
+    journal.advance(1).emit("agentgraph", "turn-started", labels, {
+      transcript: at(), turn, role: "assistant", started_at: startedAt, model: "a-model",
+    });
+    for (const event of events.filter((e) => e.kind !== "message" || e.index !== events.at(-1).index)) {
+      journal.advance(2).emit("agentgraph", "turn-activity", labels, {
+        transcript: at({ index: event.index, ...(event.tool_call_id ? { tool_call_id: event.tool_call_id } : {}) }),
+        kind: event.kind, name: event.name,
+        ...(event.tool_call_id ? { tool_call_id: event.tool_call_id } : {}),
+        index: event.index,
+      });
+    }
+    journal.advance(2).emit("agentgraph", "turn-message", labels, {
+      transcript: at(), turn, role: "assistant", text,
+    });
+    journal.advance(1).emit("agentgraph", "turn-completed", labels, {
+      turn, role: "assistant", usage, started_at: startedAt, completed_at: stamp(journal.at),
+    });
+  };
+
+  for (let n = 1; n <= FOCUS_TURNS; n += 1) {
+    if (n > 1) {
+      // The supervisor reads the turn that ended and writes the next prompt.
+      const said = focusPrompt(n);
+      journal.advance(1).emit("agentgraph", "turn-started", supervisor, {
+        turn: journal.nextTurn(supervisor.session), role: "assistant",
+        instruction: `The worker's turn ${n - 1} ended: ${focusAnswer(n - 1)} Write its next prompt.`,
+        started_at: stamp(journal.at), model: "a-model",
+      });
+      journal.advance(1).emit("agentgraph", "turn-message", supervisor, {
+        turn: journal.turns.get(supervisor.session), role: "assistant", text: said,
+      });
+    }
+    relayed(worker, 1, n, focusPrompt(n), focusEvents(n), focusAnswer(n));
+    if (n % 8 === 0) {
+      const verdict = `Turns ${n - 7}–${n} meet the criterion: each panel is one commit and its tests pass.`;
+      relayed(judge, 2, n / 8, `Judge the worker's turns ${n - 7} to ${n} against: one commit per panel, tests passing.`, [
+        { kind: "reasoning", name: null, input: null, output: `Reading turns ${n - 7} to ${n} of the worker's conversation.`, index: 0, tool_call_id: null },
+        { kind: "message", name: null, input: null, output: verdict, index: 1, tool_call_id: null },
+      ], verdict);
+    }
+  }
+  journal.advance(1).emit("agentgraph", "member-settled", { ...run, node: "panels", member: "worker", persona: "worker" },
+    { completed: true, verdict: [], completion_reason: "every panel is tidied" });
+  journal.advance(1).emit("pipeline", "node-settled", { ...run, node: "panels" }, { status: "done", outcome: "merged" });
+
+  // A drafter's standalone harness session, pointed at by one oneharness-session record.
+  const drafted = { session: `${FOCUS_STREAM}-pr-author-01`, historyId: focusHistoryId(3, 1) };
+  writeFocusHistory(store, {
+    ...drafted, started: stamp(journal.at),
+    prompt: "Draft the change request for the panels branch: say what changed and how it was checked.",
+    events: [
+      { kind: "reasoning", name: null, input: null, output: "Reading the branch's commits to describe them.", index: 0, tool_call_id: null },
+      { kind: "tool_call", name: "Bash", input: { command: "git log --oneline main..HEAD" }, output: null, index: 1, tool_call_id: "toolu_focus_pr_1", status: "completed" },
+      { kind: "tool_result", name: "Bash", input: null, output: "a1 style: tidy the run list\nb2 style: tidy the node header", index: 2, tool_call_id: "toolu_focus_pr_1", status: "completed" },
+      { kind: "message", name: null, input: null, output: "Drafted: one commit per panel, each with its tests passing.", index: 3, tool_call_id: null },
+    ],
+    text: "Drafted: one commit per panel, each with its tests passing.",
+  });
+  journal.advance(1).emit("pipeline", "node-dispatched", { ...run, node: "drafted", persona: "pr-author" });
+  journal.advance(1).emit("agentgraph", "oneharness-session",
+    { ...run, node: "drafted", member: "pr-author", persona: "pr-author" },
+    { role: "agent", turn: 1, identity: "claude-code:alternate", history_id: drafted.historyId,
+      history_dir: store, history_project: FOCUS_PROJECT, history_session: drafted.session },
+    [{ id: drafted.historyId, kind: "oneharness_session", bytes: 0 }]);
+  journal.advance(1).emit("pipeline", "node-settled", { ...run, node: "drafted" }, { status: "done", outcome: "published" });
+  Journal.writeMerged(journal.path, [journal]);
+  void dir;
+}
+
+export function focusSpikeFacts() {
+  return { run: FOCUS_RUN, turns: FOCUS_TURNS };
+}

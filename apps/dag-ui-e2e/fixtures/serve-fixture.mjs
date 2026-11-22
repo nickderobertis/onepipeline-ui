@@ -103,6 +103,8 @@ import {
   buildRuns,
   buildShutdownRuns,
   buildTranscriptRuns,
+  buildFocusSpikeRuns,
+  focusSpikeFacts,
   churnLive,
   commandStepsFacts,
   eventListFacts,
@@ -519,6 +521,7 @@ function parseArgs(argv) {
     "--review-loop-corpus",
     "--command-steps-corpus",
     "--refusals-corpus",
+    "--focus-spike-corpus",
     "--event-list-corpus",
     "--held-turn-corpus",
     "--large-run-views-corpus",
@@ -897,6 +900,8 @@ if (args.stall) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
       } else if (args["command-steps-corpus"]) {
         corpus = { build: buildCommandStepsRuns, facts: commandStepsFacts };
+      } else if (args["focus-spike-corpus"]) {
+        corpus = { build: buildFocusSpikeRuns, facts: focusSpikeFacts };
       } else if (args["refusals-corpus"]) {
         corpus = { build: buildRefusalsRuns, facts: refusalsFacts };
       } else if (args["event-list-corpus"]) {
