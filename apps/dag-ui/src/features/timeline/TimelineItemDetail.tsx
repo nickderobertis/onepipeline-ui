@@ -1239,6 +1239,8 @@ function RecordContent({
           Object.entries(event.fields ?? {}).filter(([key]) => !shown.has(key)),
         );
   if (shown !== undefined && Object.keys(fields).length === 0) return null;
+  // SPIKE: a harness session reads as its conversation alone, with no field list under it.
+  if (event.kind === "oneharness-session") return null;
   const argv =
     event.kind === "command-started" ? argvOf(fields.command) : undefined;
   return (
