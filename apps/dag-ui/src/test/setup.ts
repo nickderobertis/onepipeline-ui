@@ -3,6 +3,16 @@ import "@testing-library/jest-dom/vitest";
 // jsdom has no layout-backed scrolling. Timeline v2 deliberately calls this browser
 // boundary; keep component tests at that boundary instead of replacing the hook.
 Element.prototype.scrollIntoView ??= () => undefined;
+// The same boundary for an element scrolled to an offset: `@oneharness/ui`'s focus
+// placement, and this app's own for a missing turn's note, scroll the drawer this
+// way. With no layout there is no distance to cover, so it only moves `scrollTop`.
+Element.prototype.scrollTo ??= function scrollTo(
+  this: Element,
+  options?: ScrollToOptions | number,
+) {
+  if (typeof options === "object" && options.top !== undefined)
+    this.scrollTop = options.top;
+};
 
 // The views render every stamp in the reader's own zone, so the assertions on those
 // words only mean something against a fixed one. Set before any test file — and so

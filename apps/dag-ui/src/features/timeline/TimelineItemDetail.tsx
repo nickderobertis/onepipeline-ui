@@ -23,6 +23,7 @@ import {
 } from "@oneharness/ui";
 import type {
   AgentRole,
+  ConversationItem,
   DagConversation,
   Redirection as RedirectionRecord,
   TimelineEvent,
@@ -32,7 +33,7 @@ import type {
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { changeRequestId } from "../../lib/change-request";
 import { argvOf, commandLine } from "../../lib/command-line";
 import { HarnessConversation } from "../../lib/HarnessConversation";
@@ -54,10 +55,18 @@ import {
 } from "./timeline-model";
 import { useConversation } from "./useConversation";
 import { usePinnedHeight } from "./usePinnedHeight";
+import { usePlacedBelowPinned } from "./usePlacedBelowPinned";
 import { useStickyBottom } from "./useStickyBottom";
 
 /** How many turns of a long transcript are handed to the reader at once. */
 const PAGE_SIZE = 25;
+
+/**
+ * How often an open transcript is re-read while the turn the reader opened is not
+ * in it yet: the row names a turn the history store has not written, and nothing
+ * else the panel holds moves when it is.
+ */
+const AWAITED_TURN_REREAD_MS = 2000;
 
 /**
  * The one timeline item the operator opened, expanded across the working area.
@@ -86,16 +95,32 @@ export function TimelineItemDetail({
   const reference = row === undefined ? undefined : referenceOf(row);
   const conversationId =
     reference?.kind === "conversation" ? reference.value : undefined;
+  // Moves only while the turn the reader opened is awaited, so the transcript is
+  // re-read until it lands; every other row's record stays what it was.
+  const [rereads, setRereads] = useState(0);
   const transcript = useConversation(
     client,
     runId,
     conversationId,
-    row === undefined ? undefined : transcriptFingerprint(row),
+    row === undefined ? undefined : `${transcriptFingerprint(row)}|${rereads}`,
   );
+  const awaited = row !== undefined && absenceOf(row, transcript) === "not-yet";
+  useEffect(() => {
+    if (!awaited) return;
+    const timer = setInterval(
+      () => setRereads((count) => count + 1),
+      AWAITED_TURN_REREAD_MS,
+    );
+    return () => clearInterval(timer);
+  }, [awaited]);
   const stickToLastLine = useStickyBottom(
     conversationId,
     availableTurnCount(row, transcript),
   );
+  const harness =
+    reference?.kind === "oneharness_session"
+      ? servableArtifact(reference.value)
+      : undefined;
 
   return (
     <section aria-label="Timeline item detail" className="timeline-detail">
@@ -106,6 +131,23 @@ export function TimelineItemDetail({
               <ListTree size={30} />
               <p>Select an item in the timeline to read what it recorded.</p>
             </div>
+          ) : opensConversation(reference) ? (
+            // One view per item, decided from what the row carries before
+            // anything is read: a conversation item is read in its conversation
+            // alone — no heading, badge or field list — before, during and after
+            // its transcript loads.
+            <Session
+              conversationId={reference?.value ?? ""}
+              row={row}
+              transcript={transcript}
+            />
+          ) : harness !== undefined ? (
+            <HarnessConversation
+              artifactId={harness}
+              client={client}
+              focusFirstPrompt
+              runId={runId}
+            />
           ) : (
             <>
               <ItemHeading row={row} />
@@ -116,12 +158,8 @@ export function TimelineItemDetail({
                 node={node}
                 reference={reference}
                 row={row}
-                transcript={transcript}
               />
-              {/* One view per item, decided from what the row carries: a
-                  conversation item is read in the conversation alone, before,
-                  during and after its transcript loads. */}
-              {row.rowKind === "event" && !opensConversation(reference) && (
+              {row.rowKind === "event" && (
                 <RecordContent
                   client={client}
                   event={row.event}
@@ -147,19 +185,13 @@ function Body({
   row,
   node,
   reference,
-  transcript,
 }: {
   readonly row: TimelineRow;
   readonly client: TelemetryClient;
   readonly runId: string;
   readonly node?: NodeView;
   readonly reference?: TimelineReference;
-  readonly transcript: Transcript;
 }) {
-  // First, and on the reference alone: whatever else a record carries, one whose
-  // reference is a conversation is read in that conversation and nowhere else.
-  if (opensConversation(reference))
-    return <Session row={row} transcript={transcript} />;
   if (row.rowKind === "event" && row.event.kind === "edit-rejected")
     return (
       <Refusal
@@ -210,19 +242,6 @@ function Body({
         runId={runId}
       />
     );
-  if (
-    reference?.kind === "oneharness_session" &&
-    servableArtifact(reference.value) !== undefined
-  )
-    return (
-      <HarnessSession
-        artifactId={reference.value}
-        client={client}
-        reference={reference}
-        row={row}
-        runId={runId}
-      />
-    );
   if (isPublication(row, reference) && node !== undefined)
     return <Publication node={node} reference={reference} />;
   return <Recorded reference={reference} row={row} />;
@@ -253,32 +272,118 @@ function JudgeDecisions({ turn }: { readonly turn: Turn }) {
 }
 
 /**
- * The conversation turn an event row opens: the turn a tool event was published
- * inside, and a turn record's own id otherwise.
+ * The conversation item a row stands for (timeline schema 18): the turn and part
+ * the server read off the record itself, or a span's first turn's prompt.
+ */
+function conversationItemOf(row: TimelineRow): ConversationItem | undefined {
+  if (row.rowKind === "event") return row.event.conversation_item;
+  if (row.rowKind === "span") return row.span.conversation_item;
+  return undefined;
+}
+
+/**
+ * The conversation turn an event row opens: the turn the server names for it, the
+ * turn a tool event was published inside, and a turn record's own id otherwise.
  */
 function turnOf(event: TimelineEvent): string {
-  return event.tool?.turn ?? event.id;
+  return event.conversation_item?.turn ?? event.tool?.turn ?? event.id;
 }
 
 /**
  * Where opening a row puts the reader in its conversation: on the tool call a
  * `turn-activity` record is, by the identity the harness minted for it where the
- * served turn carries that identity, and by the producer's index otherwise. No
- * focus for any other row, which opens the turn as it always has.
+ * served turn carries that identity, and by the producer's index otherwise; on
+ * the part of its turn any other turn-level row or conversation span names. The
+ * focus is kept even where the transcript lacks that turn, because the note that
+ * stands in its place is what is marked until it arrives.
  */
 function focusOf(
   row: TimelineRow,
   turns: readonly Turn[],
 ): ConversationFocus | undefined {
-  if (row.rowKind !== "event" || row.event.tool === undefined) return undefined;
-  const opened = turnOf(row.event);
-  const turn = turns.find(({ id }) => id === opened);
-  if (turn === undefined) return undefined;
-  const { index, tool_call_id: toolCallId } = row.event.tool;
-  return toolCallId !== undefined &&
-    turn.tools.some((tool) => tool.toolCallId === toolCallId)
-    ? { turnId: turn.id, toolCallId }
-    : { turnId: turn.id, eventIndex: index };
+  if (row.rowKind === "event" && row.event.tool !== undefined) {
+    const opened = turnOf(row.event);
+    const turn = turns.find(({ id }) => id === opened);
+    const { index, tool_call_id: toolCallId } = row.event.tool;
+    if (turn === undefined) return { turnId: opened, eventIndex: index };
+    return toolCallId !== undefined &&
+      turn.tools.some((tool) => tool.toolCallId === toolCallId)
+      ? { turnId: turn.id, toolCallId }
+      : { turnId: turn.id, eventIndex: index };
+  }
+  const item = conversationItemOf(row);
+  return item === undefined
+    ? undefined
+    : { turnId: item.turn, part: item.part };
+}
+
+/**
+ * Why the transcript does not hold the turn a row opens, or `undefined` where it
+ * does (or the row opens none, or nothing is read yet). A turn is *not yet* in a
+ * conversation still recording — a live turn the history store has not written,
+ * or one whose place a later turn holds (`gap`) — and *no longer* in one that
+ * has stopped, which no later read will bring back.
+ */
+function absenceOf(
+  row: TimelineRow,
+  transcript: Transcript,
+): "not-yet" | "no-longer" | undefined {
+  const served = transcript.conversation?.conversation;
+  if (served === undefined) return undefined;
+  const item = conversationItemOf(row);
+  const opened = row.rowKind === "event" ? turnOf(row.event) : item?.turn;
+  if (opened === undefined) return undefined;
+  const held =
+    item?.gap !== true && served.turns.some(({ id }) => id === opened);
+  if (held) return undefined;
+  if (item?.gap === true) return "not-yet";
+  // Past every turn the conversation serves, in one still recording: a turn the
+  // history store has not written yet. Anywhere before them, or in one that has
+  // stopped, a turn the store no longer holds.
+  const position = Number(opened.slice(opened.lastIndexOf(".") + 1));
+  return Number.isInteger(position) &&
+    position >= served.turns.length &&
+    !settled(served.state)
+    ? "not-yet"
+    : "no-longer";
+}
+
+/**
+ * Whether a conversation has stopped recording: the run last recorded its member
+ * settling, which is the state a stored report's conversations are served in.
+ */
+function settled(state: string): boolean {
+  return state === "member-settled";
+}
+
+/**
+ * What stands in the place of a turn the transcript lacks: the marked item until
+ * the turn arrives, placed below the pinned card as the turn would be. Its box
+ * keeps room below it, so the turn that replaces it is placed where it stood.
+ */
+function AbsentTurn({
+  turnId,
+  absence,
+}: {
+  readonly turnId: string;
+  readonly absence: "not-yet" | "no-longer";
+}) {
+  const note = useRef<HTMLParagraphElement>(null);
+  usePlacedBelowPinned(note, `${turnId}|${absence}`);
+  return (
+    <div className="conversation-turn-absent" data-turn-id={turnId}>
+      <p
+        aria-current="true"
+        className="detail-note conversation-focus-highlight"
+        ref={note}
+        role="note"
+      >
+        {absence === "not-yet"
+          ? "This turn is not in the recorded transcript yet."
+          : "This turn is no longer part of the recorded transcript."}
+      </p>
+    </div>
+  );
 }
 
 /**
@@ -316,59 +421,49 @@ function RecorderCut({ turn }: { readonly turn: Turn }) {
   );
 }
 
-/** A dispatched session: the turn that was opened, or the whole conversation. */
+/**
+ * A dispatched session: the turn that was opened, or the whole conversation, with
+ * the item the row stands for marked and placed below the pinned timeline.
+ *
+ * Its header is drawn from the first frame, from what the row already carries,
+ * and keeps its height when the transcript arrives, so nothing above the turns
+ * moves under the reader.
+ */
 function Session({
+  conversationId,
   row,
   transcript,
 }: {
+  readonly conversationId: string;
   readonly row: TimelineRow;
   readonly transcript: Transcript;
 }) {
   const [visible, setVisible] = useState(PAGE_SIZE);
-  const availableTurns = transcript.conversation?.conversation.turns ?? [];
+  const served = transcript.conversation;
+  const availableTurns = served?.conversation.turns ?? [];
   const opened = row.rowKind === "event" ? turnOf(row.event) : undefined;
+  const absence = absenceOf(row, transcript);
   const turns: readonly Turn[] =
     opened === undefined
       ? availableTurns
-      : availableTurns.filter(({ id }) => id === opened);
+      : absence === undefined
+        ? availableTurns.filter(({ id }) => id === opened)
+        : [];
   const sync = useTimelineScrollSync(
     turns.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
   );
-  const pinned = usePinnedHeight("--conversation-pinned");
-  if (transcript.loading)
-    return (
-      <div aria-live="polite" className="loading-inline">
-        <Skeleton className="h-2 w-40" />
-        <Skeleton className="h-2 w-24" />
-        Loading transcript…
-      </div>
-    );
-  // Only when there is nothing to read: a revalidation that failed leaves the
-  // transcript already on screen there, which is the whole point of re-reading it
-  // underneath the reader rather than in place of them.
-  // llmlint: ignore[changed_behavior_has_e2e] a conforming server cannot produce this state — it names a transcript in a timeline it just served, so a transcript it then refuses only comes from a peer that raced or broke between the two reads. App.test.tsx proves it against the real telemetry client at its browser boundary.
-  if (transcript.conversation === undefined)
-    return (
-      <Alert variant="destructive">
-        <TriangleAlert />
-        <AlertTitle>Transcript unavailable</AlertTitle>
-        <AlertDescription>
-          <p>
-            {transcript.error?.message ?? "The server recorded no transcript."}
-          </p>
-          {/* What the record itself holds, so nothing is lost while its
-              conversation cannot be read — inside this state, never as a
-              second view beside it. */}
-          {row.rowKind === "event" &&
-            Object.keys(row.event.fields ?? {}).length > 0 && (
-              <FieldList value={row.event.fields ?? {}} />
-            )}
-        </AlertDescription>
-      </Alert>
-    );
-  const { conversation, attribution } = transcript.conversation;
-  const author = roleLabel(attribution.agentRole, attribution.transportRole);
-  const focus = focusOf(row, turns);
+  const pinned = usePinnedHeight("--conversation-focus-offset");
+  const focus = focusOf(row, turns.length === 0 ? availableTurns : turns);
+  // The turn whose place the note stands in, when the transcript lacks it.
+  const missing = absence === undefined ? undefined : (opened ?? focus?.turnId);
+  const author =
+    served === undefined
+      ? dispatchRoleLabel(row.role, row.transport)
+      : roleLabel(
+          served.attribution.agentRole,
+          served.attribution.transportRole,
+        );
+  const persona = served?.attribution.persona;
   // The turns sit on the design system's own card surface rather than straight on
   // the page: `TurnCard` paints its own bubbles and nothing behind them.
   return (
@@ -382,33 +477,68 @@ function Session({
             <p className="eyebrow">
               {row.dispatch === undefined ? "" : `${row.dispatch.label} · `}
               {author}
-              {attribution.persona ? ` · ${attribution.persona}` : ""}
+              {persona ? ` · ${persona}` : ""}
             </p>
-            <h4>{conversation.name}</h4>
+            <h4>{served?.conversation.name ?? conversationId}</h4>
           </div>
-          <StatusBadge state={conversation.state} />
+          {served === undefined ? (
+            <Skeleton className="transcript-state-placeholder" />
+          ) : (
+            <StatusBadge state={served.conversation.state} />
+          )}
         </header>
         <Separator className="my-2.5" />
-        <div className="conversation-timeline-sticky" ref={pinned}>
-          <ConversationPlotHover>
-            <ConversationTimeline
-              cursor={sync.cursor}
-              {...(focus === undefined ? {} : { focus })}
-              onSelectTurn={sync.scrollTo}
-              turns={[...turns]}
-            />
-          </ConversationPlotHover>
-        </div>
-        {/* llmlint: ignore[changed_behavior_has_e2e] the same unproducible state as
-            above, from the other side: a served timeline names this turn, so only a
-            history store rewritten between the two reads drops it. */}
-        {turns.length === 0 ? (
-          <p className="detail-note">
-            This turn is no longer part of the recorded transcript.
-          </p>
+        {transcript.loading ? (
+          <div className="conversation-loading">
+            <div className="conversation-timeline-sticky conversation-timeline-placeholder">
+              <Skeleton className="h-full w-full" />
+            </div>
+            <div aria-live="polite" className="loading-inline">
+              <Skeleton className="h-2 w-40" />
+              <Skeleton className="h-2 w-24" />
+              Loading transcript…
+            </div>
+          </div>
+        ) : served === undefined ? (
+          // Only when there is nothing to read: a revalidation that failed leaves
+          // the transcript already on screen there, which is the whole point of
+          // re-reading it underneath the reader rather than in place of them.
+          // llmlint: ignore[changed_behavior_has_e2e] a conforming server cannot produce this state — it names a transcript in a timeline it just served, so a transcript it then refuses only comes from a peer that raced or broke between the two reads. App.test.tsx proves it against the real telemetry client at its browser boundary.
+          <Alert variant="destructive">
+            <TriangleAlert />
+            <AlertTitle>Transcript unavailable</AlertTitle>
+            <AlertDescription>
+              <p>
+                {transcript.error?.message ??
+                  "The server recorded no transcript."}
+              </p>
+              {/* What the record itself holds, so nothing is lost while its
+                  conversation cannot be read — inside this state, never as a
+                  second view beside it. */}
+              {row.rowKind === "event" &&
+                Object.keys(row.event.fields ?? {}).length > 0 && (
+                  <FieldList value={row.event.fields ?? {}} />
+                )}
+            </AlertDescription>
+          </Alert>
         ) : (
           <>
+            <div className="conversation-timeline-sticky" ref={pinned}>
+              <ConversationPlotHover>
+                <ConversationTimeline
+                  cursor={sync.cursor}
+                  {...(focus === undefined || absence !== undefined
+                    ? {}
+                    : { focus })}
+                  onSelectTurn={sync.scrollTo}
+                  turns={[...turns]}
+                />
+              </ConversationPlotHover>
+            </div>
             <div className="conversation-turns" ref={sync.containerRef}>
+              {absence !== undefined && missing !== undefined && (
+                <AbsentTurn absence={absence} turnId={missing} />
+              )}
               {turns.slice(0, visible).map((turn) => (
                 <div
                   key={turn.id}
@@ -423,6 +553,12 @@ function Session({
                   <JudgeDecisions turn={turn} />
                 </div>
               ))}
+              {/* Room below a single opened turn, so the item it opened on can be
+                  placed below the pinned card however short the turn is — and
+                  stays where it was placed when the turn replaces its note. */}
+              {opened !== undefined && (
+                <div aria-hidden="true" className="conversation-focus-room" />
+              )}
             </div>
             {turns.length > visible && (
               <Button
@@ -518,38 +654,6 @@ function SettledReport({
         noun="report"
         runId={runId}
         unreadable="This run kept no readable copy of that report."
-      />
-      <Recorded reference={reference} row={row} />
-    </>
-  );
-}
-
-/**
- * The conversation one oneharness invocation had — the prompt it ran, every tool
- * it called, the text it finished on — read whole by the server from the history
- * file and drawn as the conversation turn it was, through the design system's own
- * `TurnCard`. A pointer at a transcript the store no longer holds is said in the
- * server's own words, naming the file and why.
- */
-function HarnessSession({
-  artifactId,
-  client,
-  reference,
-  row,
-  runId,
-}: {
-  readonly artifactId: string;
-  readonly client: TelemetryClient;
-  readonly reference: TimelineReference;
-  readonly row: TimelineRow;
-  readonly runId: string;
-}) {
-  return (
-    <>
-      <HarnessConversation
-        artifactId={artifactId}
-        client={client}
-        runId={runId}
       />
       <Recorded reference={reference} row={row} />
     </>

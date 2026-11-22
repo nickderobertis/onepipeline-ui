@@ -987,12 +987,57 @@ p {
   padding-bottom: 10px;
   background: var(--card);
 }
-/* A scroll to a turn, or to the item a panel opened on within one, stops below the
-   pinned timeline rather than under it (`usePinnedHeight` keeps its height). */
+/* A scroll to a turn stops below the pinned timeline rather than under it
+   (`usePinnedHeight` keeps its height as `--conversation-focus-offset`). */
 .conversation-turns > div,
-.conversation-turns article,
-.conversation-turns [aria-current="true"] {
-  scroll-margin-top: calc(var(--conversation-pinned, 0px) + 8px);
+.conversation-turns article {
+  scroll-margin-top: calc(var(--conversation-focus-offset, 0px) + 8px);
+}
+/* The item a panel opened on is placed with its top at the pinned timeline's
+   bottom edge, by the package's focus placement (and `usePlacedBelowPinned` for
+   the note standing in a missing turn's place). */
+.conversation-turns article[aria-current="true"],
+.conversation-turns [data-turn-id] [aria-current="true"] {
+  scroll-margin-top: var(--conversation-focus-offset, 0px);
+}
+/* Held at the height the loaded timeline takes, so the turns arriving under it
+   move nothing above them. */
+.conversation-timeline-placeholder {
+  height: 92px;
+}
+.transcript-header > div {
+  min-width: 0;
+}
+.transcript-header .eyebrow,
+.transcript-header h4 {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.transcript-header {
+  flex-wrap: nowrap;
+}
+.transcript-state-placeholder {
+  width: 72px;
+  height: 22px;
+}
+/* A missing turn's note, in that turn's place, and the room below a single opened
+   turn that lets its item be placed below the pinned timeline. */
+.conversation-turn-absent {
+  margin: 0 auto 42px;
+  max-width: 850px;
+}
+.conversation-turn-absent [role="note"] {
+  padding: 12px 14px;
+  border-radius: 10px;
+}
+.conversation-focus-room {
+  height: 100vh;
+}
+/* An oneharness invocation opened from the timeline has no pinned card: its item
+   is placed clear of the panel's own Close control instead. */
+.harness-conversation-focused {
+  --conversation-focus-offset: 52px;
 }
 .node-timeline-sticky [data-testid="timeline-cursor"] {
   pointer-events: none;

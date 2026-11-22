@@ -4,6 +4,7 @@ import {
   AlertTitle,
   Card,
   CardContent,
+  type ConversationFocus,
   TurnCard,
 } from "@oneharness/ui";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
@@ -21,14 +22,19 @@ import { useRead } from "./useRead";
  * In `lib` because two features open one: the timeline's detail panel opens the
  * session a record relayed, and the agents panel opens the session a pointer line
  * names. Each asks by the opaque history id and never by a path.
+ *
+ * `focusFirstPrompt` is the timeline's: an `oneharness-session` record opens its
+ * invocation at the prompt it ran, marked and placed clear of the panel's Close.
  */
 export function HarnessConversation({
   artifactId,
   client,
+  focusFirstPrompt = false,
   runId,
 }: {
   readonly artifactId: string;
   readonly client: TelemetryClient;
+  readonly focusFirstPrompt?: boolean;
   readonly runId: string;
 }) {
   // A run id never holds a slash, so the pair cannot spell another pair.
@@ -38,6 +44,11 @@ export function HarnessConversation({
     0,
   );
   const turns = artifact.value?.turns ?? [];
+  const first = turns[0];
+  const focus: ConversationFocus | undefined =
+    focusFirstPrompt && first !== undefined
+      ? { turnId: first.id, part: "prompt" }
+      : undefined;
   return (
     <>
       <h3 className="detail-heading">Oneharness conversation</h3>
@@ -56,10 +67,20 @@ export function HarnessConversation({
           <AlertDescription>{artifact.value.unavailable}</AlertDescription>
         </Alert>
       ) : (
-        <Card className="gap-0 py-3">
+        <Card
+          className={
+            focusFirstPrompt
+              ? "harness-conversation-focused gap-0 py-3"
+              : "gap-0 py-3"
+          }
+        >
           <CardContent className="px-3">
             {turns.map((turn) => (
-              <TurnCard key={turn.id} turn={turn} />
+              <TurnCard
+                key={turn.id}
+                {...(focus?.turnId === turn.id ? { focus } : {})}
+                turn={turn}
+              />
             ))}
           </CardContent>
         </Card>
