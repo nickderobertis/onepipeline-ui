@@ -805,11 +805,24 @@ test("a span opened while it runs shows its end when the run records it, over wh
   await expect(session).toContainText("running");
   await session.click();
   const detail = page.getByRole("complementary");
-  await expect(detail).toContainText("still running");
+  const stream = `a-recording-host-${run}`;
+  // The open detail is the session's conversation, headed by the state the
+  // served conversation is in.
+  const conversationState = async () => {
+    const served = await page.request.get(
+      `${server.origin}/api/v2/runs/${run}/conversations/${stream}-${node}.worker`,
+    );
+    return z
+      .object({ conversation: z.object({ state: z.string() }) })
+      .parse(await served.json()).conversation.state;
+  };
+  const running = await conversationState();
+  // llmlint: ignore-next-line[e2e_uses_accessible_selectors] the transcript's own header has no role or accessible name of its own; it is the one place the conversation's state is drawn, which is what this journey follows.
+  const header = detail.locator(".transcript-header");
+  await expect(header).toContainText(running);
   await expect.poll(() => spanPages.length).toBeGreaterThan(0);
   // The run records the session's end and the node's settlement.
   const seq = nextSeq(server, run);
-  const stream = `a-recording-host-${run}`;
   const at = new Date().toISOString();
   appendRecords(journalOf(server, run), [
     {
@@ -858,6 +871,8 @@ test("a span opened while it runs shows its end when the run records it, over wh
   };
   await expect.poll(servedStatus, { timeout: FRAME_PATIENCE }).toBe("done");
   await expect(session).toContainText("done", { timeout: FRAME_PATIENCE });
-  await expect(detail).not.toContainText("still running");
-  await expect(detail).toContainText("done");
+  const ended = await conversationState();
+  expect(ended).not.toBe(running);
+  await expect(header).toContainText(ended, { timeout: FRAME_PATIENCE });
+  await expect(header).not.toContainText(running);
 });
