@@ -711,18 +711,20 @@ test("opens a node's timeline, reads one recorded moment, and returns", async ({
   const reading = itemDetail(page).locator("[data-radix-scroll-area-viewport]");
   const readingTop = () =>
     reading.evaluate((element) => Math.round(element.scrollTop));
-  expect(await readingTop()).toBe(0);
-  // Expanded first, because a collapsed line stacks turns and the tool calls inside
-  // them on one row — which is what collapsing is for, and what makes any single one
-  // of them unreachable by pointer.
-  await conversationTimeline
-    .getByRole("button", { name: "Expand timeline" })
-    .click();
+  // A span opens at its first turn's prompt, placed below the pinned timeline.
+  await expectOpenedAtFirstPrompt(page);
+  const opened = await readingTop();
+  // Already expanded, as the line the opened item is marked on is drawn: a collapsed
+  // line stacks turns and the tool calls inside them on one row, which is what makes
+  // any single one of them unreachable by pointer.
+  await expect(
+    conversationTimeline.getByRole("button", { name: "Collapse timeline" }),
+  ).toBeVisible();
   await conversationTimeline
     .getByRole("button", { name: /oneagentgraph turn/ })
     .last()
     .click();
-  await expect.poll(readingTop).toBeGreaterThan(0);
+  await expect.poll(readingTop).toBeGreaterThan(opened);
   // Pinned, not carried off: the turns scroll under it and it is still on screen.
   await expect(conversationTimeline).toBeInViewport();
   await reading.hover();
@@ -1886,12 +1888,12 @@ test("reads a relayed turn and the oneharness conversation behind it", async ({
     "oneharness-history",
   );
 
-  // The record itself stays beside the conversation rather than being replaced
-  // by it, and it is reachable from the keyboard like every other control here.
-  await expect(itemDetail(page)).toContainText("Recorded at");
-  await expect(itemDetail(page)).toContainText(
-    fixture().artifacts.harness_session,
-  );
+  // The conversation is the record's only view: no field list or recorded time
+  // under it to scroll past (timeline schema 18's table, docs/contract.md).
+  await expect(
+    itemDetail(page).getByRole("region", { name: "Recorded fields" }),
+  ).toHaveCount(0);
+  await expect(itemDetail(page)).not.toContainText("Recorded at");
 
   // The other half: a pointer at a conversation the store no longer holds. The
   // record is still in the run, and the panel says it is gone in the resolver's
@@ -4515,12 +4517,56 @@ test("follows a growing transcript only while the reader is at its end", async (
     "Implementing the dashboard now",
   );
 
-  // Opening this long a session lands at its beginning: following a transcript that
-  // is still being written is not the same as skipping to the last thing it said.
+  // Opening this long a session lands at its first turn's prompt: following a
+  // transcript that is still being written is not the same as skipping to the last
+  // thing it said.
   await page.reload();
   await expect(itemDetail(page)).toContainText("Dashboard turn 20 arrived");
-  expect((await detailScroll(page)).top).toBe(0);
+  await expectOpenedAtFirstPrompt(page);
+  expect((await detailScroll(page)).bottom).toBeGreaterThan(40);
 });
+
+/**
+ * A conversation span opens with its first turn's prompt marked, wholly in the
+ * panel's scroll viewport below the pinned conversation timeline, where the panel
+ * put it: nothing here scrolls.
+ */
+async function expectOpenedAtFirstPrompt(page: Page): Promise<void> {
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` and `data-turn-part` are the package's own marks of the item a panel opened on, and `data-turn-id` its only name for a turn's article; the scroll viewport is the scroll-area's own slot, with no role or name. The criterion is about that one element's box.
+  const marked = itemDetail(page).locator(
+    '[data-turn-id] [aria-current="true"][data-turn-part="prompt"]',
+  );
+  const first = itemDetail(page).locator("[data-turn-id]").first();
+  const viewport = itemDetail(page).locator(
+    '[data-slot="scroll-area-viewport"]',
+  );
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
+  await expect(marked).toHaveCount(1);
+  const firstTurn = await first.getAttribute("data-turn-id");
+  expect(
+    await marked.evaluate(
+      (element) =>
+        element.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId,
+    ),
+  ).toBe(firstTurn);
+  const pinned = itemDetail(page).getByRole("region", {
+    name: "Conversation timeline",
+  });
+  await expect
+    .poll(async () => {
+      const [item, card, view] = await Promise.all([
+        marked.boundingBox(),
+        pinned.boundingBox(),
+        viewport.boundingBox(),
+      ]);
+      if (item === null || card === null || view === null) return false;
+      return (
+        item.y >= card.y + card.height - 0.5 &&
+        item.y + item.height <= view.y + view.height + 0.5
+      );
+    })
+    .toBe(true);
+}
 
 test("keeps the list a reader scrolled to when a run moves", async ({
   page,

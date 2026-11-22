@@ -25,6 +25,17 @@ they stay out of each other's way, which costs more than everything else here
 together and answers one question nothing else asks. Each edge is what a reader
 can ask for without paying for the rest; `check` pays for all of it.
 
+## Where an opened item stands is the view's, measured from the first frame
+
+`dag-ui-conversation-focus.spec.ts` holds every conversation row and span to the
+item timeline schema 18 names (`docs/contract.md`), and the rule it holds is
+what earlier journeys missed while a reader saw the failure: the **whole** box
+of the marked item lies in the drawer's scroll viewport below the pinned card,
+**nothing in the test scrolls it there**, and that holds **from the first frame**
+after the click, recorded by `focus-recorder.ts` on every frame and mutation. A
+helper that scrolls the item into view before measuring, or that checks only its
+top edge, passes on exactly the view a reader cannot use.
+
 ## `read-latency/`: a project of its own, for timings
 
 `dag-ui-read-latency` records what its budgets read, so nothing may time beside it and
