@@ -16,7 +16,8 @@ export function spikeTarget(row: TimelineRow, turnTexts: readonly { user: string
   const fields = fieldsOf(row);
   const turnNo = typeof fields.turn === "number" ? fields.turn : undefined;
   const label = row.displayLabel;
-  const supervisor = (row as { member?: string }).member === "supervisor" || /supervisor/.test(JSON.stringify(event.labels ?? {}));
+  // In the fixture only the supervisor's turn records carry no transcript.
+  const supervisor = (event.kind === "turn-message" || event.kind === "turn-started") && fields.transcript === undefined;
   if (supervisor && event.kind === "turn-message") {
     const said = typeof fields.text === "string" ? fields.text : label;
     const at = turnTexts.findIndex((t) => t.user.trim() === said.trim());
@@ -25,7 +26,7 @@ export function spikeTarget(row: TimelineRow, turnTexts: readonly { user: string
   if (supervisor && event.kind === "turn-started") return { turn: Math.max(1, Math.floor(((turnNo ?? 1) + 1 - 1) / 8)), part: "prompt" };
   if (event.kind === "oneharness-session") return { turn: 1, part: "prompt" };
   if (event.kind === "turn-started" && turnNo) return { turn: turnNo, part: "prompt" };
-  if (event.kind === "turn-message" && turnNo) return { turn: turnNo, part: "answer" };
+  if (event.kind === "turn-message" && turnNo) return { turn: turnNo, part: "answer", text: typeof fields.text === "string" ? fields.text : undefined };
   if (event.kind === "turn-completed" && turnNo) return { turn: turnNo, part: "end" };
   if (event.tool?.tool_call_id) {
     const at = turnTexts.findIndex((t) => t.tools.includes(event.tool?.tool_call_id ?? ""));
@@ -70,7 +71,11 @@ export function spikeApply(root: HTMLElement, target: Target): void {
   }
   let element: HTMLElement | null = null;
   if (target.part === "prompt") element = turn.querySelector<HTMLElement>(".rounded-\\[22px_22px_5px_22px\\]");
-  if (target.part === "answer") element = [...turn.querySelectorAll<HTMLElement>('[aria-label="Agent message"]')].at(-1) ?? null;
+  if (target.part === "answer") {
+    // The smallest element whose whole text is the recorded answer.
+    const said = target.text?.trim();
+    element = [...turn.querySelectorAll<HTMLElement>("*")].filter((e) => e.textContent?.trim() === said).at(-1) ?? null;
+  }
   if (target.part === "end") element = turn.querySelector<HTMLElement>('[aria-label="Usage"]');
   if (target.part === "tool") element = turn.querySelector<HTMLElement>(`[data-tool-call-id="${target.toolCallId}"]`);
   place(root, element);

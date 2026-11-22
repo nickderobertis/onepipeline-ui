@@ -1163,6 +1163,11 @@ function referenceOf(row: TimelineRow): TimelineReference | undefined {
     if (row.event.kind === "turn-message" && row.event.reference?.kind !== "conversation" && typeof session === "string") {
       return { kind: "conversation", value: session } as TimelineReference;
     }
+    // SPIKE: the supervisor's turn records carry no transcript; hard-coded to the
+    // fixture's supervisor conversation, which spikeRedirect then sends onwards.
+    if ((row.event.kind === "turn-message" || row.event.kind === "turn-started") && transcript === undefined && row.event.reference?.kind !== "conversation") {
+      return { kind: "conversation", value: "node-scope-1793000000000-4600.supervisor" } as TimelineReference;
+    }
     return row.event.reference;
   }
   return undefined;
