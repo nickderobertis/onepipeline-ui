@@ -3564,7 +3564,6 @@ impl<'a> Transcripts<'a> {
         }
     }
 
-    /// One session's transcript, by its id.
     fn session(&self, session: &str) -> Option<&SessionTranscript<'a>> {
         self.sessions.get(*self.by_session.get(session)?)
     }
@@ -7376,10 +7375,12 @@ impl TurnPart {
 }
 
 /// The conversation item one row or span stands for: `conversation_item` on the
-/// wire, and the conversation its `reference` names.
+/// wire, and the conversation its `reference` names. The turn is held as its
+/// 0-based position in that conversation, so its id — the conversation's own with
+/// the position after it — cannot name a turn of another conversation.
 struct ConversationItem {
-    conversation: String,
-    turn: String,
+    conversation: ConversationId,
+    position: u64,
     part: TurnPart,
     /// Whether the transcript row at `turn` records a different turn than the
     /// one named — a session whose journal relayed a later turn before an
@@ -7391,8 +7392,8 @@ struct ConversationItem {
 impl ConversationItem {
     fn to_value(&self) -> Value {
         let mut item = json!({
-            "conversation": self.conversation,
-            "turn": self.turn,
+            "conversation": self.conversation.as_str(),
+            "turn": format!("{}.{}", self.conversation, self.position),
             "part": self.part.as_str(),
         });
         if self.gap {
@@ -7401,14 +7402,21 @@ impl ConversationItem {
         item
     }
 
-    /// A conversation span's item: the first turn of the conversation it draws,
-    /// whose id is the conversation's own with the turn's 0-based place after it.
-    fn first_of(conversation: &str) -> Self {
-        Self {
-            conversation: conversation.to_owned(),
-            turn: format!("{conversation}.0"),
+    /// A conversation span's item: the prompt of the first turn of the
+    /// conversation it draws, or `None` for an id no route could be asked for.
+    fn first_of(conversation: &str) -> Option<Self> {
+        Some(Self {
+            conversation: ConversationId::try_from(conversation).ok()?,
+            position: 0,
             part: TurnPart::Prompt,
             gap: false,
+        })
+    }
+
+    /// Insert this item, where there is one, as `span`'s `conversation_item`.
+    fn insert_first_of(span: &mut Map<String, Value>, conversation: &str) {
+        if let Some(item) = Self::first_of(conversation) {
+            span.insert("conversation_item".into(), item.to_value());
         }
     }
 }
@@ -7444,16 +7452,17 @@ fn conversation_item(event: &Envelope, transcripts: &Transcripts<'_>) -> Option<
         return None;
     }
     let session = session_label(event)?;
+    let conversation = ConversationId::try_from(session).ok()?;
     let number = event
         .payload
         .get(graph::TURN)
         .and_then(Value::as_u64)
         .filter(|number| *number >= 1)?;
-    let agent = |turn: u64, part: TurnPart| ConversationItem {
-        conversation: session.to_owned(),
-        turn: format!("{session}.{turn}"),
+    let agent = |position: u64, part: TurnPart| ConversationItem {
+        conversation: conversation.clone(),
+        position,
         part,
-        gap: holds_another_turn(transcripts, session, turn),
+        gap: holds_another_turn(transcripts, session, position),
     };
     if agent_turn(event) {
         let part = match kind {
@@ -7471,14 +7480,13 @@ fn conversation_item(event: &Envelope, transcripts: &Transcripts<'_>) -> Option<
     } else {
         TurnPart::End
     };
-    let judged = judge_turn_of(transcripts, session, number).map(|index| {
-        let id = judge_session(session);
-        ConversationItem {
-            turn: format!("{id}.{index}"),
-            conversation: id,
+    let judged = judge_turn_of(transcripts, session, number).and_then(|index| {
+        Some(ConversationItem {
+            conversation: ConversationId::try_from(judge_session(session)).ok()?,
+            position: u64::try_from(index).ok()?,
             part,
             gap: false,
-        }
+        })
     });
     Some(judged.unwrap_or_else(|| agent(number - 1, TurnPart::End)))
 }
@@ -7838,10 +7846,7 @@ fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &End
             "reference".into(),
             json!({ "kind": "conversation", "value": session }),
         );
-        span.insert(
-            "conversation_item".into(),
-            ConversationItem::first_of(session).to_value(),
-        );
+        ConversationItem::insert_first_of(&mut span, session);
         lens.fill(&mut span, &relayed);
         spans.push(Value::Object(span));
     }
@@ -8872,10 +8877,7 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 "reference".into(),
                 json!({ "kind": "conversation", "value": session }),
             );
-            span.insert(
-                "conversation_item".into(),
-                ConversationItem::first_of(session).to_value(),
-            );
+            ConversationItem::insert_first_of(&mut span, session);
         }
         lens.fill(&mut span, &relayed);
         let sibling = judge_span(lens.transcripts, session, &span);
@@ -8925,10 +8927,7 @@ fn judge_span(
         "reference".into(),
         json!({ "kind": "conversation", "value": id }),
     );
-    span.insert(
-        "conversation_item".into(),
-        ConversationItem::first_of(&id).to_value(),
-    );
+    ConversationItem::insert_first_of(&mut span, &id);
     span.insert("events".into(), json!(Vec::<Value>::new()));
     Some(Value::Object(span))
 }
