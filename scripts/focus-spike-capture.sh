@@ -10,7 +10,7 @@ restore() { git checkout -q HEAD -- apps/dag-ui/src; git clean -qfd apps/dag-ui/
 trap restore EXIT
 git diff "$mock^" "$mock" -- apps/dag-ui/src | git apply -R
 status=0
-SPIKE_SIDE=before SHOTS_OUT="$out" bash scripts/visual-capture.sh -- --grep 'before 0[1-6]-' || status=$?
+SPIKE_SIDE=before SHOTS_OUT="$out" bash scripts/visual-capture.sh --grep 'before 0[1-6]-' || status=$?
 restore
-SPIKE_SIDE=after SHOTS_OUT="$out" bash scripts/visual-capture.sh -- --grep 'after 0[1-6]-' || status=$?
+SPIKE_SIDE=after SHOTS_OUT="$out" bash scripts/visual-capture.sh --grep 'after 0[1-6]-' || status=$?
 exit "$status"
