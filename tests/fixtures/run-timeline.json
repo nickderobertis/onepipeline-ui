@@ -2,7 +2,7 @@
   "api_version": 2,
   "telemetry_schema_version": 30,
   "observed_at": "2026-08-07T12:00:00Z",
-  "timeline_schema_version": 17,
+  "timeline_schema_version": 18,
   "run_id": "run-20260807-a1b2c3",
   "spans": [
     {
@@ -218,6 +218,11 @@
             "kind": "conversation",
             "value": "node-scope-1786925518098-3163646.worker"
           },
+          "conversation_item": {
+            "conversation": "node-scope-1786925518098-3163646.worker",
+            "turn": "node-scope-1786925518098-3163646.worker.0",
+            "part": "prompt"
+          },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
             "label": "Dispatch 1",
@@ -272,6 +277,11 @@
           "reference": {
             "kind": "conversation",
             "value": "node-scope-1786925518098-3163646.worker"
+          },
+          "conversation_item": {
+            "conversation": "node-scope-1786925518098-3163646.worker",
+            "turn": "node-scope-1786925518098-3163646.worker.1",
+            "part": "prompt"
           },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
@@ -770,6 +780,11 @@
         "kind": "conversation",
         "value": "node-scope-1786925518098-3163646.worker"
       },
+      "conversation_item": {
+        "conversation": "node-scope-1786925518098-3163646.worker",
+        "turn": "node-scope-1786925518098-3163646.worker.0",
+        "part": "prompt"
+      },
       "events": [
         {
           "id": "node-scope-1786925518098-3163646.worker.0",
@@ -789,6 +804,11 @@
           "reference": {
             "kind": "conversation",
             "value": "node-scope-1786925518098-3163646.worker"
+          },
+          "conversation_item": {
+            "conversation": "node-scope-1786925518098-3163646.worker",
+            "turn": "node-scope-1786925518098-3163646.worker.0",
+            "part": "prompt"
           },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
@@ -844,6 +864,11 @@
           "reference": {
             "kind": "conversation",
             "value": "node-scope-1786925518098-3163646.worker"
+          },
+          "conversation_item": {
+            "conversation": "node-scope-1786925518098-3163646.worker",
+            "turn": "node-scope-1786925518098-3163646.worker.1",
+            "part": "prompt"
           },
           "dispatch_group": {
             "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",

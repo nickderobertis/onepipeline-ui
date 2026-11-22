@@ -7335,6 +7335,144 @@ impl SurfaceStates {
 }
 // llmlint: ignore-end[code_lands_in_the_domain_that_owns_it]
 
+/// Which part of a conversation turn a timeline row stands for (timeline schema 18).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TurnPart {
+    /// The turn's prompt: what it was asked.
+    Prompt,
+    /// The turn's final answer.
+    Answer,
+    /// Where the turn ended: its usage and any failure.
+    End,
+}
+
+impl TurnPart {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Prompt => "prompt",
+            Self::Answer => "answer",
+            Self::End => "end",
+        }
+    }
+}
+
+/// The conversation item one row or span stands for: `conversation_item` on the
+/// wire, and the conversation its `reference` names.
+struct ConversationItem {
+    conversation: String,
+    turn: String,
+    part: TurnPart,
+}
+
+impl ConversationItem {
+    fn to_value(&self) -> Value {
+        json!({
+            "conversation": self.conversation,
+            "turn": self.turn,
+            "part": self.part.as_str(),
+        })
+    }
+
+    /// A conversation span's item: the first turn of the conversation it draws,
+    /// whose id is the conversation's own with the turn's 0-based place after it.
+    fn first_of(conversation: &str) -> Self {
+        Self {
+            conversation: conversation.to_owned(),
+            turn: format!("{conversation}.0"),
+            part: TurnPart::Prompt,
+        }
+    }
+}
+
+/// The conversation item a turn-level record stands for, read off the record's
+/// own session and turn number (`docs/contract.md`, timeline schema 18).
+///
+/// **From the record, never from whether the transcript holds the turn**, so a
+/// live turn the history store has not written yet, and one it no longer holds,
+/// is still named: turn `N` of a session is the transcript row the fold numbers
+/// `<session>.<N-1>`, because [`transcript_turns`] orders a session's rows by
+/// that number. An agent's three records are its turn's prompt, answer and end.
+/// A supervisor's are the other party's (`role` other than the agent's): its
+/// `turn-message` is the prompt of the agent turn after the one it judged, and
+/// its `turn-started` and `turn-completed` are its own Nth invocation — the
+/// judge conversation's turn the fold numbers for it where the run serves that
+/// conversation, and otherwise the end of the agent reply being judged.
+///
+/// `None` for anything else, a `turn-activity` included: it is placed by its
+/// `tool`, as schema 14 says.
+fn conversation_item(event: &Envelope, transcripts: &Transcripts<'_>) -> Option<ConversationItem> {
+    if event.source != Source::Agentgraph {
+        return None;
+    }
+    let kind = event.kind.0.as_str();
+    if ![
+        graph::TURN_STARTED,
+        graph::TURN_MESSAGE,
+        graph::TURN_COMPLETED,
+    ]
+    .contains(&kind)
+    {
+        return None;
+    }
+    let session = session_label(event)?;
+    let number = event
+        .payload
+        .get(graph::TURN)
+        .and_then(Value::as_u64)
+        .filter(|number| *number >= 1)?;
+    let agent = |turn: u64, part: TurnPart| ConversationItem {
+        conversation: session.to_owned(),
+        turn: format!("{session}.{turn}"),
+        part,
+    };
+    if agent_turn(event) {
+        let part = match kind {
+            graph::TURN_STARTED => TurnPart::Prompt,
+            graph::TURN_MESSAGE => TurnPart::Answer,
+            _ => TurnPart::End,
+        };
+        return Some(agent(number - 1, part));
+    }
+    if kind == graph::TURN_MESSAGE {
+        return Some(agent(number, TurnPart::Prompt));
+    }
+    let part = if kind == graph::TURN_STARTED {
+        TurnPart::Prompt
+    } else {
+        TurnPart::End
+    };
+    let judged = judge_turn_of(transcripts, session, number).map(|index| {
+        let id = judge_session(session);
+        ConversationItem {
+            turn: format!("{id}.{index}"),
+            conversation: id,
+            part,
+        }
+    });
+    Some(judged.unwrap_or_else(|| agent(number - 1, TurnPart::End)))
+}
+
+/// Where the judge conversation [`judge_conversation`] serves for `session`
+/// numbers the supervisor's `number`th invocation, or `None` where the run serves
+/// no judge conversation for it — a member still running, or one whose report
+/// holds no `role: judge` row for that invocation.
+///
+/// A stacked panel runs several judges on one invocation, each a turn of its
+/// own; the first of them is the one a supervisor's record opens.
+fn judge_turn_of(transcripts: &Transcripts<'_>, session: &str, number: u64) -> Option<usize> {
+    let report = &transcripts
+        .sessions
+        .iter()
+        .find(|folded| folded.session.as_str() == session)?
+        .stored
+        .as_ref()?
+        .report;
+    judge_interval(report)?;
+    judge_links(report)
+        .iter()
+        .position(|link| u64::from(link.turn_index) == number)
+}
+
 /// One journal envelope as a timeline event.
 fn timeline_event(index: usize, position: usize, event: &Envelope, lens: &Lens<'_>) -> Value {
     let Lens {
@@ -7466,7 +7604,17 @@ fn timeline_event(index: usize, position: usize, event: &Envelope, lens: &Lens<'
     // Where the event's own heavy content lives, never inlined: the transcript it
     // is a turn of, the change it published, or the first evidence it stored. A
     // reader opens the record and the client fetches that one thing.
-    if let Some(turn) = turn {
+    //
+    // A turn-level record names its item first: the conversation it opens may be
+    // the judge's rather than the session it was relayed on, and a `turn-message`
+    // or a supervisor's record is not a row of the fold at all.
+    if let Some(opened) = conversation_item(event, lens.transcripts) {
+        item.insert(
+            "reference".into(),
+            json!({ "kind": "conversation", "value": opened.conversation }),
+        );
+        item.insert("conversation_item".into(), opened.to_value());
+    } else if let Some(turn) = turn {
         item.insert(
             "reference".into(),
             json!({ "kind": "conversation", "value": turn.session }),
@@ -7649,6 +7797,10 @@ fn run_level_spans(view: &Run<'_>, lens: &Lens<'_>, first: &Envelope, ends: &End
         span.insert(
             "reference".into(),
             json!({ "kind": "conversation", "value": session }),
+        );
+        span.insert(
+            "conversation_item".into(),
+            ConversationItem::first_of(session).to_value(),
         );
         lens.fill(&mut span, &relayed);
         spans.push(Value::Object(span));
@@ -8680,6 +8832,10 @@ fn node_spans(view: &Run<'_>, node: &str, lens: &Lens<'_>) -> Vec<Value> {
                 "reference".into(),
                 json!({ "kind": "conversation", "value": session }),
             );
+            span.insert(
+                "conversation_item".into(),
+                ConversationItem::first_of(session).to_value(),
+            );
         }
         lens.fill(&mut span, &relayed);
         let sibling = judge_span(lens.transcripts, session, &span);
@@ -8728,6 +8884,10 @@ fn judge_span(
     span.insert(
         "reference".into(),
         json!({ "kind": "conversation", "value": id }),
+    );
+    span.insert(
+        "conversation_item".into(),
+        ConversationItem::first_of(&id).to_value(),
     );
     span.insert("events".into(), json!(Vec::<Value>::new()));
     Some(Value::Object(span))

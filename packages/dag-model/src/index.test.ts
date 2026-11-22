@@ -1593,6 +1593,42 @@ describe("nodeStreamLineSchema", () => {
     expect(rows.length).toBeGreaterThan(0);
   });
 
+  test("reads the conversation item the crate serves on a turn row (schema 18)", () => {
+    const rows = golden
+      .map((line) => nodeStreamLineSchema.parse(line))
+      .flatMap((line) => (line.kind === "rows" ? line.rows : []));
+    const items = rows.flatMap((row) =>
+      row.conversation_item === undefined ? [] : [row.conversation_item],
+    );
+    expect(items.length).toBeGreaterThan(0);
+    for (const item of items) {
+      expect(["prompt", "answer", "end"]).toContain(item.part);
+      expect(item.turn.startsWith(`${item.conversation}.`)).toBe(true);
+    }
+    const timeline = parseRunTimeline(
+      JSON.parse(
+        readFileSync(
+          join(
+            import.meta.dirname,
+            "../../../tests/fixtures/run-timeline.json",
+          ),
+          "utf8",
+        ),
+      ),
+    );
+    const spanItems = timeline.spans.flatMap((span) =>
+      span.conversation_item === undefined ? [] : [span.conversation_item],
+    );
+    expect(spanItems.length).toBeGreaterThan(0);
+    const turn = rows.find((row) => row.conversation_item !== undefined);
+    expect(() =>
+      timelineEventSchema.parse({
+        ...turn,
+        conversation_item: { ...turn?.conversation_item, part: "reply" },
+      }),
+    ).toThrow();
+  });
+
   test("refuses a line the crate's type does not declare", () => {
     expect(() =>
       nodeStreamLineSchema.parse({ kind: "end", extra: true }),

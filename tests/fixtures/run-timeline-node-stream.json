@@ -520,6 +520,11 @@
           "kind": "conversation",
           "value": "node-scope-1786925518098-3163646.worker"
         },
+        "conversation_item": {
+          "conversation": "node-scope-1786925518098-3163646.worker",
+          "turn": "node-scope-1786925518098-3163646.worker.1",
+          "part": "prompt"
+        },
         "dispatch_group": {
           "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
           "label": "Dispatch 1",
@@ -576,6 +581,11 @@
         "reference": {
           "kind": "conversation",
           "value": "node-scope-1786925518098-3163646.worker"
+        },
+        "conversation_item": {
+          "conversation": "node-scope-1786925518098-3163646.worker",
+          "turn": "node-scope-1786925518098-3163646.worker.0",
+          "part": "prompt"
         },
         "dispatch_group": {
           "id": "run-20260807-a1b2c3.contract-interface:a-recording-host-4242:a-recording-host-4242:10",
