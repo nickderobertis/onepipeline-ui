@@ -855,8 +855,8 @@ test("a span opened while it runs shows its end when the run records it, over wh
       artifacts: [],
     },
   ]);
-  // Its row and its open detail both say it ended, as the served document does,
-  // rather than holding what the span's page said while it ran.
+  // Its row says it ended, as the served document does, rather than holding what
+  // the span's page said while it ran.
   const servedStatus = async () => {
     const served = await page.request.get(
       `${server.origin}/api/v2/runs/${run}/timeline?scope=node&node=${node}`,
@@ -872,8 +872,13 @@ test("a span opened while it runs shows its end when the run records it, over wh
   };
   await expect.poll(servedStatus, { timeout: FRAME_PATIENCE }).toBe("done");
   await expect(session).toContainText("done", { timeout: FRAME_PATIENCE });
-  const ended = await conversationState();
-  expect(ended).not.toBe(running);
-  await expect(header).toContainText(ended, { timeout: FRAME_PATIENCE });
-  await expect(header).not.toContainText(running);
+  // The open detail stays the session's conversation, headed by the state the
+  // served conversation is now in: the row is what says the span ended, since a
+  // conversation's detail carries no event heading (timeline schema 18).
+  await expect(header).toContainText(await conversationState(), {
+    timeout: FRAME_PATIENCE,
+  });
+  await expect(
+    detail.getByRole("region", { name: "Recorded fields" }),
+  ).toHaveCount(0);
 });
