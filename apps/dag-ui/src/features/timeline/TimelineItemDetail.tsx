@@ -1154,7 +1154,17 @@ function opensConversation(reference: TimelineReference | undefined): boolean {
 
 function referenceOf(row: TimelineRow): TimelineReference | undefined {
   if (row.rowKind === "span") return row.span.reference;
-  if (row.rowKind === "event") return row.event.reference;
+  if (row.rowKind === "event") {
+    // SPIKE: a turn-message opens its own session's conversation, which the plan's
+    // SDK change would reference; the mock reads it off the transcript's history
+    // session, which is the conversation id with the turn number appended.
+    const transcript = row.event.fields?.transcript as Record<string, unknown> | undefined;
+    const session = typeof transcript?.history_session === "string" ? transcript.history_session.replace(/-\d+$/, "") : undefined;
+    if (row.event.kind === "turn-message" && row.event.reference?.kind !== "conversation" && typeof session === "string") {
+      return { kind: "conversation", value: session } as TimelineReference;
+    }
+    return row.event.reference;
+  }
   return undefined;
 }
 

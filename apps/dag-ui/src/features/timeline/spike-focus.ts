@@ -64,6 +64,7 @@ export function spikeApply(root: HTMLElement, target: Target): void {
       const element = [...turn.querySelectorAll<HTMLElement>(".border-dashed")].find((e) => e.textContent?.includes(wanted)) ?? null;
       for (const trigger of triggers()) if (!element?.contains(trigger) && trigger.getAttribute("aria-expanded") === "true") trigger.click();
       window.setTimeout(() => place(root, element), 200);
+      window.setTimeout(() => place(root, element), 700); // again, once the closed blocks have settled
     }, 200);
     return;
   }
