@@ -893,10 +893,11 @@ test("harness-only intervals and points open transcripts without consuming work 
       exact: true,
     })
     .click();
+  // The span opens as its conversation alone; its missing end is what the row it
+  // was opened from says, and nothing in the panel calls it running.
   const panel = page.getByRole("region", { name: "Timeline item detail" });
   await expect(panel).toContainText("timeline-worker transcript");
   await expect(panel).not.toContainText(/still running/i);
-  await expect(panel).toContainText("no recorded end");
 });
 
 for (const scope of ["node", "run"] as const) {
@@ -926,13 +927,23 @@ for (const scope of ["node", "run"] as const) {
     else bookmark.set("view", "overall");
     await page.goto(`/?${bookmark}`);
     const detail = page.getByRole("region", { name: "Timeline item detail" });
-    await expect(
-      detail.getByRole("heading", { name: rowLabel(event), exact: true }),
-    ).toBeVisible();
-    await expect(detail.getByRole("time").first()).toHaveAttribute(
-      "datetime",
-      event.at,
-    );
+    if (event.tool === undefined) {
+      await expect(
+        detail.getByRole("heading", { name: rowLabel(event), exact: true }),
+      ).toBeVisible();
+      await expect(detail.getByRole("time").first()).toHaveAttribute(
+        "datetime",
+        event.at,
+      );
+    } else {
+      // A turn's activity opens its conversation at that entry, marked.
+      // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` on `data-event-index` inside the turn's `data-turn-id` is the package's only mark of the opened entry; no role or name tells one entry of a turn from another.
+      const marked = detail.locator(
+        `[data-turn-id="${event.tool.turn}"] [data-event-index="${event.tool.index}"][aria-current="true"]`,
+      );
+      // llmlint: ignore-end[e2e_uses_accessible_selectors]
+      await expect(marked).toBeVisible();
+    }
     await page.keyboard.press("Escape");
     await expect(detail).toHaveCount(0);
     expect(new URL(page.url()).searchParams.has("event")).toBe(false);

@@ -761,7 +761,8 @@ class Journal {
         v: 1,
         ts: stamp(this.at),
         stream: this.stream,
-        seq: this.lines.length,
+        // Past any records held back from the file, which keep their own.
+        seq: this.lines.length + (this.held ?? 0),
         source,
         kind,
         labels,
@@ -6437,4 +6438,692 @@ function writeReadableCards(root, runId, when) {
 
 export function readabilityFacts() {
   return READABILITY;
+}
+
+// The conversation-focus corpus: every kind of row and span that opens a
+// conversation, in the record shapes a host's runs carry — the agent's own
+// `turn-started`, `turn-activity`, `turn-message` and `turn-completed` pointing at
+// their oneharness history, the supervisor's three beside them on the worker's
+// own session (`role: user`, its message `origin: supervisor`), no message
+// carrying a reference in the journal, `oneharness-session` records beside each
+// invocation, and a member that settled with a report holding the judge's rows.
+// `dag-ui-conversation-focus.spec.ts` opens each one and holds what is marked.
+
+export const FOCUS_RUN = "dag-ui-conversation-focus";
+/** How many turns the long, live worker conversation has. */
+const FOCUS_TURNS = 32;
+/** Its turn holding at least fifty tool calls, with a reasoning item past index 80. */
+const FOCUS_BUSY_TURN = 20;
+const FOCUS_BUSY_CALLS = 50;
+const FOCUS_BUSY_REASONING = 84;
+/** Its turn whose prompt runs to several screens. */
+const FOCUS_LONG_PROMPT_TURN = 24;
+/** Its turn whose reasoning item runs to several screens, at that index. */
+const FOCUS_LONG_REASONING_TURN = 26;
+const FOCUS_LONG_REASONING_INDEX = 3;
+/** The settled, judged dispatch's turns. */
+const FOCUS_REVIEW_TURNS = 3;
+const FOCUS_STREAMS = {
+  panels: "node-scope-1793000000000-4600",
+  gapped: "node-scope-1793000000001-4601",
+  reviewed: "node-scope-1793000000002-4602",
+  drafted: "pr-author-1793000000003-4603",
+  observer: "dag-scope-1793000000004-4604",
+  stopped: "node-scope-1793000000005-4605",
+};
+const FOCUS_PROJECT = "home-operator-projects-observatory";
+const FOCUS_AREAS = [
+  "the run list",
+  "the node header",
+  "the graph legend",
+  "the timeline axis",
+  "the event drawer",
+  "the transcript panel",
+  "the release badge",
+  "the history controls",
+];
+const focusArea = (turn) => FOCUS_AREAS[(turn - 1) % FOCUS_AREAS.length];
+const focusPrompt = (turn) =>
+  turn === FOCUS_LONG_PROMPT_TURN
+    ? [
+        `Turn ${turn - 1} is in. This one is a long brief, read it all before you start.`,
+        ...Array.from(
+          { length: 90 },
+          (_, line) =>
+            `${line + 1}. For ${focusArea(line + 1)}, check its spacing, its contrast and its keyboard path, and say which you changed.`,
+        ),
+      ].join("\n\n")
+    : turn === 1
+      ? "## What\nTidy the observatory's panels one at a time, committing each.\n\nStart with the run list."
+      : `Good. Turn ${turn - 1} is in. Now move on to ${focusArea(turn)}, and keep each commit to one panel.`;
+const focusAnswer = (turn) =>
+  `Turn ${turn} done: ${focusArea(turn)} is tidied and committed as one change; the panel's tests pass.`;
+const focusHistoryId = (kind, n) =>
+  `01a18000-0000-7000-8000-${String(kind * 1000 + n).padStart(12, "0")}`;
+
+/** What one agent turn did, in the order its harness reported it. */
+function focusEvents(turn) {
+  const id = (n) => `toolu_focus_${String(turn).padStart(2, "0")}_${n}`;
+  const call = (index, n, name, input) => ({
+    kind: "tool_call",
+    name,
+    input,
+    output: null,
+    index,
+    tool_call_id: id(n),
+    status: "completed",
+  });
+  const result = (index, n, name, output) => ({
+    kind: "tool_result",
+    name,
+    input: null,
+    output,
+    index,
+    tool_call_id: id(n),
+    status: "completed",
+  });
+  const words = (index, kind, output) => ({
+    kind,
+    name: null,
+    input: null,
+    output,
+    index,
+    tool_call_id: null,
+  });
+  const area = focusArea(turn);
+  if (turn === FOCUS_BUSY_TURN) {
+    // Fifty calls, call and result each an entry, with the reasoning item a reader
+    // clicks sitting among them past index 80.
+    const events = [];
+    let index = 0;
+    for (let n = 1; n <= FOCUS_BUSY_CALLS; n += 1) {
+      if (index === FOCUS_BUSY_REASONING)
+        events.push(
+          words(
+            index++,
+            "reasoning",
+            "I'm resolving the merge conflict in the panel's stylesheet: both sides changed the gap, and the newer value is the one the design asks for, so I keep theirs and drop mine.",
+          ),
+        );
+      events.push(
+        call(index++, n, "Read", {
+          file_path: `apps/dag-ui/src/panels/part-${n}.tsx`,
+        }),
+      );
+      events.push(
+        result(index++, n, "Read", `1\texport const part${n} = ${n};`),
+      );
+    }
+    events.push(words(index, "message", focusAnswer(turn)));
+    return events;
+  }
+  return [
+    words(
+      0,
+      "reasoning",
+      `Reading the prompt: this turn is about ${area}. I'll look at its component first.`,
+    ),
+    call(1, 1, "Read", {
+      file_path: `apps/dag-ui/src/panels/panel-${turn}.tsx`,
+    }),
+    result(
+      2,
+      1,
+      "Read",
+      `1\texport function Panel${turn}() {\n2\t  return <section aria-label="${area}" />;\n3\t}`,
+    ),
+    words(
+      FOCUS_LONG_REASONING_INDEX,
+      "reasoning",
+      turn === FOCUS_LONG_REASONING_TURN
+        ? Array.from(
+            { length: 70 },
+            (_, line) =>
+              `Step ${line + 1}: weighing whether ${focusArea(line + 1)} shares the spacing token this panel uses, and what changing it here would move there.`,
+          ).join("\n\n")
+        : `The component for ${area} is small; tightening its spacing.`,
+    ),
+    call(4, 2, "Bash", { command: `git commit -am "style: tidy ${area}"` }),
+    result(
+      5,
+      2,
+      "Bash",
+      `[focus ${turn}abc] style: tidy ${area}\n 1 file changed, 3 insertions(+), 2 deletions(-)`,
+    ),
+    words(
+      6,
+      "message",
+      `Committed; checking nothing else in ${area} needs the same change.`,
+    ),
+    words(7, "message", focusAnswer(turn)),
+  ];
+}
+
+/** One invocation's oneharness history file, as the harness writes it. */
+function writeFocusHistory(
+  store,
+  { session, historyId, started, prompt, events, text },
+) {
+  const harness = {
+    harness: "claude-code",
+    variant: "alternate",
+    harness_id: "claude-code:alternate",
+  };
+  const lines = [
+    {
+      type: "run-started",
+      schema_version: "1.11",
+      history_id: historyId,
+      harness_id: harness.harness_id,
+      prompt,
+      started,
+    },
+    ...events.map((event) => ({
+      type: "event",
+      schema_version: "1.9",
+      run_id: historyId,
+      ...harness,
+      event,
+      session_name: session,
+    })),
+    {
+      type: "run",
+      schema_version: "1.2",
+      history_id: historyId,
+      session,
+      name: session,
+      labels: {},
+      project: "/home/operator/projects/observatory",
+      timestamp: started,
+      ...harness,
+      model: "a-model",
+      prompt,
+      permission_mode: "default",
+      status: "ok",
+      exit_code: 0,
+      duration_ms: 42000,
+      finished_at: null,
+      observed_tool_ms: 800,
+      text,
+      text_source: "stream-json:result",
+      usage: {
+        input_tokens: 2400,
+        output_tokens: 610,
+        cache_read_tokens: 18000,
+        cache_write_tokens: 900,
+      },
+      session_id: historyId,
+      failure_kind: null,
+    },
+  ];
+  const dir = join(store, FOCUS_PROJECT);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, `${session}.jsonl`),
+    `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`,
+  );
+}
+
+const FOCUS_USAGE = {
+  input_tokens: 2400,
+  output_tokens: 610,
+  cache_read_tokens: 18000,
+  cache_write_tokens: 900,
+  cost_usd: 0.31,
+};
+
+/**
+ * One member's records on its own graph run's stream, as `oneagentgraph` relays
+ * them for a host: every turn a history file, every record pointing at it.
+ */
+class FocusMember {
+  constructor({ store, stream, node, member, persona, kind, start }) {
+    this.store = store;
+    this.journal = new Journal(join(store, "..", "unused"), stream, start);
+    this.session = `${stream}.${member}`;
+    this.kind = kind;
+    this.histories = 0;
+    this.labels = {
+      run_id: stream,
+      ...(node === undefined ? {} : { node }),
+      member,
+      persona,
+      "onepipeline.run_id": FOCUS_RUN,
+      ...(node === undefined ? {} : { "onepipeline.node": node }),
+      "onepipeline.persona": persona,
+      session: this.session,
+    };
+    this.unsessioned = Object.fromEntries(
+      Object.entries(this.labels).filter(([key]) => key !== "session"),
+    );
+  }
+
+  /** A history file for one invocation, and the reference its records carry. */
+  history(prompt, events, text) {
+    this.histories += 1;
+    const historyId = focusHistoryId(this.kind, this.histories);
+    const session = `${this.session.replaceAll(".", "-")}-${String(this.histories).padStart(2, "0")}`;
+    writeFocusHistory(this.store, {
+      session,
+      historyId,
+      started: stamp(this.journal.at),
+      prompt,
+      events,
+      text,
+    });
+    return {
+      historyId,
+      at: (extra = {}) => ({
+        history_dir: this.store,
+        history_project: FOCUS_PROJECT,
+        history_session: session,
+        history_id: historyId,
+        ...extra,
+      }),
+    };
+  }
+
+  /** The `oneharness-session` record the engine writes beside an invocation. */
+  invoked(role, turn, written) {
+    this.journal.advance(1).emit(
+      "agentgraph",
+      "oneharness-session",
+      this.unsessioned,
+      {
+        role,
+        turn,
+        identity: "claude-code:alternate",
+        history_id: written.historyId,
+        history_dir: this.store,
+        history_project: FOCUS_PROJECT,
+        history_session: written.at().history_session,
+      },
+      [{ id: written.historyId, kind: "oneharness_session", bytes: 0 }],
+    );
+  }
+
+  /**
+   * One agent turn: started, its activity, its answer and its close — any of
+   * which may be left out, for a turn the journal has not relayed whole.
+   */
+  agentTurn(turn, { started = true, message = true, completed = true } = {}) {
+    const events = focusEvents(turn);
+    const written = this.history(focusPrompt(turn), events, focusAnswer(turn));
+    const startedAt = stamp(this.journal.at);
+    if (started) {
+      this.invoked("agent", turn, written);
+      this.journal.advance(1).emit("agentgraph", "turn-started", this.labels, {
+        transcript: written.at(),
+        turn,
+        role: "assistant",
+        started_at: startedAt,
+        origin: turn === 1 ? "task" : "supervisor",
+      });
+      // Every entry, the final message too: the engine relays the answer as an
+      // activity like any other, though the transcript serves it as the answer.
+      for (const event of events)
+        this.journal
+          .advance(1)
+          .emit("agentgraph", "turn-activity", this.labels, {
+            transcript: written.at({
+              index: event.index,
+              ...(event.tool_call_id
+                ? { tool_call_id: event.tool_call_id }
+                : {}),
+            }),
+            kind: event.kind,
+            name: event.name,
+            ...(event.tool_call_id ? { tool_call_id: event.tool_call_id } : {}),
+            index: event.index,
+          });
+    }
+    if (message)
+      this.journal.advance(2).emit("agentgraph", "turn-message", this.labels, {
+        transcript: written.at(),
+        turn,
+        role: "assistant",
+      });
+    if (completed)
+      this.journal
+        .advance(1)
+        .emit("agentgraph", "turn-completed", this.labels, {
+          turn,
+          role: "assistant",
+          usage: FOCUS_USAGE,
+          started_at: startedAt,
+          finished_at: stamp(this.journal.at),
+        });
+  }
+
+  /**
+   * The supervisor's invocation judging agent turn `turn`, on the worker's own
+   * session: its message, where it writes one, is the next turn's prompt.
+   */
+  supervisorTurn(turn, { message = true, completed = true } = {}) {
+    const said = focusPrompt(turn + 1);
+    const written = this.history(
+      `The worker's turn ${turn} ended: ${focusAnswer(turn)} Judge it, and write its next prompt.`,
+      [
+        {
+          kind: "message",
+          name: null,
+          input: null,
+          output: said,
+          index: 0,
+          tool_call_id: null,
+        },
+      ],
+      said,
+    );
+    const startedAt = stamp(this.journal.at);
+    this.invoked("judge", turn, written);
+    this.journal.advance(1).emit("agentgraph", "turn-started", this.labels, {
+      transcript: written.at(),
+      turn,
+      role: "user",
+      started_at: startedAt,
+    });
+    if (message)
+      this.journal.advance(1).emit("agentgraph", "turn-message", this.labels, {
+        transcript: written.at(),
+        turn,
+        role: "user",
+        origin: "supervisor",
+      });
+    if (completed)
+      this.journal
+        .advance(1)
+        .emit("agentgraph", "turn-completed", this.labels, {
+          turn,
+          role: "user",
+          usage: {
+            input_tokens: 900,
+            output_tokens: 80,
+            cache_read_tokens: 4000,
+          },
+          started_at: startedAt,
+          finished_at: stamp(this.journal.at),
+        });
+  }
+
+  started() {
+    this.journal
+      .advance(1)
+      .emit("agentgraph", "member-started", this.unsessioned, {});
+  }
+
+  /** Records past the journal as written, held back for a journey to append. */
+  hold(write) {
+    const from = this.journal.lines.length;
+    write();
+    const held = this.journal.lines.splice(from);
+    this.journal.held = (this.journal.held ?? 0) + held.length;
+    return held;
+  }
+}
+
+/** The report a settled, judged member stores: its turns, and the judge's rows. */
+function focusReviewReport(started) {
+  const turns = Array.from({ length: FOCUS_REVIEW_TURNS }, (_, at) => at + 1);
+  const link = (role, turn) => ({
+    session_id: `01a18000-0000-7000-9000-${String(turn).padStart(12, "0")}`,
+    role,
+    turn_index: turn,
+    started_at: stamp(started + turn * 60_000),
+    finished_at: stamp(started + turn * 60_000 + 20_000),
+  });
+  return `${JSON.stringify({
+    schema_version: 12,
+    transcript: {
+      messages: turns.flatMap((turn) => [
+        { role: "user", content: focusPrompt(turn) },
+        { role: "assistant", content: focusAnswer(turn) },
+      ]),
+    },
+    completion_reason: "every panel is tidied",
+    control: null,
+    supervisor_control: null,
+    telemetry: {
+      wall_ms: 400_000,
+      agent: {},
+      judge: {},
+      orchestration_ms: 1_000,
+      sessions: turns.flatMap((turn) => [
+        link("agent", turn),
+        link("judge", turn),
+      ]),
+      // What each judge invocation ran on and consumed, which is what gives a
+      // judge turn the end a supervisor's close opens.
+      attribution: turns.map((turn) => ({
+        role: "judge",
+        turn_index: turn,
+        ran: "codex:judge",
+        fell_through: [],
+        candidates: [
+          {
+            harness: "codex",
+            harness_id: "codex:judge",
+            variant: "judge",
+            model: "a-judge-model",
+            status: "ok",
+            available: true,
+            ran: true,
+            failure_kind: null,
+            exit_code: 0,
+            duration_ms: 20_000,
+            usage: {
+              input_tokens: 51_204,
+              output_tokens: 311,
+              cache_read_tokens: 20_480,
+            },
+          },
+        ],
+      })),
+    },
+  })}\n`;
+}
+
+const FOCUS = {
+  run: FOCUS_RUN,
+  turns: FOCUS_TURNS,
+  busyTurn: FOCUS_BUSY_TURN,
+  busyReasoning: FOCUS_BUSY_REASONING,
+  longPromptTurn: FOCUS_LONG_PROMPT_TURN,
+  longReasoningTurn: FOCUS_LONG_REASONING_TURN,
+  longReasoningIndex: FOCUS_LONG_REASONING_INDEX,
+  reviewTurns: FOCUS_REVIEW_TURNS,
+  sessions: Object.fromEntries(
+    Object.entries(FOCUS_STREAMS).map(([node, stream]) => [
+      node,
+      `${stream}.${node === "drafted" ? "pr-author" : node === "observer" ? "monitor" : "worker"}`,
+    ]),
+  ),
+  /** The records each live dispatch has not relayed yet, which a journey appends. */
+  pending: "focus-pending.json",
+};
+
+export function buildConversationFocusRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const store = join(root, "..", "focus-history");
+  const start = now() - 50 * 60 * 1000;
+  const { dir, journal } = plannedRun(
+    root,
+    FOCUS_RUN,
+    [
+      ["panels", "Tidy the observatory's panels, one commit each."],
+      [
+        "gapped",
+        "A dispatch whose journal relayed a turn ahead of the one before it.",
+      ],
+      ["reviewed", "A dispatch a supervisor judged and settled."],
+      ["drafted", "Draft the change request for the panels branch."],
+      ["stopped", "A dispatch whose node failed before its next turn started."],
+    ],
+    start,
+  );
+  const run = { run_id: FOCUS_RUN };
+  const member = (node, kind, start, persona = "engineer") =>
+    new FocusMember({
+      store,
+      stream: FOCUS_STREAMS[node],
+      node: node === "observer" ? undefined : node,
+      member:
+        node === "drafted"
+          ? "pr-author"
+          : node === "observer"
+            ? "monitor"
+            : "worker",
+      persona,
+      kind,
+      start,
+    });
+  declareGraph(root, FOCUS_STREAMS.panels, ["worker"]);
+  declareGraph(root, FOCUS_STREAMS.gapped, ["worker"]);
+  declareGraph(root, FOCUS_STREAMS.reviewed, ["worker"]);
+  declareGraph(root, FOCUS_STREAMS.drafted, ["pr-author"]);
+  declareGraph(root, FOCUS_STREAMS.observer, ["monitor"]);
+  declareGraph(root, FOCUS_STREAMS.stopped, ["worker"]);
+  const pending = {};
+
+  // The run's observer, at no node: a run-level session.
+  const observer = member("observer", 9, start + 2_000, "monitor");
+  observer.started();
+  observer.agentTurn(1);
+
+  // A long worker conversation, still running: every turn judged by the supervisor,
+  // whose last message is the prompt of a turn the worker has not started.
+  for (const node of ["panels", "gapped", "reviewed", "drafted", "stopped"])
+    journal
+      .advance(1)
+      .emit("pipeline", "node-dispatched", { ...run, node, persona: "worker" });
+  const panels = member("panels", 1, start + 5_000);
+  panels.started();
+  for (let turn = 1; turn <= FOCUS_TURNS; turn += 1) {
+    panels.agentTurn(turn);
+    panels.supervisorTurn(turn);
+  }
+  pending.next = {
+    stream: FOCUS_STREAMS.panels,
+    lines: panels.hold(() =>
+      panels.agentTurn(FOCUS_TURNS + 1, { message: false, completed: false }),
+    ),
+  };
+
+  // A live dispatch whose journal relayed turn 4 before turn 3's records: turn 3 is
+  // an answer alone, so turn 4 sits at turn 3's place until turn 3's records land.
+  const gapped = member("gapped", 2, start + 6_000);
+  gapped.started();
+  gapped.agentTurn(1);
+  gapped.supervisorTurn(1);
+  gapped.agentTurn(2);
+  gapped.supervisorTurn(2);
+  // Turn 3's records, written in place but held back from the journal below.
+  const third = gapped.hold(() => gapped.agentTurn(3, { message: false }));
+  gapped.journal.advance(1).emit("agentgraph", "turn-message", gapped.labels, {
+    transcript: JSON.parse(third[0]).payload.transcript ?? {},
+    turn: 3,
+    role: "assistant",
+  });
+  gapped.agentTurn(4, { message: false, completed: false });
+  pending.gap = { stream: FOCUS_STREAMS.gapped, lines: third };
+
+  // A dispatch the supervisor judged and settled, with a report holding the
+  // judge's rows, so its judge conversation is served — and an answer naming a
+  // turn past every one its report and its turn records hold.
+  const reviewed = member("reviewed", 3, start + 7_000);
+  reviewed.started();
+  for (let turn = 1; turn <= FOCUS_REVIEW_TURNS; turn += 1) {
+    reviewed.agentTurn(turn);
+    reviewed.supervisorTurn(turn, { message: turn < FOCUS_REVIEW_TURNS });
+  }
+  const lost = reviewed.history(
+    focusPrompt(FOCUS_REVIEW_TURNS + 1),
+    [],
+    "a lost answer",
+  );
+  reviewed.journal
+    .advance(1)
+    .emit("agentgraph", "turn-message", reviewed.labels, {
+      transcript: lost.at(),
+      turn: FOCUS_REVIEW_TURNS + 1,
+      role: "assistant",
+    });
+  const settledAt = reviewed.journal.advance(2).lines.length;
+  reviewed.journal.emit(
+    "agentgraph",
+    "member-settled",
+    reviewed.unsessioned,
+    {
+      completed: true,
+      verdict: [],
+      completion_reason: "every panel is tidied",
+      report_path: "/a/producing/librarys/scratch/report.json",
+    },
+    [{ id: `report-${FOCUS_STREAMS.reviewed}`, kind: "report", bytes: 0 }],
+  );
+  retainReport(
+    dir,
+    FOCUS_STREAMS.reviewed,
+    settledAt,
+    focusReviewReport(start + 7_000),
+  );
+
+  // A change request drafter's session, beside the harness record of its run.
+  const drafted = member("drafted", 4, start + 8_000, "pr-author");
+  drafted.started();
+  drafted.agentTurn(1, { message: false });
+  drafted.journal
+    .advance(1)
+    .emit("agentgraph", "member-settled", drafted.unsessioned, {
+      completed: true,
+      verdict: [],
+      completion_reason: "drafted",
+    });
+
+  // A dispatch whose node failed after the supervisor wrote the next prompt and
+  // before the worker started it, with no settlement from the member: only the
+  // node's own end says no later read will bring that turn.
+  const stopped = member("stopped", 5, start + 9_000);
+  stopped.started();
+  stopped.agentTurn(1);
+  stopped.supervisorTurn(1);
+
+  journal
+    .advance(2990)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...run, node: "stopped" },
+      { status: "failed", outcome: "the harness exited" },
+    );
+  journal
+    .advance(10)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...run, node: "reviewed" },
+      { status: "done", outcome: "merged" },
+    );
+  journal
+    .advance(1)
+    .emit(
+      "pipeline",
+      "node-settled",
+      { ...run, node: "drafted" },
+      { status: "done", outcome: "published" },
+    );
+  Journal.writeMerged(journal.path, [
+    journal,
+    observer.journal,
+    panels.journal,
+    gapped.journal,
+    reviewed.journal,
+    drafted.journal,
+    stopped.journal,
+  ]);
+  writeJson(join(root, "..", FOCUS.pending), pending);
+}
+
+export function conversationFocusFacts() {
+  return FOCUS;
 }

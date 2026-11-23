@@ -532,7 +532,24 @@ fn as_served_at(mut timeline: Value, base_schema: u64) -> Value {
         if base_schema < 13 {
             span.as_object_mut().expect("span").remove("dispatch_group");
         }
+        // Schema 18 names the item a conversation span opens on, as it does an
+        // event's.
+        if base_schema < 18 {
+            span.as_object_mut()
+                .expect("span")
+                .remove("conversation_item");
+        }
         for event in span["events"].as_array_mut().into_iter().flatten() {
+            // Schema 18 gives a supervisor's turn start and close — the other
+            // party's, `role: user` — the conversation `reference` an agent's
+            // carried already.
+            if base_schema < 18
+                && ["turn-started", "turn-completed"]
+                    .contains(&event["kind"].as_str().unwrap_or(""))
+                && event["fields"]["role"] == "user"
+            {
+                event.as_object_mut().expect("event").remove("reference");
+            }
             // Schema 14 gives a `turn-activity` the `reference` the other turn
             // records already carried, so the field is new on that kind alone.
             if base_schema < 14 && event["kind"] == "turn-activity" {

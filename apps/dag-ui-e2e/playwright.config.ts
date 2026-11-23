@@ -237,6 +237,15 @@ const OWN_SERVERS = [
   "**/dag-ui-event-details.spec.ts",
 ];
 
+/**
+ * The conversation-focus journeys start one server of their own for the whole file,
+ * as the own-servers specs do per journey, so they share nothing with either lane.
+ * They are a lane of their own because the own-servers lane was this tier's longest:
+ * appended to it, they took the tier past test-linux's step, and beside it they end
+ * inside the shared-server lane (docs/linux-cold-cache-timing.md).
+ */
+const CONVERSATION_FOCUS = ["**/dag-ui-conversation-focus.spec.ts"];
+
 export default defineConfig({
   testDir: ".",
   globalTeardown: "./global-teardown.ts",
@@ -253,20 +262,26 @@ export default defineConfig({
    */
   expect: { timeout: 15_000 },
   timeout: 120_000,
-  // Two lanes, each one worker. One server serves one run directory, and the
+  // Three lanes, each one worker. One server serves one run directory, and the
   // live-update journeys change what it is serving, so every journey against that
   // server shares that state and must not run against another. The specs in
   // `OWN_SERVERS` start a server per journey over a directory of their own, so they
-  // share nothing with that lane and take their own (docs/linux-cold-cache-timing.md).
-  workers: 2,
+  // share nothing with that lane and take their own, and `CONVERSATION_FOCUS` starts
+  // one for its file and takes a third (docs/linux-cold-cache-timing.md).
+  workers: 3,
   fullyParallel: false,
   projects: [
     {
       name: "shared-server",
-      testIgnore: [...NOT_THIS_TIER, ...OWN_SERVERS],
+      testIgnore: [...NOT_THIS_TIER, ...OWN_SERVERS, ...CONVERSATION_FOCUS],
       workers: 1,
     },
     { name: "own-servers", testMatch: OWN_SERVERS, workers: 1 },
+    {
+      name: "conversation-focus",
+      testMatch: CONVERSATION_FOCUS,
+      workers: 1,
+    },
   ],
   use: { baseURL: `http://${LOOPBACK}:${session.ui}` },
   /**

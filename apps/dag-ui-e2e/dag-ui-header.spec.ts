@@ -201,17 +201,17 @@ for (const viewport of VIEWPORTS) {
           .find((span) => span.kind === "node")
           ?.events.filter((event) => event.kind === "turn-activity").length,
       );
+      // The activity opens its conversation with one item of its own turn marked:
+      // the call where the transcript holds it, else the turn itself.
       const detail = page.getByRole("region", { name: "Timeline item detail" });
-      await expect(
-        detail.getByRole("heading", {
-          name: namedActivity.description,
-          exact: true,
-        }),
-      ).toBeVisible();
-      await expect(detail.getByRole("time").first()).toHaveAttribute(
-        "datetime",
-        namedEvent?.at ?? "",
+      const turn = namedEvent?.tool?.turn ?? "";
+      // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` inside the turn's `data-turn-id` is the package's only mark of the opened item, and no role or name says which turn an article is; the article, because the pinned plot marks the turn's bar too.
+      const marked = detail.locator(
+        `article[data-turn-id="${turn}"][aria-current="true"], article[data-turn-id="${turn}"] [aria-current="true"]`,
       );
+      // llmlint: ignore-end[e2e_uses_accessible_selectors]
+      await expect(marked).toHaveCount(1);
+      await expect(marked).toBeVisible();
       expect(forbidden).toEqual([]);
     } finally {
       await server.stop();

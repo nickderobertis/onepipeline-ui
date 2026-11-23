@@ -29,14 +29,21 @@ pub const TIMELINE_EVENT_ADDITIONS: &[(u64, &str)] = &[
     (16, "surface_id"),
     (16, "correlation"),
     (16, "surface_state"),
+    (18, "conversation_item"),
 ];
 
 /// The fields a timeline schema added to the events of one kind alone, with the
 /// schema that added each: read as [`TIMELINE_EVENT_ADDITIONS`] is, and stripped
 /// from that kind's events only, because the field is one other kinds already
 /// carried. Schema 17 gives an `edit-rejected` the `reference` its kept refusal
-/// is opened by.
-pub const TIMELINE_KIND_ADDITIONS: &[(u64, &str, &str)] = &[(17, "edit-rejected", "reference")];
+/// is opened by; schema 18 gives a `turn-message` the conversation `reference`
+/// the other turn records carried. A supervisor's `turn-started` and
+/// `turn-completed` gain one too under 18, which no kind alone says: the
+/// baseline journey strips those by their `role`.
+pub const TIMELINE_KIND_ADDITIONS: &[(u64, &str, &str)] = &[
+    (17, "edit-rejected", "reference"),
+    (18, "turn-message", "reference"),
+];
 
 /// The timeline schema whose `fields` are every payload key under its wire key,
 /// where the schemas before it served a selection under English labels: the one

@@ -625,10 +625,12 @@ test("a conversation item opens in the conversation view alone, before, while an
 });
 
 /**
- * Scroll the panel to the item it opened on, its top at the top of the panel, and
- * hold that nothing pinned there — the conversation's own timeline header, the
- * panel's Close control — is painted over either of them: what is hit at the
- * item's top edge is the item, and what is hit at Close is Close.
+ * Hold, where the panel itself put it, that the item it opened on lies wholly in
+ * the panel's scroll viewport below the conversation's pinned timeline header, and
+ * that nothing pinned there — that header, the panel's Close control — is painted
+ * over either of them: what is hit at the item's top edge is the item, and what is
+ * hit at Close is Close. Nothing here scrolls: an item the panel left out of view
+ * is the failure this exists to catch.
  */
 async function expectNothingPinnedOver(page: Page): Promise<void> {
   // llmlint: ignore-block[e2e_uses_accessible_selectors] `aria-current` is the package's own mark of the item a panel opened on — the turn, or the tool call within it (its plot marks the same turn, hence the article) — and no role query can filter on it; the criterion is about that one item.
@@ -637,13 +639,33 @@ async function expectNothingPinnedOver(page: Page): Promise<void> {
     .first();
   // llmlint: ignore-end[e2e_uses_accessible_selectors]
   await expect(focused).toBeVisible();
-  await focused.evaluate((element) => {
-    element.scrollIntoView({ block: "start" });
-  });
   const pinned = detail(page).getByRole("region", {
     name: "Conversation timeline",
   });
   await expect(pinned).toBeVisible();
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the panel's scroll viewport is the scroll-area's own slot, which has no role or accessible name; the criterion is the item's box inside it.
+  const viewport = detail(page).locator('[data-slot="scroll-area-viewport"]');
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
+  await expect
+    .poll(
+      async () => {
+        const [item, card, view] = await Promise.all([
+          focused.boundingBox(),
+          pinned.boundingBox(),
+          viewport.first().boundingBox(),
+        ]);
+        if (item === null || card === null || view === null) return false;
+        return (
+          item.y >= card.y + card.height - 0.5 &&
+          item.y + item.height <= view.y + view.height + 0.5
+        );
+      },
+      {
+        message:
+          "the opened item lies wholly in the viewport, below the pinned header",
+      },
+    )
+    .toBe(true);
   const close = page.getByRole("button", { name: "Close detail" });
   const button = await close.elementHandle();
   if (button === null) throw new Error("the panel has no Close control");

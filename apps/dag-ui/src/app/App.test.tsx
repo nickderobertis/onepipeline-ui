@@ -1692,10 +1692,11 @@ describe("DAG application", JOURNEY_TIMEOUT, () => {
     expect(
       await within(panel).findByText("Progress reported"),
     ).toBeInTheDocument();
-    // Headed by the member word alone: the session's label is that same word, and
-    // a session is not named twice for saying its name once.
+    // Read in its conversation alone: no event heading over it, and the
+    // conversation's own header names the member word the plot labelled it with.
+    expect(within(panel).queryByRole("heading", { level: 2 })).toBeNull();
     expect(
-      within(panel).getByRole("heading", { name: /^check-in$/ }),
+      within(panel).getByText(/check-in/, { selector: ".eyebrow" }),
     ).toBeInTheDocument();
     expect(transcripts()).toEqual([RUN_CHECK_IN_SESSION]);
     expect(window.location.search).toContain(`event=${CHECK_IN_SPAN}`);

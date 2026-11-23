@@ -60,6 +60,7 @@
       "{workspaceRoot}/tests/fixtures/private-github-home/**",
       "{workspaceRoot}/tests/e2e/main.rs",
       "{workspaceRoot}/tests/e2e/cli.rs",
+      "{workspaceRoot}/tests/e2e/conversation_items.rs",
       "{workspaceRoot}/tests/e2e/human_items.rs",
       "{workspaceRoot}/tests/fixtures/human-items/**",
       "{workspaceRoot}/tests/fixtures/human-item*.json",

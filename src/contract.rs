@@ -373,7 +373,18 @@ pub const TELEMETRY_SCHEMA_VERSION: u32 = 30;
 /// reports directory is named on the wire by its file name, which the artifact
 /// route resolves against the run's own envelopes and serves a refusal by whole,
 /// as its text. A client written against 16 refuses the new reference word.
-pub const TIMELINE_SCHEMA_VERSION: u32 = 17;
+///
+/// **Schema 18 names the conversation item a turn-level row stands for.** Every
+/// `turn-message`, and every supervisor (`role: user`) `turn-started`,
+/// `turn-message` and `turn-completed`, carries the conversation `reference` of
+/// the conversation it opens, and every turn-level row and conversation span
+/// gains `conversation_item`, `{conversation, turn, part}`: the turn of that
+/// conversation it is and which part of it — `prompt`, `answer` or `end` —
+/// computed from the record's own session and turn number rather than from
+/// whether the transcript holds that turn yet, with `gap: true` where the row at
+/// that position records a different turn. Additive: every field 17 served is
+/// served unchanged.
+pub const TIMELINE_SCHEMA_VERSION: u32 = 18;
 
 /// The largest run-list page any request can ask for.
 ///

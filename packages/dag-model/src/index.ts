@@ -376,8 +376,13 @@ export const TELEMETRY_SCHEMA_VERSION = 30;
  * `17` names a refused edit's complete refusal: the reference vocabulary gains
  * `refusal`, an artifact the engine kept beside the run is named by its file
  * name, and the artifact route serves a refusal whole, as its text.
+ *
+ * `18` names the conversation item a row stands for: every `turn-message`, and
+ * every supervisor `turn-started`, `turn-message` and `turn-completed`, carries
+ * its conversation `reference`, and every turn-level row and conversation span
+ * gains `conversation_item`, the turn of that conversation it is and which part.
  */
-export const TIMELINE_SCHEMA_VERSION = 17;
+export const TIMELINE_SCHEMA_VERSION = 18;
 
 export const timingQualitySchema = z.enum(["complete", "partial", "legacy"]);
 export const linkageQualitySchema = z.enum(["native", "labelled", "inferred"]);
@@ -1762,6 +1767,26 @@ export const timelineDispatchGroupSchema = openObject({
  * on those two names here, for the same reason `kind` is open at all.
  */
 // llmlint: ignore[boundary_inputs_validated] the pairing of `redirection` with a `kind` is not a constraint this parser may enforce: `kind` is the journal event kind and the journal owns that vocabulary, so a conforming server relaying another producer's interrupt record under a name this build has never seen would have its whole timeline refused over a field it filled correctly. What `redirection` itself carries is fully validated above, which is the part this contract does own.
+/**
+ * The conversation item a timeline row or span stands for (timeline schema 18):
+ * `conversation` is an id the conversation route serves, `turn` a `turns[].id` of
+ * it, and `part` the part of that turn. The server reads it off the record's own
+ * session and turn number, so it names a turn the served transcript does not hold
+ * yet, or no longer holds, as well as one it does.
+ */
+export const conversationItemSchema = openObject({
+  conversation: z.string().min(1),
+  turn: z.string().min(1),
+  part: z.enum(["prompt", "answer", "end"]),
+  /**
+   * Present, and only ever `true`, where the transcript row at `turn` records a
+   * different turn — a later one, relayed ahead of this one. The turn is then
+   * not in the transcript yet, and nothing there may be marked.
+   */
+  gap: z.literal(true).optional(),
+});
+export type ConversationItem = z.infer<typeof conversationItemSchema>;
+
 export const timelineEventSchema = openObject({
   id: z.string().min(1),
   stream: z.string().min(1).optional(),
@@ -1827,6 +1852,11 @@ export const timelineEventSchema = openObject({
    * `transcript unavailable: <path>: <why>`. Shown as served, never derived here.
    */
   description: z.string().optional(),
+  /**
+   * The conversation item this row stands for (timeline schema 18): the turn of
+   * the conversation its `reference` names, and which part of it.
+   */
+  conversation_item: conversationItemSchema.optional(),
   /**
    * Where a `turn-activity` sits in the conversation its `reference` names: the
    * producer's index, the call's identity where the harness minted one, and the
@@ -1906,6 +1936,8 @@ export const timelineSpanSchema = openObject({
   dispatch_id: z.string().min(1).optional(),
   dispatch_group: timelineDispatchGroupSchema.optional(),
   reference: timelineReferenceSchema.optional(),
+  /** A conversation span's first turn's prompt (timeline schema 18). */
+  conversation_item: conversationItemSchema.optional(),
   detail: openObject({
     ok: z.boolean().optional(),
     output_tail: z.string().optional(),
