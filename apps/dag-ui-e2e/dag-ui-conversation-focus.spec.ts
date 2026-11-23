@@ -162,11 +162,19 @@ async function clickRow(page: Page, id: string, seq?: number): Promise<void> {
   await row.getByRole("button").first().click();
 }
 
+/**
+ * How often a journey asks whether the drawer has rendered: Playwright's default
+ * backs off to a second, which every journey here would add to its two seconds of
+ * sampling after the render.
+ */
+const POLL = [100];
+
 /** Every sample until two seconds after the drawer's transcript rendered. */
 async function settledFrames(page: Page): Promise<FocusFrame[]> {
   await expect
     .poll(async () => (await recorded(page)).some((frame) => frame.loaded), {
       message: "the drawer's transcript renders",
+      intervals: POLL,
     })
     .toBe(true);
   await page.waitForTimeout(2_000);
@@ -335,7 +343,11 @@ async function arrivesInPlace(
         (await recorded(page)).some((frame) =>
           matches(frame.mark, { turn, part: "prompt" }),
         ),
-      { message: "the turn arrives and takes the mark", timeout: 20_000 },
+      {
+        message: "the turn arrives and takes the mark",
+        timeout: 20_000,
+        intervals: POLL,
+      },
     )
     .toBe(true);
   await page.waitForTimeout(2_000);

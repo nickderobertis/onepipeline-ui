@@ -213,6 +213,13 @@ journey starts its own server, in the other. Those two were 695 of the tier's
 1851 s of journey time, so the tier's wall time falls by up to that share, about
 9 minutes on the runner; the same 284 journeys run.
 
+The conversation-focus journeys (52, one server for the file) first joined the
+own-servers lane, and PR #876's test-linux was then killed at the step's limit in
+three attempts with the browser tier unfinished. Locally, on a shared host at load
+45, the tier took 17.9 minutes: shared-server 775 s of journeys, own-servers
+1050 s, of which conversation-focus was 391 s. They are a third lane now, so the
+own-servers lane is back to its 660 s and the tier ends on the shared-server lane.
+
 Run 42515808360 (080242f, job 128838449483) had both lanes and was still cancelled
 at the cap, with `dag-ui-e2e:test`, `:test-isolation`, `dag-ui-read-latency:test`
 and `:budgets` and `onepipeline-ui-release:test` unfinished and every finished task
