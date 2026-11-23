@@ -972,3 +972,13 @@ board-read fix: no onefollowup links onetaskgraph 0.14.21. It serves nothing new
 is announced as a break: the re-exported engine and plan-store types change. Its
 oneagentgraph, onejudge, oneharness-core, onemessagebus and onevcs requirements are the
 ones 0.117.4 resolved.
+
+0.118.1 is the engine whose plan load and live edits let a node that lands nothing — a
+direct finalizer among them — depend on a `publish: "preserve"` node as an ordering edge,
+leaving session bases and stacking unchanged; a node that lands work is still refused
+with `depends_on_preserved`. This crate moves to it so that a host holding its engine pin
+equal to the one this read API links can adopt the release that lets a spikes plan
+finalize itself once its kept branches settle, and delete its own refinalize recipe. A
+patch move within 0.118, so the re-exported engine and plan-store types do not change; it
+serves nothing new. Its oneagentgraph, onejudge, oneharness-core, onemessagebus,
+onetaskgraph and onevcs requirements are the ones 0.118.0 resolved.
