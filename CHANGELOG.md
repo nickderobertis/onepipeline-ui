@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.89.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.89.0...v0.89.1) - 2026-11-23
+
+### Added
+
+- *(dag-ui)* open every conversation event straight into its conversation at its own highlighted item ([#876](https://github.com/nickderobertis/onepipeline-ui/pull/876))
+
+### Fixed
+
+- *(deps)* link the engine that lets a node landing nothing depend on a kept spike ([#878](https://github.com/nickderobertis/onepipeline-ui/pull/878))
+
 ## [0.89.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.88.1...v0.89.0) - 2026-11-22
 
 ### Fixed
