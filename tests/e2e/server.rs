@@ -20422,7 +20422,8 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     .expect("metadata JSON");
     assert_eq!(
         metadata["onepipeline.settlement"],
-        json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser"}),
+        // Since onepipeline 0.119 a projected settlement names the run that made it.
+        json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser", "run": run}),
         "{metadata}"
     );
     assert!(
@@ -20454,7 +20455,7 @@ fn remote_plan_cache_adoption(enabled: bool) -> ProjectReads {
     assert_eq!(
         after.metadata.get("onepipeline.settlement"),
         Some(
-            &json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser"})
+            &json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser", "run": run})
         ),
         "{:?}",
         after.metadata
@@ -20699,7 +20700,8 @@ fn an_adopted_run_moves_the_card_of_its_plans_completed_task_to_done() {
     .expect("metadata JSON");
     assert_eq!(
         metadata["onepipeline.settlement"],
-        json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser"}),
+        // Since onepipeline 0.119 a projected settlement names the run that made it.
+        json!({"status": "done", "outcome": "settled-from-evidence", "detail": "Approved in the browser", "run": run}),
         "{metadata}"
     );
     serving.stop_on(Stop::Terminate);
