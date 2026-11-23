@@ -761,5 +761,46 @@ for (const size of [
       });
       await page.unroute("**/api/v2/runs/*/conversations/**");
     });
+
+    test("a long session's span is drawn from the read asked when it opened, while its own pages ask for another", async ({
+      page,
+    }) => {
+      const session = facts.sessions.panels;
+      const span = await servedSpan(page, "panels", session);
+      await openNode(page, "panels");
+      let reads = 0;
+      let reread = () => {};
+      const rereadAsked = new Promise<void>((resolve) => {
+        reread = resolve;
+      });
+      let releaseFirst = () => {};
+      const firstReleased = new Promise<void>((resolve) => {
+        releaseFirst = resolve;
+      });
+      let releaseRest = () => {};
+      const restReleased = new Promise<void>((resolve) => {
+        releaseRest = resolve;
+      });
+      // llmlint: ignore-block[e2e_not_mocked] the defect is a race between the transcript read and the span's own pages, which no corpus can order on demand: every read is held at the network boundary until the pages have asked for another, then the real server's answers pass through unchanged — the first one alone, so only a view that keeps the read it asked can draw.
+      await page.route("**/api/v2/runs/*/conversations/**", async (route) => {
+        reads += 1;
+        if (reads === 1) await firstReleased;
+        else {
+          reread();
+          await restReleased;
+        }
+        await route.continue();
+      });
+      // llmlint: ignore-end[e2e_not_mocked]
+      await clickRow(page, span.id);
+      await rereadAsked;
+      releaseFirst();
+      await expectPlaced(page, await settledFrames(page), {
+        turn: `${session}.0`,
+        part: "prompt",
+      });
+      releaseRest();
+      await page.unrouteAll({ behavior: "wait" });
+    });
   });
 }
