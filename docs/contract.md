@@ -237,6 +237,7 @@ The engine writes a hold when it **begins** and again whenever what the node is 
 | Row or span | Conversation opened | Item |
 | --- | --- | --- |
 | `turn-activity`, a tool call, agent message or reasoning | its session | that entry, by `tool` (unchanged) |
+| `turn-activity`, a tool result | its session | the tool call that holds the result, by `tool.tool_call_id` (unchanged) |
 | `turn-started` (agent: `role: assistant`, or none) | its session | turn N's `prompt` |
 | `turn-message` (agent) | its session | turn N's `answer` |
 | `turn-completed` (agent) | its session | turn N's `end` |
@@ -244,6 +245,7 @@ The engine writes a hold when it **begins** and again whenever what the node is 
 | `turn-started` (supervisor) | `<session>.judge` where served; otherwise the worker's session | judge turn N's `prompt`; otherwise agent turn N's `end`, the reply being judged |
 | `turn-completed` (supervisor) | as the line above | judge turn N's `end`; otherwise agent turn N's `end` |
 | `oneharness-session` | the harness record (`oneharness_session` reference) | no `conversation_item`; that record's turn's prompt |
+| A dispatch span whose `reference` is an `oneharness_session` | the harness record | no `conversation_item`; that record's turn's prompt |
 | A conversation span: a worker, its `· judge` lane, a change request drafter, a run-level session | that conversation | its first turn's `prompt`, `<conversation>.0` |
 
 
