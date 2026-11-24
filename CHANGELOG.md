@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.90.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.90.0...v0.90.1) - 2026-11-24
+
+### Fixed
+
+- *(deps)* link the engine whose onevcs waits out a host rate limit ([#887](https://github.com/nickderobertis/onepipeline-ui/pull/887))
+
 ## [0.90.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.89.1...v0.90.0) - 2026-11-24
 
 ### Fixed
