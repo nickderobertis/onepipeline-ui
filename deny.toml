@@ -13,7 +13,11 @@ yanked = "deny"
 # onetaskgraph-linear -> yrs. Every yrs release through 0.28.0 depends on it.
 # Retire this exception when a yrs release drops smallstr; the engine and plan
 # store carry the same exception while they await that release.
-ignore = ["RUSTSEC-2026-0215"]
+# chrono is unmaintained, not vulnerable, with no safe upgrade, and reached
+# only through onetaskgraph-* (via onepipeline) and schemars (via
+# oneagentgraph, oneharness-core and onejudge). Retire this exception when
+# those crates drop chrono; the engine carries the same exception.
+ignore = ["RUSTSEC-2026-0215", "RUSTSEC-2026-0543"]
 
 [licenses]
 # Permissive licenses compatible with this MIT-licensed binary. Adding a
