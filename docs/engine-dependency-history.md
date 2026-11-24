@@ -997,3 +997,11 @@ its plan's task now names the `run` that made it, which the board-projection jou
 onepipeline 0.118 to 0.119, whose re-exported engine types change. Its oneagentgraph,
 onejudge, oneharness-core, onemessagebus, onetaskgraph and onevcs requirements are the ones
 0.118.1 resolved.
+
+0.119.2 is the engine that links onevcs 0.69.0, whose GitHub host waits out a rate limit
+rather than settling verified work failed on one, and answers a launch's holder read in one
+pass. This crate moves to it, and its own exact `onevcs` requirement with it, so that a host
+holding its engine pin equal to the one this read API links can adopt those fixes. A patch
+move within 0.119, so the re-exported engine types do not change; it serves nothing new. Its
+oneagentgraph, onejudge, oneharness-core, onemessagebus and onetaskgraph requirements are
+the ones 0.119.0 resolved.
