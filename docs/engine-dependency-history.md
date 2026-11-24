@@ -982,3 +982,18 @@ finalize itself once its kept branches settle, and delete its own refinalize rec
 patch move within 0.118, so the re-exported engine and plan-store types do not change; it
 serves nothing new. Its oneagentgraph, onejudge, oneharness-core, onemessagebus,
 onetaskgraph and onevcs requirements are the ones 0.118.0 resolved.
+
+0.119.0 is the engine that tells a redone node which of its dependencies changed since it
+last settled `done`: `status --json` gives each `ReadingNode` its `provenance` (settled by
+this run, or continued from its project's store and from which run) and its
+`changed_dependencies`, and the launch record keeps each settlement's `inputs` and the
+`authored` form of every path value it resolved, so the plan write-back puts the authored
+value back rather than one checkout's absolute path (events bundle 2.8.0). This crate moves
+to it so that a host holding its engine pin equal to the one this read API links can adopt
+the engine's exact rework of changed spikes and delete its own spike-record scripts. It
+constructs neither struct whose fields grew. The settlement an adopted run projects onto
+its plan's task now names the `run` that made it, which the board-projection journeys in
+`tests/e2e/server.rs` hold. The move is announced as a break: it carries this crate from
+onepipeline 0.118 to 0.119, whose re-exported engine types change. Its oneagentgraph,
+onejudge, oneharness-core, onemessagebus, onetaskgraph and onevcs requirements are the ones
+0.118.1 resolved.

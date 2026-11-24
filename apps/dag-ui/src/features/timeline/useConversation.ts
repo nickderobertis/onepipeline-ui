@@ -1,6 +1,6 @@
 import type { DagConversation } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export interface ConversationState {
   readonly conversation?: DagConversation;
@@ -37,6 +37,14 @@ interface Fetched {
  * Reads are stale-while-revalidate — the transcript already served stays until the
  * next one arrives, and a revalidation that fails leaves it in place rather than
  * replacing a readable page with an error.
+ *
+ * A read already asked is never thrown away because the record moved while it was in
+ * flight: it still answers for the same transcript, and the newer read lands after it.
+ * Opening a session pages the rest of its span in, and every page moves the record,
+ * so discarding the read in flight made the first paint of a long transcript wait for
+ * every page and then one more whole read. Answers land in the order they were asked
+ * instead — one asked before an answer already shown is dropped, so an older reading
+ * never replaces a newer one — and an answer for another transcript never lands.
  */
 export function useConversation(
   client: TelemetryClient,
@@ -45,6 +53,10 @@ export function useConversation(
   record?: string,
 ): ConversationState {
   const [fetched, setFetched] = useState<Fetched>();
+  const reads = useRef<{ key?: string; asked: number; shown: number }>({
+    asked: 0,
+    shown: 0,
+  });
   // Serialized rather than joined on a separator: both halves are server-chosen
   // identifiers, and no separator is guaranteed to be absent from either.
   const key =
@@ -57,19 +69,30 @@ export function useConversation(
       key === undefined ||
       runId === undefined ||
       conversationId === undefined
-    )
+    ) {
+      // Nothing is open, so no read asked before now may land.
+      reads.current.key = undefined;
       return;
+    }
     // Read so each change of the served record asks for the open transcript again;
     // the value itself is immaterial.
     void record;
-    let active = true;
+    const order = reads.current;
+    // Every read asked so far was for another transcript, so none of them may land.
+    if (order.key !== key) order.shown = order.asked;
+    order.key = key;
+    order.asked += 1;
+    const asked = order.asked;
+    const lands = () => order.key === key && asked > order.shown;
     void client
       .getConversation(runId, conversationId)
       .then((conversation) => {
-        if (active) setFetched({ key, conversation });
+        if (!lands()) return;
+        order.shown = asked;
+        setFetched({ key, conversation });
       })
       .catch((caught: unknown) => {
-        if (!active) return;
+        if (!lands()) return;
         const error =
           caught instanceof Error ? caught : new Error(String(caught));
         setFetched((current) =>
@@ -78,9 +101,6 @@ export function useConversation(
             : { key, error },
         );
       });
-    return () => {
-      active = false;
-    };
   }, [client, runId, conversationId, key, record]);
 
   // A transcript read for a session that is no longer open is not this one's, so the
