@@ -9320,7 +9320,9 @@ pub fn rendered(run: &RunId, rendered: String) -> Value {
 /// onepipeline 0.118. Linking onepipeline 0.119.0 was such a break once more:
 /// this crate's public surface follows onepipeline 0.119.0's, so a consumer
 /// upgrading across it must align its own engine dependency with onepipeline
-/// 0.119 to pass a `RunStatus` here.
+/// 0.119 to pass a `RunStatus` here. Linking onepipeline 0.120.0 is such a
+/// break as well: a consumer upgrading across it must align its own engine
+/// dependency with onepipeline 0.120 to pass a `RunStatus` here.
 #[must_use]
 pub fn status(run: &RunId, status: &onepipeline::verbs::RunStatus, rendered: String) -> Value {
     let (count, oldest_seconds) = status.view.unread_surfaces();
