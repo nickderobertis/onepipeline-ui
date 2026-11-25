@@ -100,6 +100,25 @@ describe("the first screen subscribes the view the app would", () => {
     }
   });
 
+  it("reads the item an address opens as the app does, the ones it could never serve as none", () => {
+    for (const item of [
+      "dispatch.3f9a1c2e",
+      "e".repeat(512),
+      "a%2Fb",
+      "a%23b",
+      "a%09b",
+      "e".repeat(513),
+    ]) {
+      const search = `?run=r&node=n&event=${item}`;
+      window.history.replaceState(null, "", `/${search}`);
+      const { result, unmount } = renderHook(() => useUrlSelection());
+      const app = result.current.itemId;
+      unmount();
+      expect(firstAddress(search, "/")?.itemId).toBe(app);
+    }
+    expect(firstAddress("?run=r&node=n", "/")?.itemId).toBeUndefined();
+  });
+
   it("asks for every view unfiltered, whatever the address names", () => {
     for (const search of [
       "?run=r&view=overall",

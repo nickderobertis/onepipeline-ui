@@ -13,6 +13,8 @@ export type FirstScreenKind = "graph" | "overall" | "node";
 export interface FirstAddress {
   readonly runId: string;
   readonly nodeId?: string;
+  /** The timeline item the address opens (`event`), read as `useUrlSelection` reads it. */
+  readonly itemId?: string;
   readonly kind: FirstScreenKind;
   readonly view: SubscriptionView;
 }
@@ -109,9 +111,11 @@ export function firstAddress(
         : "graph",
     nodeId,
   );
+  const itemId = usable(params.get("event"));
   return {
     runId,
     ...(kind === "node" && nodeId !== undefined ? { nodeId } : {}),
+    ...(itemId === undefined ? {} : { itemId }),
     kind,
     view: subscriptionView(runId, kind, nodeId),
   };
