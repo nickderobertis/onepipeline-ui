@@ -149,6 +149,7 @@ test("a transcript still being read when the view arrives is waited for, not ask
 });
 
 /** Each way the page's entry can fail to read a transcript, as the network serves it. */
+// llmlint: ignore-block[e2e_not_mocked] each is a failure a conforming server never produces on demand, so it is served at the network boundary to the page's own first read alone (see the journey below); every later read reaches the real server unchanged.
 const ENTRY_READ_FAILURES: ReadonlyArray<{
   readonly name: string;
   readonly refuse: (route: Route) => Promise<void>;
@@ -178,6 +179,7 @@ const ENTRY_READ_FAILURES: ReadonlyArray<{
       }),
   },
 ];
+// llmlint: ignore-end[e2e_not_mocked]
 
 for (const failure of ENTRY_READ_FAILURES) {
   test(`a transcript read ${failure.name} at the page's entry is read again by the drawer`, async ({
@@ -275,10 +277,11 @@ test("a session reopened after the drawer took the page's read over is read afre
   await expect(turnsOf(page, opened.id)).toHaveCount(opened.turns);
   expect(asked, "the page asked for the transcript once").toHaveLength(1);
   const list = page.getByRole("region", { name: "Node transcript" });
-  // llmlint: ignore[e2e_uses_accessible_selectors] the opened row is the one the list marks current; its accessible name is then what the reader clicks by.
+  // llmlint: ignore-block[e2e_uses_accessible_selectors] the opened row is the one the list marks current; its accessible name is then what the reader clicks by.
   const label = await list
     .locator('article[aria-current="true"]')
     .getAttribute("aria-label");
+  // llmlint: ignore-end[e2e_uses_accessible_selectors]
   if (label === null) throw new Error("the list marks no row as the open one");
   await page.getByRole("button", { name: "Close detail" }).click();
   await expect(turnsOf(page, opened.id)).toHaveCount(0);
