@@ -4,6 +4,7 @@ import {
   artifactContentSchema,
   conversationSchema,
   runTimelineSchema,
+  type TimelineEvent,
 } from "@onepipeline-ui/dag-model";
 import { expect, type Locator, type Page, test } from "@playwright/test";
 import { z } from "zod";
@@ -1006,4 +1007,88 @@ test("a conversation item opens at that item, outlined in the view's selection a
       top: await viewport(page).evaluate((element) => element.scrollTop),
     };
   }
+});
+
+/**
+ * Two items of one turn, opened one after the other while the panel is open: the
+ * mark moves to the second at once, on the turn already drawn, rather than when
+ * the transcript has been read again. The panel redraws a turn only when the
+ * turn, its author or the item marked in it changed, and every read lands a new
+ * turn, so only a journey that holds the read can tell a panel that redraws on a
+ * moved mark from one that waits for the read.
+ */
+test("opening another item of the same turn moves the mark before the transcript is read again", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const timeline = runTimelineSchema.parse(
+    await (
+      await page.request.get(
+        `${server.origin}/api/v2/runs/${facts.run}/timeline?scope=node&node=narrated`,
+      )
+    ).json(),
+  );
+  // One entry per item: the node's span and its dispatch's both list each one.
+  const items = new Map<string, TimelineEvent>();
+  for (const event of timeline.spans.flatMap((span) => span.events))
+    if (
+      event.kind === "turn-activity" &&
+      event.tool !== undefined &&
+      event.reference?.kind === "conversation" &&
+      typeof event.description === "string"
+    )
+      items.set(`${event.tool.turn}|${event.tool.index}`, event);
+  const all = [...items.values()];
+  // Opened by the one line its row reads, so only a line no other item reads.
+  const unique = all.filter(
+    (event) =>
+      all.filter((other) => other.description === event.description).length ===
+      1,
+  );
+  const first = unique[0];
+  // A tool call rather than the turn's last message, which the turn serves as
+  // its answer and the panel marks as that part rather than as an entry.
+  const second = unique.findLast(
+    (event) =>
+      event.tool?.turn === first?.tool?.turn &&
+      event.fields?.kind === "tool_call",
+  );
+  if (first === undefined || second === undefined || second === first)
+    throw new Error("the narrated node lists no turn with two items");
+  await openNode(page, facts.run, "narrated");
+  const list = page.getByRole("region", { name: "Node transcript" });
+  const open = (item: TimelineEvent) =>
+    list
+      .getByRole("button", { name: `Open ${String(item.description)}` })
+      .first()
+      // Pressed where the row shows beside the open panel, as a person reaches it.
+      .click({ position: { x: 24, y: 8 } });
+  await open(first);
+  await expect(current(page)).toHaveAttribute(
+    "data-event-index",
+    String(first.tool?.index),
+  );
+
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // llmlint: ignore-block[e2e_not_mocked] the criterion is what the panel draws before its transcript is read again, so that read is held at the network boundary; nothing is doubled, and the real server's answer passes through unchanged once released.
+  await page.route("**/api/v2/runs/*/conversations/**", async (route) => {
+    await held;
+    await route.continue();
+  });
+  // llmlint: ignore-end[e2e_not_mocked]
+  await open(second);
+  await expect(current(page)).toHaveCount(1);
+  await expect(current(page)).toHaveAttribute(
+    "data-event-index",
+    String(second.tool?.index),
+  );
+  release();
+  await page.unrouteAll({ behavior: "wait" });
+  await expect(current(page)).toHaveAttribute(
+    "data-event-index",
+    String(second.tool?.index),
+  );
 });
