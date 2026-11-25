@@ -4,6 +4,7 @@ import "@xyflow/react/dist/style.css";
 import "@onetaskgraph/ui/styles.css";
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { FirstTranscriptContext } from "../features/timeline/useConversation";
 import type { FirstRead } from "../main";
 import { App } from "./App";
 import { AppErrorBoundary } from "./AppErrorBoundary";
@@ -34,10 +35,20 @@ export function mountApp(
     app.removeAttribute("data-app-behind-first-screen");
     app.style.cssText = "";
   };
+  // One handoff for the page: the first panel to open the address's conversation
+  // takes the entry's read of it, and every later one reads for itself.
+  const transcript = {
+    ...(first?.transcript === undefined
+      ? {}
+      : { transcript: first.transcript }),
+    taken: first?.transcript === undefined,
+  };
   createRoot(app).render(
     <StrictMode>
       <AppErrorBoundary>
-        <App first={first} onDrawn={reveal} />
+        <FirstTranscriptContext.Provider value={transcript}>
+          <App first={first} onDrawn={reveal} />
+        </FirstTranscriptContext.Provider>
       </AppErrorBoundary>
     </StrictMode>,
   );

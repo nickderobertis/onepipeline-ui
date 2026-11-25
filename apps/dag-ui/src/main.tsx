@@ -7,15 +7,91 @@ import {
   TelemetryDeadlineError,
 } from "@onepipeline-ui/telemetry-client/deadline";
 import { createRoot } from "react-dom/client";
-import { type FirstAddress, firstAddress } from "./first-screen/address";
+import {
+  type FirstAddress,
+  firstAddress,
+  isOpaqueId,
+} from "./first-screen/address";
 import { checkFirstAnswer } from "./first-screen/check";
-import { FirstScreen, FirstScreenLoading } from "./first-screen/FirstScreen";
+import {
+  type FirstAnswer,
+  FirstScreen,
+  FirstScreenLoading,
+} from "./first-screen/FirstScreen";
+
+/**
+ * The transcript of the conversation the address opens, read beside the app's own
+ * code rather than after the app has drawn the panel that shows it.
+ *
+ * Opening a shared address to a session used to read its transcript only once the
+ * whole app had mounted and drawn an empty panel, and then draw it behind every live
+ * frame and history page that had queued up meanwhile: on a starved page that chain,
+ * not the read, was what kept the reader waiting. The panel takes this read over as
+ * its first, so the page still asks for the transcript once.
+ */
+export interface FirstTranscript {
+  readonly runId: string;
+  readonly conversationId: string;
+  /** The read's body, where it had landed by the time the app mounted. */
+  readonly landed?: { readonly body: unknown };
+  /** The read itself: its body, or why there is none. */
+  readonly read: Promise<unknown>;
+}
 
 /** How the first read went, handed to the app that takes it over. */
 export interface FirstRead {
   readonly address: FirstAddress;
   readonly answer?: unknown;
   readonly error?: Error;
+  readonly transcript?: FirstTranscript;
+}
+
+/**
+ * The conversation the address's item opens, where the first answer names it: a
+ * span the timeline served under that id, whose reference is a conversation. An
+ * event row's reference is not among what the first screen checks, so a turn the
+ * address names is read by its panel as before.
+ */
+function openedConversation(
+  address: FirstAddress,
+  answer: FirstAnswer,
+): string | undefined {
+  const { itemId } = address;
+  if (itemId === undefined) return undefined;
+  const span = answer.initial.snapshot.visible.timeline?.spans.find(
+    ({ id }) => id === itemId,
+  );
+  const reference = span?.reference;
+  return reference?.kind === "conversation" && isOpaqueId(reference.value)
+    ? reference.value
+    : undefined;
+}
+
+/** Start reading one transcript, and say whether it has landed whenever asked. */
+function readTranscript(
+  runId: string,
+  conversationId: string,
+): () => FirstTranscript {
+  let landed: { readonly body: unknown } | undefined;
+  // `API_V2_PATHS.conversation`, spelled here because this chunk loads no schema.
+  const read = fetch(
+    `/api/v2/runs/${encodeURIComponent(runId)}/conversations/${encodeURIComponent(conversationId)}`,
+  ).then(async (response) => {
+    // A refusal is the panel's to read in the server's words, through its client.
+    if (!response.ok)
+      throw new Error(`transcript read failed with ${response.status}`);
+    const body: unknown = await response.json();
+    landed = { body };
+    return body;
+  });
+  // Whoever takes the read over reads its failure; nothing else may report it.
+  read.catch(() => undefined);
+  return () => ({
+    runId,
+    conversationId,
+    read,
+    ...(landed === undefined ? {} : { landed }),
+  });
 }
 
 /** The `{error: {code, message}}` a refusal carries, in the server's own words. */
@@ -101,13 +177,23 @@ async function start(): Promise<void> {
   // Every field the first screen draws is checked before it is drawn; the app holds
   // the same answer to the full contract when it takes it over. One that fails is
   // the app's to show, as the contract failure it is, and no screen is drawn from it.
+  let transcript: (() => FirstTranscript) | undefined;
   if (read.answer !== undefined) {
     const checked = checkFirstAnswer(read.answer);
     if (checked instanceof Error) read = { address, error: checked };
-    else drawn.render(<FirstScreen address={address} answer={checked} />);
+    else {
+      const conversationId = openedConversation(address, checked);
+      if (conversationId !== undefined)
+        transcript = readTranscript(address.runId, conversationId);
+      drawn.render(<FirstScreen address={address} answer={checked} />);
+    }
   }
   const { mountApp } = await import("./app/mount");
-  mountApp(element, read, drawn);
+  mountApp(
+    element,
+    transcript === undefined ? read : { ...read, transcript: transcript() },
+    drawn,
+  );
 }
 
 void start();
