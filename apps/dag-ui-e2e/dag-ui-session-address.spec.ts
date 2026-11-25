@@ -2,21 +2,21 @@ import {
   dagConversationSchema,
   runTimelineSchema,
 } from "@onepipeline-ui/dag-model";
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import {
+  expect,
+  type Locator,
+  type Page,
+  type Route,
+  test,
+} from "@playwright/test";
 import { runs } from "./fixture-facts";
 
 /**
  * A shared address that names one session — `?run=…&node=…&event=<its span>` —
  * opens that session's transcript in the detail drawer, and the page reads the
  * transcript beside the view's own code rather than once the view has drawn an
- * empty drawer.
- *
- * Reading it only after the view's first draw put the transcript behind the whole
- * of the app's start and then behind every live frame and history page queued up
- * meanwhile, which on a starved runner kept the reader on "Loading transcript…"
- * past any wait (the live run's Transcript inventory in `dag-ui-controls.spec.ts`
- * failed there with no turn drawn). The drawer takes the page's read over as its
- * own first, so the transcript is still asked for once.
+ * empty drawer. The drawer takes the page's read over as its own first, so the
+ * transcript is still asked for once.
  *
  * Against the shared server's live run, through the view's real entry; the reads
  * are held or refused at the network boundary only where a journey says so.
@@ -148,25 +148,58 @@ test("a transcript still being read when the view arrives is waited for, not ask
   await page.unrouteAll({ behavior: "wait" });
 });
 
-test("a transcript read the page's entry could not make is read again by the drawer", async ({
-  page,
-}) => {
-  const opened = await session(page);
-  const asked = transcriptReads(page);
-  let refused = false;
-  // llmlint: ignore-block[e2e_not_mocked] the criterion is the drawer's recovery when the page's own transcript read fails, which a conforming server never produces on demand: that one read is dropped at the network boundary, and every later one reaches the real server unchanged.
-  await page.route(CONVERSATIONS, async (route) => {
-    if (refused) return route.continue();
-    refused = true;
-    return route.abort("connectionreset");
+/** Each way the page's entry can fail to read a transcript, as the network serves it. */
+const ENTRY_READ_FAILURES: ReadonlyArray<{
+  readonly name: string;
+  readonly refuse: (route: Route) => Promise<void>;
+}> = [
+  {
+    name: "whose connection was reset",
+    refuse: (route) => route.abort("connectionreset"),
+  },
+  {
+    name: "the server refused",
+    refuse: (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "unavailable", message: "try again" },
+        }),
+      }),
+  },
+  {
+    name: "whose body is not JSON",
+    refuse: (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: "not json",
+      }),
+  },
+];
+
+for (const failure of ENTRY_READ_FAILURES) {
+  test(`a transcript read ${failure.name} at the page's entry is read again by the drawer`, async ({
+    page,
+  }) => {
+    const opened = await session(page);
+    const asked = transcriptReads(page);
+    let refused = false;
+    // llmlint: ignore-block[e2e_not_mocked] the criterion is the drawer's recovery when the page's own transcript read fails, which a conforming server never produces on demand: that one read is refused at the network boundary, and every later one reaches the real server unchanged.
+    await page.route(CONVERSATIONS, async (route) => {
+      if (refused) return route.continue();
+      refused = true;
+      return failure.refuse(route);
+    });
+    // llmlint: ignore-end[e2e_not_mocked]
+    await page.goto(opened.address);
+    await expect(turnsOf(page, opened.id)).toHaveCount(opened.turns);
+    expect(refused, "the page's own read was the one refused").toBe(true);
+    expect(asked.length, "the drawer read it again").toBeGreaterThanOrEqual(2);
+    await page.unrouteAll({ behavior: "wait" });
   });
-  // llmlint: ignore-end[e2e_not_mocked]
-  await page.goto(opened.address);
-  await expect(turnsOf(page, opened.id)).toHaveCount(opened.turns);
-  expect(refused, "the page's own read was the one refused").toBe(true);
-  expect(asked.length, "the drawer read it again").toBeGreaterThanOrEqual(2);
-  await page.unrouteAll({ behavior: "wait" });
-});
+}
 
 test("a transcript that landed before the view arrived is drawn in the drawer's first frame, and not asked for again", async ({
   page,

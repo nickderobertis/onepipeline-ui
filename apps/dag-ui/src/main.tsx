@@ -22,14 +22,9 @@ import {
 } from "./first-screen/FirstScreen";
 
 /**
- * The transcript of the conversation the address opens, read beside the app's own
- * code rather than after the app has drawn the panel that shows it.
- *
- * Opening a shared address to a session used to read its transcript only once the
- * whole app had mounted and drawn an empty panel, and then draw it behind every live
- * frame and history page that had queued up meanwhile: on a starved page that chain,
- * not the read, was what kept the reader waiting. The panel takes this read over as
- * its first, so the page still asks for the transcript once.
+ * The transcript of the conversation the address opens, read while the app's code
+ * loads so the panel need not wait on the app's start to ask for it. The panel takes
+ * this read over as its first, so the page still asks for the transcript once.
  */
 export interface FirstTranscript {
   readonly runId: string;

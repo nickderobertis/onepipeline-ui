@@ -645,12 +645,9 @@ function sameFocus(was?: ConversationFocus, now?: ConversationFocus): boolean {
  * One turn of an open session, drawn again only when the turn, its author or the
  * item marked in it changed.
  *
- * `TurnCard` renders every message through Markdown and highlight.js, which
- * guesses the language of each unlabelled code block by trying every language it
- * knows. A long session open beside a busy node re-renders its panel on every
- * page of rows and every chunk of the node's stream, and redrawing each turn on
- * each of those held the page's main thread for seconds while the transcript was
- * first being drawn.
+ * `TurnCard` highlights every unlabelled code block by trying every language
+ * highlight.js knows, and the panel re-renders on every page and stream chunk of a
+ * busy node, so an unchanged turn is not drawn again.
  */
 const SessionTurn = memo(
   function SessionTurn({ author, focus, turn }: SessionTurnProps) {
