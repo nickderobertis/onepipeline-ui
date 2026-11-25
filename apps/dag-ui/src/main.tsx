@@ -2,8 +2,6 @@
 // build, so the design system's tokens, variants and layers arrive with the app's
 // own CSS rather than as raw text injected after first paint.
 import "./styles.css";
-// The schema-free route table: this chunk loads no zod.
-import { API_V2_PATHS } from "@onepipeline-ui/dag-model/paths";
 import {
   READ_DEADLINE_MS,
   TelemetryDeadlineError,
@@ -20,6 +18,10 @@ import {
   FirstScreen,
   FirstScreenLoading,
 } from "./first-screen/FirstScreen";
+import {
+  FIRST_SUBSCRIPTIONS_PATH,
+  firstConversationPath,
+} from "./first-screen/paths";
 
 /**
  * The transcript of the conversation the address opens, read while the app's code
@@ -70,7 +72,7 @@ function readTranscript(
   conversationId: string,
 ): () => FirstTranscript {
   let landed: { readonly body: unknown } | undefined;
-  const read = fetch(API_V2_PATHS.conversation(runId, conversationId)).then(
+  const read = fetch(firstConversationPath(runId, conversationId)).then(
     async (response) => {
       // A refusal is the panel's to read in the server's words, through its client.
       if (!response.ok)
@@ -109,7 +111,7 @@ async function firstRead(address: FirstAddress): Promise<FirstRead> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), READ_DEADLINE_MS);
   try {
-    const response = await fetch(API_V2_PATHS.subscriptions, {
+    const response = await fetch(FIRST_SUBSCRIPTIONS_PATH, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ view: address.view }),
