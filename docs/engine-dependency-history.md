@@ -1005,3 +1005,16 @@ holding its engine pin equal to the one this read API links can adopt those fixe
 move within 0.119, so the re-exported engine types do not change; it serves nothing new. Its
 oneagentgraph, onejudge, oneharness-core, onemessagebus and onetaskgraph requirements are
 the ones 0.119.0 resolved.
+
+0.120.0 is the engine whose `unwatched` stops owing a watch on a run that waits only on a
+person: a run whose every unfinished node is a `kind: human` node with an open item, or is
+blocked behind one, with nothing dispatched and no planner surface unread or blocking
+surface unanswered, leaves `reported` for the new `Unwatched::waiting`, so `stop-guard` no
+longer blocks on it (onepipeline#1841). This crate moves to it so that a host holding its
+engine pin equal to the one this read API links can stop its managers re-arming watches on
+a wait only the user can end. `GET /api/v2/unwatched` still serves `reported` and
+`unresolved` as the engine answers them, so a run waiting only on a person drops out of
+`reported` there as it does from the CLI's listing; it serves `waiting` nowhere, adding no
+field. The move is announced as a break: it carries this crate from onepipeline 0.119 to
+0.120, whose re-exported engine types change. Its oneagentgraph, onejudge, oneharness-core,
+onemessagebus, onetaskgraph and onevcs requirements are the ones 0.119.2 resolved.
