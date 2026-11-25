@@ -2,6 +2,7 @@ import {
   dagConversationSchema,
   runTimelineSchema,
 } from "@onepipeline-ui/dag-model";
+import { READ_DEADLINE_MS } from "@onepipeline-ui/telemetry-client/deadline";
 import {
   expect,
   type Locator,
@@ -200,6 +201,36 @@ for (const failure of ENTRY_READ_FAILURES) {
     await page.unrouteAll({ behavior: "wait" });
   });
 }
+
+test("a transcript read the page's entry gets no answer to is given up at the read deadline and read again by the drawer", async ({
+  page,
+}) => {
+  // The page's own read waits out the whole deadline before the drawer reads again.
+  test.setTimeout(READ_DEADLINE_MS + 60_000);
+  const opened = await session(page);
+  const asked = transcriptReads(page);
+  const given = new Promise<string>((resolve) => {
+    page.on("requestfailed", (request) => {
+      if (request.url().includes("/conversations/")) resolve(request.url());
+    });
+  });
+  let stalled: string | undefined;
+  // llmlint: ignore-block[e2e_not_mocked] the criterion is the page's own read meeting a server that never answers, which a conforming server never does on demand: that one read is held at the network boundary and never answered, and every later read reaches the real server unchanged.
+  await page.route(CONVERSATIONS, async (route) => {
+    if (stalled !== undefined) return route.continue();
+    stalled = route.request().url();
+    await new Promise<never>(() => {});
+  });
+  // llmlint: ignore-end[e2e_not_mocked]
+  await page.goto(opened.address);
+  await expect(turnsOf(page, opened.id)).toHaveCount(opened.turns, {
+    timeout: READ_DEADLINE_MS + 30_000,
+  });
+  expect(stalled, "the page's own read was the one held").toBeDefined();
+  expect(await given, "the page gave the held read up").toBe(stalled);
+  expect(asked.length, "the drawer read it again").toBeGreaterThanOrEqual(2);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
 
 test("a transcript that landed before the view arrived is drawn in the drawer's first frame, and not asked for again", async ({
   page,

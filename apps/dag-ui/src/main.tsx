@@ -72,16 +72,30 @@ function readTranscript(
   conversationId: string,
 ): () => FirstTranscript {
   let landed: { readonly body: unknown } | undefined;
-  const read = fetch(firstConversationPath(runId, conversationId)).then(
-    async (response) => {
+  // The client's deadline, held over the body too: a read that never ends would
+  // keep the panel waiting on it rather than asking again through the client.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), READ_DEADLINE_MS);
+  const read = (async () => {
+    try {
+      const response = await fetch(
+        firstConversationPath(runId, conversationId),
+        { signal: controller.signal },
+      );
       // A refusal is the panel's to read in the server's words, through its client.
       if (!response.ok)
         throw new Error(`transcript read failed with ${response.status}`);
       const body: unknown = await response.json();
       landed = { body };
       return body;
-    },
-  );
+    } catch (error) {
+      if (controller.signal.aborted)
+        throw new TelemetryDeadlineError("The transcript");
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  })();
   // Whoever takes the read over reads its failure; nothing else may report it.
   read.catch(() => undefined);
   return () => ({
