@@ -78,6 +78,7 @@ function transcriptReads(page: Page): string[] {
 declare global {
   interface Window {
     __viewArrivedAt?: number;
+    __drawerWaitedOnTranscript?: boolean;
   }
 }
 
@@ -90,6 +91,7 @@ test("an address naming a session asks for its transcript before the view's code
   // (`app/mount.tsx`), and the transcript read's start is on the same clock.
   await page.addInitScript(() => {
     new MutationObserver((_, observer) => {
+      // llmlint: ignore[e2e_uses_accessible_selectors] the moment the view's code arrives is no element a reader can name: its root is marked so only for this probe, and is unmarked before it draws.
       if (document.querySelector("[data-app-behind-first-screen]") === null)
         return;
       window.__viewArrivedAt = performance.now();
@@ -164,4 +166,96 @@ test("a transcript read the page's entry could not make is read again by the dra
   expect(refused, "the page's own read was the one refused").toBe(true);
   expect(asked.length, "the drawer read it again").toBeGreaterThanOrEqual(2);
   await page.unrouteAll({ behavior: "wait" });
+});
+
+test("a transcript that landed before the view arrived is drawn in the drawer's first frame, and not asked for again", async ({
+  page,
+}) => {
+  const opened = await session(page);
+  const asked = transcriptReads(page);
+  // Whether the drawer ever said it was waiting on the transcript, on the page.
+  await page.addInitScript(() => {
+    new MutationObserver(() => {
+      if (document.body?.textContent?.includes("Loading transcript…"))
+        window.__drawerWaitedOnTranscript = true;
+    }).observe(document, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+  });
+  const landed = page.waitForResponse(
+    (response) => response.url().includes("/conversations/") && response.ok(),
+  );
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  // llmlint: ignore-block[e2e_not_mocked] the criterion is what the drawer draws when the page's transcript read landed before the view's code did, which only holding that code makes certain: the view's own chunk is held at the network boundary until the read has landed, and is then served unchanged.
+  await page.route("**/assets/mount-*.js", async (route) => {
+    await held;
+    await route.continue();
+  });
+  // llmlint: ignore-end[e2e_not_mocked]
+  await page.goto(opened.address);
+  await (await landed).finished();
+  release();
+  await expect(turnsOf(page, opened.id)).toHaveCount(opened.turns);
+  expect(asked, "the page asked for the transcript once").toHaveLength(1);
+  expect(
+    await page.evaluate(() => window.__drawerWaitedOnTranscript ?? false),
+    "the drawer drew the landed transcript rather than waiting on it",
+  ).toBe(false);
+  await page.unrouteAll({ behavior: "wait" });
+});
+
+test("a transcript the page's entry read but the contract refuses is read again by the drawer", async ({
+  page,
+}) => {
+  const opened = await session(page);
+  const asked = transcriptReads(page);
+  let refused = false;
+  // llmlint: ignore-block[e2e_not_mocked] the criterion is the drawer's recovery from a successful read whose body the contract refuses, which a conforming server never serves: that one answer's body is replaced at the network boundary, and every later read reaches the real server unchanged.
+  await page.route(CONVERSATIONS, async (route) => {
+    if (refused) return route.continue();
+    refused = true;
+    return route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ conversation: "not a conversation" }),
+    });
+  });
+  // llmlint: ignore-end[e2e_not_mocked]
+  await page.goto(opened.address);
+  await expect(turnsOf(page, opened.id)).toHaveCount(opened.turns);
+  expect(refused, "the page's own read was the one refused").toBe(true);
+  expect(asked.length, "the drawer read it again").toBeGreaterThanOrEqual(2);
+  await page.unrouteAll({ behavior: "wait" });
+});
+
+test("a session reopened after the drawer took the page's read over is read afresh", async ({
+  page,
+}) => {
+  const opened = await session(page);
+  const asked = transcriptReads(page);
+  await page.goto(opened.address);
+  await expect(turnsOf(page, opened.id)).toHaveCount(opened.turns);
+  expect(asked, "the page asked for the transcript once").toHaveLength(1);
+  const list = page.getByRole("region", { name: "Node transcript" });
+  // llmlint: ignore[e2e_uses_accessible_selectors] the opened row is the one the list marks current; its accessible name is then what the reader clicks by.
+  const label = await list
+    .locator('article[aria-current="true"]')
+    .getAttribute("aria-label");
+  if (label === null) throw new Error("the list marks no row as the open one");
+  await page.getByRole("button", { name: "Close detail" }).click();
+  await expect(turnsOf(page, opened.id)).toHaveCount(0);
+  await list
+    .getByRole("button", { name: `Open ${label}`, exact: true })
+    .click();
+  await expect(turnsOf(page, opened.id)).toHaveCount(opened.turns);
+  await expect
+    .poll(() => asked.length, {
+      message: "the reopened drawer asked for the transcript itself",
+    })
+    .toBe(2);
 });
