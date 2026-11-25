@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.91.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.90.1...v0.91.0) - 2026-11-25
+
+### Fixed
+
+- *(tests)* make the DAG view's conversation and transcript journeys deterministic ([#894](https://github.com/nickderobertis/onepipeline-ui/pull/894))
+- *(deps)* [**breaking**] link the engine that owes no watch on a run waiting only on a person ([#891](https://github.com/nickderobertis/onepipeline-ui/pull/891))
+
 ## [0.90.1](https://github.com/nickderobertis/onepipeline-ui/compare/v0.90.0...v0.90.1) - 2026-11-24
 
 ### Fixed
