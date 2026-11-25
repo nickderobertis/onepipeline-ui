@@ -57,7 +57,6 @@ async function session(page: Page) {
   };
 }
 
-/** The opened session's turns, as the drawer draws them. */
 function turnsOf(page: Page, id: string): Locator {
   return page.getByRole("region", { name: DETAIL }).getByRole("article", {
     name: new RegExp(
@@ -66,7 +65,6 @@ function turnsOf(page: Page, id: string): Locator {
   });
 }
 
-/** Every transcript read the page asks for, from here on. */
 function transcriptReads(page: Page): string[] {
   const asked: string[] = [];
   page.on("request", (request) => {
@@ -208,7 +206,6 @@ test("a transcript that landed before the view arrived is drawn in the drawer's 
 }) => {
   const opened = await session(page);
   const asked = transcriptReads(page);
-  // Whether the drawer ever said it was waiting on the transcript, on the page.
   await page.addInitScript(() => {
     new MutationObserver(() => {
       if (document.body?.textContent?.includes("Loading transcript…"))
