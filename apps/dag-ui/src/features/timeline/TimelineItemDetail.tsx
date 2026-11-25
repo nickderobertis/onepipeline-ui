@@ -34,7 +34,7 @@ import type {
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { changeRequestId } from "../../lib/change-request";
 import { argvOf, commandLine } from "../../lib/command-line";
 import { HarnessConversation } from "../../lib/HarnessConversation";
@@ -591,13 +591,11 @@ function Session({
                   key={turn.id}
                   ref={(element) => sync.register(turn.id, element)}
                 >
-                  <RecorderCut turn={turn} />
-                  <TurnCard
-                    author={{ label: author }}
+                  <SessionTurn
+                    author={author}
                     {...(focus?.turnId === turn.id ? { focus } : {})}
                     turn={turn}
                   />
-                  <JudgeDecisions turn={turn} />
                 </div>
               ))}
               {/* Room below a single opened turn, so the item it opened on can be
@@ -623,6 +621,56 @@ function Session({
     </Card>
   );
 }
+
+interface SessionTurnProps {
+  readonly author: string;
+  readonly focus?: ConversationFocus;
+  readonly turn: Turn;
+}
+
+/** Whether two focuses name the same item: `focusOf` builds a new one each render. */
+function sameFocus(was?: ConversationFocus, now?: ConversationFocus): boolean {
+  return (
+    was === now ||
+    (was !== undefined &&
+      now !== undefined &&
+      was.turnId === now.turnId &&
+      was.part === now.part &&
+      was.eventIndex === now.eventIndex &&
+      was.toolCallId === now.toolCallId)
+  );
+}
+
+/**
+ * One turn of an open session, drawn again only when the turn, its author or the
+ * item marked in it changed.
+ *
+ * `TurnCard` renders every message through Markdown and highlight.js, which
+ * guesses the language of each unlabelled code block by trying every language it
+ * knows. A long session open beside a busy node re-renders its panel on every
+ * page of rows and every chunk of the node's stream, and redrawing each turn on
+ * each of those held the page's main thread for seconds while the transcript was
+ * first being drawn.
+ */
+const SessionTurn = memo(
+  function SessionTurn({ author, focus, turn }: SessionTurnProps) {
+    return (
+      <>
+        <RecorderCut turn={turn} />
+        <TurnCard
+          author={{ label: author }}
+          {...(focus === undefined ? {} : { focus })}
+          turn={turn}
+        />
+        <JudgeDecisions turn={turn} />
+      </>
+    );
+  },
+  (was, now) =>
+    was.turn === now.turn &&
+    was.author === now.author &&
+    sameFocus(was.focus, now.focus),
+);
 
 function Verification({
   row,
