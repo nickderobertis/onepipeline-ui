@@ -2,6 +2,8 @@
 // build, so the design system's tokens, variants and layers arrive with the app's
 // own CSS rather than as raw text injected after first paint.
 import "./styles.css";
+// The schema-free route table: this chunk loads no zod.
+import { API_V2_PATHS } from "@onepipeline-ui/dag-model/paths";
 import {
   READ_DEADLINE_MS,
   TelemetryDeadlineError,
@@ -73,17 +75,16 @@ function readTranscript(
   conversationId: string,
 ): () => FirstTranscript {
   let landed: { readonly body: unknown } | undefined;
-  // `API_V2_PATHS.conversation`, spelled here because this chunk loads no schema.
-  const read = fetch(
-    `/api/v2/runs/${encodeURIComponent(runId)}/conversations/${encodeURIComponent(conversationId)}`,
-  ).then(async (response) => {
-    // A refusal is the panel's to read in the server's words, through its client.
-    if (!response.ok)
-      throw new Error(`transcript read failed with ${response.status}`);
-    const body: unknown = await response.json();
-    landed = { body };
-    return body;
-  });
+  const read = fetch(API_V2_PATHS.conversation(runId, conversationId)).then(
+    async (response) => {
+      // A refusal is the panel's to read in the server's words, through its client.
+      if (!response.ok)
+        throw new Error(`transcript read failed with ${response.status}`);
+      const body: unknown = await response.json();
+      landed = { body };
+      return body;
+    },
+  );
   // Whoever takes the read over reads its failure; nothing else may report it.
   read.catch(() => undefined);
   return () => ({
@@ -113,7 +114,7 @@ async function firstRead(address: FirstAddress): Promise<FirstRead> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), READ_DEADLINE_MS);
   try {
-    const response = await fetch("/api/v2/subscriptions", {
+    const response = await fetch(API_V2_PATHS.subscriptions, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ view: address.view }),
