@@ -867,11 +867,22 @@ test("a conversation item opens at that item, outlined in the view's selection a
 
   let previous: { index: number; top: number } | undefined;
   for (const item of items) {
-    // A reader who scrolled back up to the prompt before opening the next item.
-    if (previous !== undefined)
-      await viewport(page).evaluate((element) => {
-        element.scrollTop = 0;
-      });
+    // A reader who scrolled back up to the prompt before opening the next item,
+    // with the wheel: the panel keeps the opened item placed through every
+    // resize until the reader scrolls for themselves, so a scroll offset set
+    // from script is undone by the next reflow and the reader is back at the
+    // item they left (`@oneharness/ui`'s `useFocusPlacement`).
+    if (previous !== undefined) {
+      const box = await viewport(page).boundingBox();
+      if (box === null) throw new Error("the panel has no scroll viewport");
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await expect
+        .poll(async () => {
+          await page.mouse.wheel(0, -2_000);
+          return viewport(page).evaluate((element) => element.scrollTop);
+        })
+        .toBe(0);
+    }
     // Whether the item about to be opened is already on screen in an open panel.
     const inView =
       previous !== undefined &&
