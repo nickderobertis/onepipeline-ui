@@ -1,0 +1,29 @@
+
+== test-linux
+  control    run 43426834616#1  wall  18.4 min  executed task-min   -    failed tasks -  onepipeline-ui-versions:test-quick   -    onepipeline-ui:install-smoke   -  
+  control    run 43426834616#2  wall  20.6 min  executed task-min  78.4  failed tasks 7  onepipeline-ui-versions:test-quick   -    onepipeline-ui:install-smoke   0.2
+  fake       run 43438077800#1  wall  23.9 min  executed task-min  95.3  failed tasks 7  onepipeline-ui-versions:test-quick   -    onepipeline-ui:install-smoke   0.1
+  fake       run 43438077800#2  wall  24.5 min  executed task-min 103.5  failed tasks 6  onepipeline-ui-versions:test-quick   -    onepipeline-ui:install-smoke   0.0
+  wall                         control mean  19.5 | fake mean  24.2 | fake−control +4.7 min (spread 2.1; outside the runs' spread)
+  executed task-minutes        control mean  78.4 | fake mean  99.4 | fake−control +20.9 min (spread 8.2; one run on a side: no spread)
+  onepipeline-ui:install-smoke control mean   0.2 | fake mean   0.1 | fake−control -0.1 min (spread 0.1; one run on a side: no spread)
+
+== test-macos
+  control    run 43426834616#1  wall  13.0 min  executed task-min   -    failed tasks -  onepipeline-ui-versions:test-quick   -    onepipeline-ui:install-smoke   -  
+  control    run 43426834616#2  wall  10.1 min  executed task-min  35.6  failed tasks 0  onepipeline-ui-versions:test-quick   6.3  onepipeline-ui:install-smoke   8.0
+  fake       run 43438077800#1  wall  16.9 min  executed task-min  52.2  failed tasks 0  onepipeline-ui-versions:test-quick   0.3  onepipeline-ui:install-smoke  14.4
+  fake       run 43438077800#2  wall   5.2 min  executed task-min  14.4  failed tasks 0  onepipeline-ui-versions:test-quick   0.1  onepipeline-ui:install-smoke   3.9
+  wall                         control mean  11.6 | fake mean  11.1 | fake−control -0.5 min (spread 11.7; inside the runs' spread)
+  executed task-minutes        control mean  35.6 | fake mean  33.3 | fake−control -2.3 min (spread 37.8; one run on a side: no spread)
+  onepipeline-ui-versions:test-quick control mean   6.3 | fake mean   0.2 | fake−control -6.1 min (spread 0.2; one run on a side: no spread)
+  onepipeline-ui:install-smoke control mean   8.0 | fake mean   9.2 | fake−control +1.2 min (spread 10.6; one run on a side: no spread)
+
+== test-windows
+  control    run 43426834616#1  wall  14.3 min  executed task-min   -    failed tasks -  onepipeline-ui-versions:test-quick   -    onepipeline-ui:install-smoke   -  
+  control    run 43426834616#2  wall  14.2 min  executed task-min  38.5  failed tasks 0  onepipeline-ui-versions:test-quick   8.1  onepipeline-ui:install-smoke   8.8
+  fake       run 43438077800#1  wall  12.7 min  executed task-min  26.0  failed tasks 0  onepipeline-ui-versions:test-quick   0.4  onepipeline-ui:install-smoke   9.1
+  fake       run 43438077800#2  wall  16.3 min  executed task-min  51.4  failed tasks 0  onepipeline-ui-versions:test-quick   0.2  onepipeline-ui:install-smoke  12.6
+  wall                         control mean  14.3 | fake mean  14.5 | fake−control +0.2 min (spread 3.7; inside the runs' spread)
+  executed task-minutes        control mean  38.5 | fake mean  38.7 | fake−control +0.2 min (spread 25.4; one run on a side: no spread)
+  onepipeline-ui-versions:test-quick control mean   8.1 | fake mean   0.3 | fake−control -7.9 min (spread 0.2; one run on a side: no spread)
+  onepipeline-ui:install-smoke control mean   8.8 | fake mean  10.9 | fake−control +2.1 min (spread 3.6; one run on a side: no spread)

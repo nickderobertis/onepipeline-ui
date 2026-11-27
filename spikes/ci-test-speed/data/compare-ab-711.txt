@@ -1,0 +1,16 @@
+
+== test-linux
+  parent     run 43399808950#1  wall  48.2 min  executed task-min 226.3  failed tasks 5  github-workflows-nx-cache:test  23.0  onepipeline-ui:test  17.5  onepipeline-ui-e2e:test  17.0  onepipeline-ui-npm-launcher:test  11.0  onepipeline-ui-repo-tooling:test  17.8  dag-ui-read-latency:compile-release-server  30.0  dag-ui-e2e:test  18.3  onepipeline-ui-release:test-standalone  20.0
+  parent     run 43399808950#2  wall  40.3 min  executed task-min 185.3  failed tasks 5  github-workflows-nx-cache:test  17.1  onepipeline-ui:test  14.9  onepipeline-ui-e2e:test  13.7  onepipeline-ui-npm-launcher:test   9.4  onepipeline-ui-repo-tooling:test  14.4  dag-ui-read-latency:compile-release-server  24.5  dag-ui-e2e:test  13.8  onepipeline-ui-release:test-standalone  15.2
+  merge      run 43399806156#1  wall  36.2 min  executed task-min 166.5  failed tasks 6  github-workflows-nx-cache:test  17.8  onepipeline-ui:test  12.4  onepipeline-ui-e2e:test   3.6  onepipeline-ui-npm-launcher:test   9.2  onepipeline-ui-repo-tooling:test  19.3  dag-ui-read-latency:compile-release-server  21.8  dag-ui-e2e:test  14.6  onepipeline-ui-release:test-standalone  13.5
+  merge      run 43399806156#2  wall  49.5 min  executed task-min 225.8  failed tasks 5  github-workflows-nx-cache:test  23.2  onepipeline-ui:test  16.7  onepipeline-ui-e2e:test   4.8  onepipeline-ui-npm-launcher:test  12.5  onepipeline-ui-repo-tooling:test  29.1  dag-ui-read-latency:compile-release-server  33.5  dag-ui-e2e:test  19.1  onepipeline-ui-release:test-standalone  19.3
+  wall                         parent mean  44.3 | merge mean  42.8 | merge−parent -1.4 min (spread 13.3; inside the runs' spread)
+  executed task-minutes        parent mean 205.8 | merge mean 196.1 | merge−parent -9.7 min (spread 59.3; inside the runs' spread)
+  github-workflows-nx-cache:test parent mean  20.0 | merge mean  20.5 | merge−parent +0.5 min (spread 6.0; inside the runs' spread)
+  onepipeline-ui:test          parent mean  16.2 | merge mean  14.6 | merge−parent -1.7 min (spread 4.3; inside the runs' spread)
+  onepipeline-ui-e2e:test      parent mean  15.3 | merge mean   4.2 | merge−parent -11.1 min (spread 3.3; outside the runs' spread)
+  onepipeline-ui-npm-launcher:test parent mean  10.2 | merge mean  10.9 | merge−parent +0.7 min (spread 3.3; inside the runs' spread)
+  onepipeline-ui-repo-tooling:test parent mean  16.1 | merge mean  24.2 | merge−parent +8.1 min (spread 9.8; inside the runs' spread)
+  dag-ui-read-latency:compile-release-server parent mean  27.2 | merge mean  27.7 | merge−parent +0.5 min (spread 11.7; inside the runs' spread)
+  dag-ui-e2e:test              parent mean  16.1 | merge mean  16.8 | merge−parent +0.8 min (spread 4.4; inside the runs' spread)
+  onepipeline-ui-release:test-standalone parent mean  17.6 | merge mean  16.4 | merge−parent -1.2 min (spread 5.7; inside the runs' spread)

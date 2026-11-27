@@ -1,0 +1,409 @@
+{
+  "schema": 2,
+  "base_sha": "1b72a6025f689c04f4e1e3508ed17378cab67b4a",
+  "repository": "nickderobertis/onepipeline-ui",
+  "ref": "refs/pull/773/merge",
+  "pr": 773,
+  "head_sha": "bb0cf37941aa856bec699bb98bba26cb88be98fc",
+  "run_id": 43370095836,
+  "attempt": 1,
+  "job": "test-windows",
+  "os": "win32",
+  "tasks": [
+    {
+      "task": "onepipeline-ui:bootstrap",
+      "hash": "5141762905289510358",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:11:12.171Z",
+      "finished_at": "2026-11-13T05:11:47.993Z"
+    },
+    {
+      "task": "github-workflows:bootstrap",
+      "hash": "3103849825381022068",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:11:47.994Z",
+      "finished_at": "2026-11-13T05:11:48.063Z"
+    },
+    {
+      "task": "dag-ui-e2e:bootstrap",
+      "hash": "4601544811901470555",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:11:48.064Z",
+      "finished_at": "2026-11-13T05:12:07.657Z"
+    },
+    {
+      "task": "github-workflows-judge-install:bootstrap",
+      "hash": "4609710218571100213",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:07.657Z",
+      "finished_at": "2026-11-13T05:12:07.724Z"
+    },
+    {
+      "task": "github-workflows-installs:bootstrap",
+      "hash": "11285092131010338221",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:07.724Z",
+      "finished_at": "2026-11-13T05:12:07.788Z"
+    },
+    {
+      "task": "github-workflows-nx-cache:bootstrap",
+      "hash": "15936544073721971957",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:07.788Z",
+      "finished_at": "2026-11-13T05:12:10.088Z"
+    },
+    {
+      "task": "pool-maintenance:bootstrap",
+      "hash": "11719226071306319136",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:10.088Z",
+      "finished_at": "2026-11-13T05:12:10.315Z"
+    },
+    {
+      "task": "dag-ui:format-check",
+      "hash": "17260210352103954804",
+      "cacheable": true,
+      "result": "remote_hit",
+      "remote_status": 200,
+      "remote_read": "hit",
+      "started_at": "2026-11-13T05:12:20.969Z",
+      "finished_at": "2026-11-13T05:12:20.971Z"
+    },
+    {
+      "task": "dag-ui:lint",
+      "hash": "6036976356760156141",
+      "cacheable": true,
+      "result": "remote_hit",
+      "remote_status": 200,
+      "remote_read": "hit",
+      "started_at": "2026-11-13T05:12:20.969Z",
+      "finished_at": "2026-11-13T05:12:20.971Z"
+    },
+    {
+      "task": "dag-ui-e2e:format-check",
+      "hash": "9267157074437932570",
+      "cacheable": true,
+      "result": "remote_hit",
+      "remote_status": 200,
+      "remote_read": "hit",
+      "started_at": "2026-11-13T05:12:20.969Z",
+      "finished_at": "2026-11-13T05:12:20.971Z"
+    },
+    {
+      "task": "dag-ui-e2e:lint",
+      "hash": "14363355959019358966",
+      "cacheable": true,
+      "result": "remote_hit",
+      "remote_status": 200,
+      "remote_read": "hit",
+      "started_at": "2026-11-13T05:12:20.969Z",
+      "finished_at": "2026-11-13T05:12:20.971Z"
+    },
+    {
+      "task": "onepipeline-ui-release:lint",
+      "hash": "3334479480174608912",
+      "cacheable": true,
+      "result": "remote_hit",
+      "remote_status": 200,
+      "remote_read": "hit",
+      "started_at": "2026-11-13T05:12:20.969Z",
+      "finished_at": "2026-11-13T05:12:20.971Z"
+    },
+    {
+      "task": "dag-ui-read-latency:format-check",
+      "hash": "17790153763822108588",
+      "cacheable": true,
+      "result": "remote_hit",
+      "remote_status": 200,
+      "remote_read": "hit",
+      "started_at": "2026-11-13T05:12:20.969Z",
+      "finished_at": "2026-11-13T05:12:20.971Z"
+    },
+    {
+      "task": "dag-ui-read-latency:lint",
+      "hash": "12324734518389085250",
+      "cacheable": true,
+      "result": "remote_hit",
+      "remote_status": 200,
+      "remote_read": "hit",
+      "started_at": "2026-11-13T05:12:20.969Z",
+      "finished_at": "2026-11-13T05:12:20.971Z"
+    },
+    {
+      "task": "github-workflows:bootstrap",
+      "hash": "3103849825381022068",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:20.973Z",
+      "finished_at": "2026-11-13T05:12:21.229Z"
+    },
+    {
+      "task": "github-workflows-nx-cache:lint",
+      "hash": "11027712974893134981",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:20.973Z",
+      "finished_at": "2026-11-13T05:12:21.410Z"
+    },
+    {
+      "task": "onepipeline-ui:ensure-node-without-execve",
+      "hash": "5660901314256596690",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:20.973Z",
+      "finished_at": "2026-11-13T05:12:21.742Z"
+    },
+    {
+      "task": "onepipeline-ui:ensure-sibling",
+      "hash": "16263302232693080925",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:20.973Z",
+      "finished_at": "2026-11-13T05:12:22.150Z"
+    },
+    {
+      "task": "github-workflows:lint",
+      "hash": "1132864446155114310",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:21.745Z",
+      "finished_at": "2026-11-13T05:12:24.530Z"
+    },
+    {
+      "task": "onepipeline-ui:format-check",
+      "hash": "17081259465865218487",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:20.973Z",
+      "finished_at": "2026-11-13T05:12:24.783Z"
+    },
+    {
+      "task": "dag-ui:build",
+      "hash": "7241565829882301440",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:20.973Z",
+      "finished_at": "2026-11-13T05:12:25.202Z"
+    },
+    {
+      "task": "onepipeline-ui:lint",
+      "hash": "3554081598615668864",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:25.702Z",
+      "finished_at": "2026-11-13T05:12:48.504Z"
+    },
+    {
+      "task": "dag-ui-build-cache:lint",
+      "hash": "4962510363241956732",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:48.511Z",
+      "finished_at": "2026-11-13T05:13:32.798Z"
+    },
+    {
+      "task": "onepipeline-ui:test-quick",
+      "hash": "7207932410147395281",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:25.702Z",
+      "finished_at": "2026-11-13T05:13:39.668Z"
+    },
+    {
+      "task": "onepipeline-ui-npm-launcher:test-quick",
+      "hash": "4074947993210520854",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:25.702Z",
+      "finished_at": "2026-11-13T05:13:43.195Z"
+    },
+    {
+      "task": "onepipeline-ui-baseline-reuse:test-quick",
+      "hash": "13994622967242638336",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:25.702Z",
+      "finished_at": "2026-11-13T05:13:52.219Z"
+    },
+    {
+      "task": "onepipeline-ui-e2e:test-quick",
+      "hash": "14655001018426675509",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:13:39.675Z",
+      "finished_at": "2026-11-13T05:17:49.966Z"
+    },
+    {
+      "task": "onepipeline-ui-repo-tooling:test-quick",
+      "hash": "15042803378166810049",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:12:25.702Z",
+      "finished_at": "2026-11-13T05:18:54.278Z"
+    },
+    {
+      "task": "onepipeline-ui:install-smoke",
+      "hash": "14811211474146496398",
+      "cacheable": false,
+      "result": "executed",
+      "remote_status": null,
+      "remote_read": "not_attempted",
+      "started_at": "2026-11-13T05:12:25.702Z",
+      "finished_at": "2026-11-13T05:21:44.690Z"
+    },
+    {
+      "task": "onepipeline-ui-versions:test-quick",
+      "hash": "1118291191836408301",
+      "cacheable": true,
+      "result": "executed",
+      "remote_status": 404,
+      "remote_read": "miss",
+      "started_at": "2026-11-13T05:13:32.805Z",
+      "finished_at": "2026-11-13T05:21:58.545Z"
+    }
+  ],
+  "store_attempts": [
+    {
+      "task": "github-workflows-nx-cache:lint",
+      "hash": "11027712974893134981",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:12:21.414Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "github-workflows:lint",
+      "hash": "1132864446155114310",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:12:24.539Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "onepipeline-ui:format-check",
+      "hash": "17081259465865218487",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:12:24.786Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "onepipeline-ui:lint",
+      "hash": "3554081598615668864",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:12:48.508Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "dag-ui-build-cache:lint",
+      "hash": "4962510363241956732",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:13:32.801Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "onepipeline-ui:test-quick",
+      "hash": "7207932410147395281",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:13:39.670Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "onepipeline-ui-npm-launcher:test-quick",
+      "hash": "4074947993210520854",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:13:43.198Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "onepipeline-ui-baseline-reuse:test-quick",
+      "hash": "13994622967242638336",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:13:52.232Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "onepipeline-ui-e2e:test-quick",
+      "hash": "14655001018426675509",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:17:49.974Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "onepipeline-ui-repo-tooling:test-quick",
+      "hash": "15042803378166810049",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:18:54.282Z",
+      "status": "failed",
+      "http_status": 403
+    },
+    {
+      "task": "onepipeline-ui-versions:test-quick",
+      "hash": "1118291191836408301",
+      "os": "win32",
+      "attempted_at": "2026-11-13T05:21:58.549Z",
+      "status": "failed",
+      "http_status": 403
+    }
+  ],
+  "selection": {
+    "mode": "affected",
+    "base_sha": "1b72a6025f689c04f4e1e3508ed17378cab67b4a",
+    "head_sha": "bb0cf37941aa856bec699bb98bba26cb88be98fc"
+  }
+}

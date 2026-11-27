@@ -1,0 +1,904 @@
+{
+  "run": 43426834616,
+  "attempt": 1,
+  "head_sha": "2155cfbbd57124a9f4470abb5dbf535208e9da76",
+  "head_branch": "nick/ci-test-speed-2026-11-12/demo-ui-control2",
+  "jobs": [
+    {
+      "job": "test-linux",
+      "job_id": 131890198661,
+      "conclusion": "failure",
+      "runner": "GitHub Actions 1000316531",
+      "started_at": "2026-11-13T12:38:06Z",
+      "completed_at": "2026-11-13T12:56:33Z",
+      "wall_minutes": 18.45,
+      "github_sha": "b3a7fdc1c6bf5561b894cfb1a6f4b3eaa31c7e19",
+      "selection": {
+        "job": "test-linux",
+        "count": 44,
+        "tasks": [
+          "dag-ui-build-cache:test",
+          "dag-ui-e2e:budgets",
+          "dag-ui-e2e:prioritize",
+          "dag-ui-e2e:test",
+          "dag-ui-e2e:test-isolation",
+          "dag-ui-read-latency:compile-release-server",
+          "dag-ui:build",
+          "dag-ui:build-api-server",
+          "dag-ui:test",
+          "github-workflows-installs:bootstrap",
+          "github-workflows-installs:test",
+          "github-workflows-nx-cache:bootstrap",
+          "github-workflows-nx-cache:prioritize",
+          "github-workflows-nx-cache:test",
+          "github-workflows:bootstrap",
+          "github-workflows:budgets",
+          "github-workflows:test",
+          "github-workflows:test-ci-jobs",
+          "onepipeline-ui-baseline-reuse:test",
+          "onepipeline-ui-baseline:test-baseline",
+          "onepipeline-ui-ci-jobs:test",
+          "onepipeline-ui-cost:test-cost",
+          "onepipeline-ui-coverage:coverage",
+          "onepipeline-ui-deps-audit-toolchain:test",
+          "onepipeline-ui-e2e:test",
+          "onepipeline-ui-judged-tier:test",
+          "onepipeline-ui-linked-report:test",
+          "onepipeline-ui-npm-launcher:test",
+          "onepipeline-ui-release:prioritize",
+          "onepipeline-ui-release:rehearse",
+          "onepipeline-ui-release:test",
+          "onepipeline-ui-release:test-staged",
+          "onepipeline-ui-release:test-standalone",
+          "onepipeline-ui-release:tools",
+          "onepipeline-ui-repo-tooling:test",
+          "onepipeline-ui-versions:test",
+          "onepipeline-ui:ensure-baseline",
+          "onepipeline-ui:ensure-node-without-execve",
+          "onepipeline-ui:ensure-sibling",
+          "onepipeline-ui:install-smoke",
+          "onepipeline-ui:test",
+          "onepipeline-ui:wheel-smoke",
+          "report-job:budgets",
+          "report-job:test"
+        ]
+      },
+      "restores": [
+        {
+          "step": "Run Swatinem/rust-cache@v2.9.2",
+          "hit": true,
+          "partial": false,
+          "key": "v0-rust-test-linux-Linux-x64-3c1a7064-861f7ea2",
+          "at": "2026-11-13T12:38:36.881Z",
+          "size_mb": 1123,
+          "step_seconds": 44
+        },
+        {
+          "step": "Restore the sibling CLI",
+          "hit": false,
+          "partial": false,
+          "key": "onepipeline-cli-Linux-X64-0.110.0-5f2271a5575c-11718d84675715abfdf9615802cc7aa79e7a77b94d68096655d7f0032acf3868",
+          "at": "2026-11-13T12:39:25.209Z",
+          "step_seconds": 1
+        },
+        {
+          "step": "Restore the base commit's server",
+          "hit": false,
+          "partial": false,
+          "key": "onepipeline-api-baseline-Linux-X64-281bdde84209918d31d2e8b518945615ffe766f2-ee9944ec6bc1df9a200a6fbd17ee4b0458433c39c570eaee71a8a890020a9ce1",
+          "at": "2026-11-13T12:39:25.456Z",
+          "step_seconds": 0
+        }
+      ],
+      "nested_fixture_records": 0,
+      "sleeping_and_polling": [],
+      "other_processes": [],
+      "nx_cache_stored_bytes": null,
+      "nx_store_attempts": null,
+      "recorder": null,
+      "process_totals": null,
+      "links": null,
+      "elapsed_beyond_cpu": {},
+      "unobserved": [],
+      "categories": [
+        {
+          "category": "unattributed (no recorded work running)",
+          "minutes": 16.3,
+          "share": 0.8834688346883469
+        },
+        {
+          "category": "cache restore",
+          "minutes": 0.75,
+          "share": 0.04065040650406504
+        },
+        {
+          "category": "setup",
+          "minutes": 0.5666666666666667,
+          "share": 0.03071364046973803
+        },
+        {
+          "category": "recorder (measurement-only)",
+          "minutes": 0.38333333333333336,
+          "share": 0.02077687443541102
+        },
+        {
+          "category": "bootstrap: unattributed (no recorded work running)",
+          "minutes": 0.31666666666666665,
+          "share": 0.017163504968383016
+        },
+        {
+          "category": "report and upload",
+          "minutes": 0.08333333333333333,
+          "share": 0.004516711833785004
+        },
+        {
+          "category": "unattributed (runner time between steps)",
+          "minutes": 0.05,
+          "share": 0.0027100271002710027
+        }
+      ],
+      "tasks": [],
+      "critical_chain": [],
+      "slowest_tests": [
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "publication against registry doubles",
+          "seconds": 258.492870883,
+          "depth": 0,
+          "task": "onepipeline-ui-release:test-staged"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ci_jobs::a_job_runs_what_it_selects_and_a_failing_target_fails_it",
+          "seconds": 206.348,
+          "task": "onepipeline-ui-ci-jobs:test"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "the split tiers run exactly the tests the original targets ran",
+          "seconds": 191.33248088300002,
+          "depth": 0,
+          "task": "github-workflows-nx-cache:test"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "the build-linux recipe, with publication in its dry-run mode",
+          "seconds": 169.967523163,
+          "depth": 0,
+          "task": "onepipeline-ui-release:rehearse"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "the warmer compiles what each OS's pull-request jobs compile, and nothing else",
+          "seconds": 138.328358787,
+          "depth": 0,
+          "task": "github-workflows:test"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "a whole release against registry doubles",
+          "seconds": 137.632978764,
+          "depth": 0,
+          "task": "onepipeline-ui-release:test-staged"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_cursor_older_than_the_retained_frames_is_answered_stale",
+          "seconds": 107.8,
+          "task": "onepipeline-ui-e2e:test"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::every_appended_record_patches_each_view_into_what_a_fresh_read_serves",
+          "seconds": 103.499,
+          "task": "onepipeline-ui-e2e:test"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ci_jobs::the_large_run_timings_journeys_and_budgets_run_wherever_the_read_paths_change",
+          "seconds": 94.48,
+          "task": "onepipeline-ui-ci-jobs:test"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "the build-linux recipe, over staged files that do not install",
+          "seconds": 87.171089818,
+          "depth": 0,
+          "task": "onepipeline-ui-release:test-staged"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ensure_node_without_execve::a_stale_install_is_replaced_from_the_kept_archive",
+          "seconds": 85.363,
+          "task": "onepipeline-ui-npm-launcher:test"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "human_items::a_stale_human_items_cursor_is_reset_to_what_the_routes_answer",
+          "seconds": 81.796,
+          "task": "onepipeline-ui-e2e:test"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing",
+          "seconds": 76.58,
+          "task": "onepipeline-ui-versions:test"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "build-linux publishes exactly the files it built, and a failed upload is finished by a re-run",
+          "seconds": 72.75186427,
+          "depth": 2,
+          "task": "onepipeline-ui-release:test-staged"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_selective_first_answer_serves_its_nodes_pages_before_the_rest",
+          "seconds": 70.494,
+          "task": "onepipeline-ui-e2e:test"
+        },
+        {
+          "runner": "vitest-file",
+          "binary": null,
+          "name": "src/app/App.test.tsx",
+          "seconds": 68.025,
+          "task": "pool-maintenance:bootstrap"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "workflow delivers reports and growing-tree samples before restore ends, including runner death and API refusal",
+          "seconds": 65.29941694,
+          "depth": 0,
+          "task": "github-workflows:test"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "from nothing published, it ends with every artifact it builds published",
+          "seconds": 64.716699192,
+          "depth": 2,
+          "task": "onepipeline-ui-release:test-staged"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "once every platform is served, publish publishes exactly its files, finishes a failed upload on a re-run, and restores the release",
+          "seconds": 61.839846298,
+          "depth": 2,
+          "task": "onepipeline-ui-release:test-staged"
+        },
+        {
+          "runner": "node",
+          "binary": null,
+          "name": "over v0.40.0's wheels and npm platform package, it ends with every artifact it builds published",
+          "seconds": 60.008611099,
+          "depth": 2,
+          "task": "onepipeline-ui-release:test-staged"
+        }
+      ],
+      "test_binaries": [
+        {
+          "binary": "onepipeline-ui::e2e",
+          "seconds": 3017.888
+        },
+        {
+          "binary": "onepipeline-ui::contract",
+          "seconds": 23.223999999999997
+        },
+        {
+          "binary": "onepipeline-ui::packaging",
+          "seconds": 1.5
+        },
+        {
+          "binary": "onepipeline-ui::plan_linear_create",
+          "seconds": 1.161
+        },
+        {
+          "binary": "onepipeline-ui",
+          "seconds": 0.38599999999999995
+        },
+        {
+          "binary": "onepipeline-ui::plan_copy",
+          "seconds": 0.244
+        },
+        {
+          "binary": "onepipeline-ui::checkout_paths",
+          "seconds": 0.186
+        }
+      ],
+      "test_count": 947
+    },
+    {
+      "job": "test-macos",
+      "job_id": 131890198647,
+      "conclusion": "success",
+      "runner": "GitHub Actions 1000316626",
+      "started_at": "2026-11-13T14:20:39Z",
+      "completed_at": "2026-11-13T14:33:41Z",
+      "wall_minutes": 13.033333333333333,
+      "github_sha": "b3a7fdc1c6bf5561b894cfb1a6f4b3eaa31c7e19",
+      "selection": {
+        "job": "test-macos",
+        "count": 23,
+        "tasks": [
+          "dag-ui-build-cache:lint",
+          "dag-ui-e2e:format-check",
+          "dag-ui-e2e:lint",
+          "dag-ui-read-latency:format-check",
+          "dag-ui-read-latency:lint",
+          "dag-ui:build",
+          "dag-ui:format-check",
+          "dag-ui:lint",
+          "github-workflows-nx-cache:lint",
+          "github-workflows:bootstrap",
+          "github-workflows:lint",
+          "onepipeline-ui-baseline-reuse:test-quick",
+          "onepipeline-ui-e2e:test-quick",
+          "onepipeline-ui-npm-launcher:test-quick",
+          "onepipeline-ui-release:lint",
+          "onepipeline-ui-repo-tooling:test-quick",
+          "onepipeline-ui-versions:test-quick",
+          "onepipeline-ui:ensure-node-without-execve",
+          "onepipeline-ui:ensure-sibling",
+          "onepipeline-ui:format-check",
+          "onepipeline-ui:install-smoke",
+          "onepipeline-ui:lint",
+          "onepipeline-ui:test-quick"
+        ]
+      },
+      "restores": [
+        {
+          "step": "Run Swatinem/rust-cache@v2.9.2",
+          "hit": true,
+          "partial": false,
+          "key": "v0-rust-test-macos-Darwin-arm64-29d9c6ba-861f7ea2",
+          "at": "2026-11-13T14:21:42.585Z",
+          "size_mb": 481,
+          "step_seconds": 32
+        },
+        {
+          "step": "Restore the sibling CLI",
+          "hit": true,
+          "partial": false,
+          "key": "onepipeline-cli-macOS-ARM64-0.110.0-5f2271a5575c-11718d84675715abfdf9615802cc7aa79e7a77b94d68096655d7f0032acf3868",
+          "at": "2026-11-13T14:21:59.208Z",
+          "size_mb": 20,
+          "step_seconds": 2
+        }
+      ],
+      "nested_fixture_records": 0,
+      "sleeping_and_polling": [],
+      "other_processes": [],
+      "nx_cache_stored_bytes": null,
+      "nx_store_attempts": null,
+      "recorder": null,
+      "process_totals": null,
+      "links": null,
+      "elapsed_beyond_cpu": {},
+      "unobserved": [],
+      "categories": [
+        {
+          "category": "unattributed (no recorded work running)",
+          "minutes": 10.866666666666667,
+          "share": 0.8337595907928389
+        },
+        {
+          "category": "setup",
+          "minutes": 0.8166666666666667,
+          "share": 0.06265984654731457
+        },
+        {
+          "category": "bootstrap: unattributed (no recorded work running)",
+          "minutes": 0.6,
+          "share": 0.04603580562659847
+        },
+        {
+          "category": "cache restore",
+          "minutes": 0.5833333333333334,
+          "share": 0.04475703324808184
+        },
+        {
+          "category": "unattributed (runner time between steps)",
+          "minutes": 0.06666666666666667,
+          "share": 0.005115089514066497
+        },
+        {
+          "category": "recorder (measurement-only)",
+          "minutes": 0.05,
+          "share": 0.0038363171355498722
+        },
+        {
+          "category": "report and upload",
+          "minutes": 0.03333333333333333,
+          "share": 0.0025575447570332483
+        },
+        {
+          "category": "teardown (post steps)",
+          "minutes": 0.016666666666666666,
+          "share": 0.0012787723785166241
+        }
+      ],
+      "tasks": [],
+      "critical_chain": [],
+      "slowest_tests": [
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing",
+          "seconds": 465.231,
+          "task": "onepipeline-ui-versions:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "human_items::a_stale_human_items_cursor_is_reset_to_what_the_routes_answer",
+          "seconds": 90.841,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::every_appended_record_patches_each_view_into_what_a_fresh_read_serves",
+          "seconds": 88.503,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::a_change_to_what_the_toolchain_journeys_read_selects_them_and_nothing_else_does",
+          "seconds": 86.819,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::every_change_selects_the_judged_diff_lint_and_it_selects_nothing_else",
+          "seconds": 85.951,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::a_change_to_what_the_judged_tier_reads_selects_it_and_nothing_else_does",
+          "seconds": 75.599,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_cursor_older_than_the_retained_frames_is_answered_stale",
+          "seconds": 74.321,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::a_change_to_a_shared_package_checks_it_and_its_dependents_and_no_unrelated_package",
+          "seconds": 58.276,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::a_fixture_change_re_runs_a_cached_reader_rather_than_replaying_it",
+          "seconds": 58.223,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::a_change_to_a_document_the_crate_does_not_package_selects_no_product_project",
+          "seconds": 56.331,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::a_change_to_the_crate_or_a_document_it_packages_selects_every_product_project",
+          "seconds": 55.632,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_selective_first_answer_serves_its_nodes_pages_before_the_rest",
+          "seconds": 48.086,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ensure_node_without_execve::a_stale_install_is_replaced_from_the_kept_archive",
+          "seconds": 46.637,
+          "task": "onepipeline-ui-npm-launcher:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::with_no_view_open_pages_over_a_long_journal_are_the_complete_rows",
+          "seconds": 44.78,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::a_change_to_the_npm_launcher_selects_its_journeys_and_not_the_server_journeys",
+          "seconds": 43,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "nx_affected::a_base_commit_that_does_not_resolve_runs_everything_and_says_which_variable",
+          "seconds": 40.289,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_the_rest",
+          "seconds": 38.679,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ci_tier::the_release_pull_request_tier_plans_every_projects_check",
+          "seconds": 37.096,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "semver_check::an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_compatibility",
+          "seconds": 34.828,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "workspace_install::a_fresh_checkout_installs_from_the_lockfile_and_runs_a_target",
+          "seconds": 34.093,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        }
+      ],
+      "test_binaries": [
+        {
+          "binary": "onepipeline-ui::e2e",
+          "seconds": 2830.7780000000002
+        },
+        {
+          "binary": "onepipeline-ui::contract",
+          "seconds": 43.46
+        },
+        {
+          "binary": "onepipeline-ui::packaging",
+          "seconds": 16.490000000000002
+        },
+        {
+          "binary": "onepipeline-ui::plan_copy",
+          "seconds": 1.292
+        },
+        {
+          "binary": "onepipeline-ui::plan_linear_create",
+          "seconds": 1.2109999999999999
+        },
+        {
+          "binary": "onepipeline-ui",
+          "seconds": 0.21100000000000002
+        },
+        {
+          "binary": "onepipeline-ui::checkout_paths",
+          "seconds": 0.125
+        }
+      ],
+      "test_count": 665
+    },
+    {
+      "job": "test-windows",
+      "job_id": 131890198307,
+      "conclusion": "success",
+      "runner": "GitHub Actions 1000316530",
+      "started_at": "2026-11-13T12:38:06Z",
+      "completed_at": "2026-11-13T12:52:25Z",
+      "wall_minutes": 14.316666666666666,
+      "github_sha": "b3a7fdc1c6bf5561b894cfb1a6f4b3eaa31c7e19",
+      "selection": {
+        "job": "test-windows",
+        "count": 23,
+        "tasks": [
+          "dag-ui-build-cache:lint",
+          "dag-ui-e2e:format-check",
+          "dag-ui-e2e:lint",
+          "dag-ui-read-latency:format-check",
+          "dag-ui-read-latency:lint",
+          "dag-ui:build",
+          "dag-ui:format-check",
+          "dag-ui:lint",
+          "github-workflows-nx-cache:lint",
+          "github-workflows:bootstrap",
+          "github-workflows:lint",
+          "onepipeline-ui-baseline-reuse:test-quick",
+          "onepipeline-ui-e2e:test-quick",
+          "onepipeline-ui-npm-launcher:test-quick",
+          "onepipeline-ui-release:lint",
+          "onepipeline-ui-repo-tooling:test-quick",
+          "onepipeline-ui-versions:test-quick",
+          "onepipeline-ui:ensure-node-without-execve",
+          "onepipeline-ui:ensure-sibling",
+          "onepipeline-ui:format-check",
+          "onepipeline-ui:install-smoke",
+          "onepipeline-ui:lint",
+          "onepipeline-ui:test-quick"
+        ]
+      },
+      "restores": [
+        {
+          "step": "Run Swatinem/rust-cache@v2.9.2",
+          "hit": true,
+          "partial": false,
+          "key": "v0-rust-test-windows-Windows_NT-x64-645f1527-861f7ea2",
+          "at": "2026-11-13T12:38:52.878Z",
+          "size_mb": 527,
+          "step_seconds": 53
+        },
+        {
+          "step": "Restore the sibling CLI",
+          "hit": false,
+          "partial": false,
+          "key": "onepipeline-cli-Windows-X64-0.110.0-5f2271a5575c-11718d84675715abfdf9615802cc7aa79e7a77b94d68096655d7f0032acf3868",
+          "at": "2026-11-13T12:39:32.955Z",
+          "step_seconds": 0
+        }
+      ],
+      "nested_fixture_records": 0,
+      "sleeping_and_polling": [],
+      "other_processes": [],
+      "nx_cache_stored_bytes": null,
+      "nx_store_attempts": null,
+      "recorder": null,
+      "process_totals": null,
+      "links": null,
+      "elapsed_beyond_cpu": {},
+      "unobserved": [],
+      "categories": [
+        {
+          "category": "unattributed (no recorded work running)",
+          "minutes": 10.833333333333334,
+          "share": 0.7566938300349243
+        },
+        {
+          "category": "bootstrap: unattributed (no recorded work running)",
+          "minutes": 1.85,
+          "share": 0.12922002328288706
+        },
+        {
+          "category": "cache restore",
+          "minutes": 0.8833333333333333,
+          "share": 0.06169965075669383
+        },
+        {
+          "category": "setup",
+          "minutes": 0.5333333333333333,
+          "share": 0.037252619324796274
+        },
+        {
+          "category": "recorder (measurement-only)",
+          "minutes": 0.06666666666666667,
+          "share": 0.004656577415599534
+        },
+        {
+          "category": "teardown (post steps)",
+          "minutes": 0.06666666666666667,
+          "share": 0.004656577415599534
+        },
+        {
+          "category": "report and upload",
+          "minutes": 0.03333333333333333,
+          "share": 0.002328288707799767
+        },
+        {
+          "category": "unattributed (runner time between steps)",
+          "minutes": 0.03333333333333333,
+          "share": 0.002328288707799767
+        },
+        {
+          "category": "cache save (post steps)",
+          "minutes": 0.016666666666666666,
+          "share": 0.0011641443538998836
+        }
+      ],
+      "tasks": [],
+      "critical_chain": [],
+      "slowest_tests": [
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing",
+          "seconds": 559.87,
+          "task": "onepipeline-ui-versions:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "semver_check::a_release_moving_the_engine_without_announcing_it_is_refused",
+          "seconds": 317.379,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "semver_check::an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_compatibility",
+          "seconds": 279.531,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "semver_check::several_readings_of_this_crate_at_once_each_get_their_own_answer",
+          "seconds": 234.758,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::every_appended_record_patches_each_view_into_what_a_fresh_read_serves",
+          "seconds": 125.101,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "semver_check::a_release_of_this_crate_reads_past_a_baseline_it_cannot_build",
+          "seconds": 101.332,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_cursor_older_than_the_retained_frames_is_answered_stale",
+          "seconds": 72.407,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "server::the_events_stream_announces_each_record_of_a_reworked_stack_as_it_is_written",
+          "seconds": 55.906,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_selective_first_answer_serves_its_nodes_pages_before_the_rest",
+          "seconds": 45.129,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "server::harness_timeline_metadata_uses_typed_records_and_recovers_from_unreadable_bounds",
+          "seconds": 44.891,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "server::invalid_remote_check_metadata_is_omitted",
+          "seconds": 40.58,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_the_rest",
+          "seconds": 39.693,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::with_no_view_open_pages_over_a_long_journal_are_the_complete_rows",
+          "seconds": 30.248,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "semver_check::a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release",
+          "seconds": 28.341,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "ensure_sibling::a_malformed_stamp_is_provisioned_over",
+          "seconds": 25.303,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "server::node_control_says_each_of_its_answers_from_a_run_that_produces_it",
+          "seconds": 21.629,
+          "task": "onepipeline-ui-e2e:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "baseline_reuse::the_base_is_built_from_the_units_this_clone_already_compiled",
+          "seconds": 21.337,
+          "task": "onepipeline-ui-baseline-reuse:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "release_status::every_outcome_the_workflow_reports_is_required_unless_its_switch_is_off",
+          "seconds": 20.907,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "release_status::a_platform_job_that_did_not_succeed_demotes_the_release",
+          "seconds": 20.153,
+          "task": "onepipeline-ui-repo-tooling:test-quick"
+        },
+        {
+          "runner": "nextest",
+          "binary": "onepipeline-ui::e2e",
+          "name": "live::a_pages_bounds_filter_and_total_are_the_complete_documents",
+          "seconds": 19.883,
+          "task": "onepipeline-ui-e2e:test-quick"
+        }
+      ],
+      "test_binaries": [
+        {
+          "binary": "onepipeline-ui::e2e",
+          "seconds": 3124.2379999999994
+        },
+        {
+          "binary": "onepipeline-ui::contract",
+          "seconds": 34.37199999999999
+        },
+        {
+          "binary": "onepipeline-ui::packaging",
+          "seconds": 13.306000000000003
+        },
+        {
+          "binary": "onepipeline-ui::plan_linear_create",
+          "seconds": 1.052
+        },
+        {
+          "binary": "onepipeline-ui",
+          "seconds": 0.632
+        },
+        {
+          "binary": "onepipeline-ui::plan_copy",
+          "seconds": 0.578
+        },
+        {
+          "binary": "onepipeline-ui::checkout_paths",
+          "seconds": 0.197
+        }
+      ],
+      "test_count": 509
+    }
+  ]
+}

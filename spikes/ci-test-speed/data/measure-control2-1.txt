@@ -1,0 +1,118 @@
+
+== test-linux (run 43426834616 attempt 1, job 131890198661, failure) wall 18.4 min
+   head 2155cfbbd57124a9f4470abb5dbf535208e9da76  GITHUB_SHA b3a7fdc1c6bf5561b894cfb1a6f4b3eaa31c7e19  selection 44 task(s)  recorder none
+   restore HIT  Run Swatinem/rust-cache@v2.9.2 1123 MB 44 s
+   restore MISS Restore the sibling CLI 1 s
+   restore MISS Restore the base commit's server 0 s
+   Nx remote cache stored ? bytes
+   minutes  share  category
+     16.3  88.3%  unattributed (no recorded work running)
+      0.8   4.1%  cache restore
+      0.6   3.1%  setup
+      0.4   2.1%  recorder (measurement-only)
+      0.3   1.7%  bootstrap: unattributed (no recorded work running)
+     0.08   0.5%  report and upload
+     0.05   0.3%  unattributed (runner time between steps)
+     18.4 total (wall 18.4)
+   Nx tasks: inclusive / exclusive minutes
+   critical chain: 
+   slowest tests:
+    258.5 s  node  publication against registry doubles
+    206.3 s  nextest onepipeline-ui::e2e ci_jobs::a_job_runs_what_it_selects_and_a_failing_target_fails_it
+    191.3 s  node  the split tiers run exactly the tests the original targets ran
+    170.0 s  node  the build-linux recipe, with publication in its dry-run mode
+    138.3 s  node  the warmer compiles what each OS's pull-request jobs compile, and nothing else
+    137.6 s  node  a whole release against registry doubles
+    107.8 s  nextest onepipeline-ui::e2e live::a_cursor_older_than_the_retained_frames_is_answered_stale
+    103.5 s  nextest onepipeline-ui::e2e live::every_appended_record_patches_each_view_into_what_a_fresh_read_serves
+     94.5 s  nextest onepipeline-ui::e2e ci_jobs::the_large_run_timings_journeys_and_budgets_run_wherever_the_read_paths_change
+     87.2 s  node  the build-linux recipe, over staged files that do not install
+     85.4 s  nextest onepipeline-ui::e2e ensure_node_without_execve::a_stale_install_is_replaced_from_the_kept_archive
+     81.8 s  nextest onepipeline-ui::e2e human_items::a_stale_human_items_cursor_is_reset_to_what_the_routes_answer
+     76.6 s  nextest onepipeline-ui::e2e ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing
+     72.8 s  node  build-linux publishes exactly the files it built, and a failed upload is finished by a re-run
+     70.5 s  nextest onepipeline-ui::e2e live::a_selective_first_answer_serves_its_nodes_pages_before_the_rest
+     68.0 s  vitest-file  src/app/App.test.tsx
+     65.3 s  node  workflow delivers reports and growing-tree samples before restore ends, including runner death and API refusal
+     64.7 s  node  from nothing published, it ends with every artifact it builds published
+     61.8 s  node  once every platform is served, publish publishes exactly its files, finishes a failed upload on a re-run, and restores the release
+     60.0 s  node  over v0.40.0's wheels and npm platform package, it ends with every artifact it builds published
+
+== test-macos (run 43426834616 attempt 1, job 131890198647, success) wall 13.0 min
+   head 2155cfbbd57124a9f4470abb5dbf535208e9da76  GITHUB_SHA b3a7fdc1c6bf5561b894cfb1a6f4b3eaa31c7e19  selection 23 task(s)  recorder none
+   restore HIT  Run Swatinem/rust-cache@v2.9.2 481 MB 32 s
+   restore HIT  Restore the sibling CLI 20 MB 2 s
+   Nx remote cache stored ? bytes
+   minutes  share  category
+     10.9  83.4%  unattributed (no recorded work running)
+      0.8   6.3%  setup
+      0.6   4.6%  bootstrap: unattributed (no recorded work running)
+      0.6   4.5%  cache restore
+     0.07   0.5%  unattributed (runner time between steps)
+     0.05   0.4%  recorder (measurement-only)
+     0.03   0.3%  report and upload
+     0.02   0.1%  teardown (post steps)
+     13.0 total (wall 13.0)
+   Nx tasks: inclusive / exclusive minutes
+   critical chain: 
+   slowest tests:
+    465.2 s  nextest onepipeline-ui::e2e ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing
+     90.8 s  nextest onepipeline-ui::e2e human_items::a_stale_human_items_cursor_is_reset_to_what_the_routes_answer
+     88.5 s  nextest onepipeline-ui::e2e live::every_appended_record_patches_each_view_into_what_a_fresh_read_serves
+     86.8 s  nextest onepipeline-ui::e2e nx_affected::a_change_to_what_the_toolchain_journeys_read_selects_them_and_nothing_else_does
+     86.0 s  nextest onepipeline-ui::e2e nx_affected::every_change_selects_the_judged_diff_lint_and_it_selects_nothing_else
+     75.6 s  nextest onepipeline-ui::e2e nx_affected::a_change_to_what_the_judged_tier_reads_selects_it_and_nothing_else_does
+     74.3 s  nextest onepipeline-ui::e2e live::a_cursor_older_than_the_retained_frames_is_answered_stale
+     58.3 s  nextest onepipeline-ui::e2e nx_affected::a_change_to_a_shared_package_checks_it_and_its_dependents_and_no_unrelated_package
+     58.2 s  nextest onepipeline-ui::e2e nx_affected::a_fixture_change_re_runs_a_cached_reader_rather_than_replaying_it
+     56.3 s  nextest onepipeline-ui::e2e nx_affected::a_change_to_a_document_the_crate_does_not_package_selects_no_product_project
+     55.6 s  nextest onepipeline-ui::e2e nx_affected::a_change_to_the_crate_or_a_document_it_packages_selects_every_product_project
+     48.1 s  nextest onepipeline-ui::e2e live::a_selective_first_answer_serves_its_nodes_pages_before_the_rest
+     46.6 s  nextest onepipeline-ui::e2e ensure_node_without_execve::a_stale_install_is_replaced_from_the_kept_archive
+     44.8 s  nextest onepipeline-ui::e2e live::with_no_view_open_pages_over_a_long_journal_are_the_complete_rows
+     43.0 s  nextest onepipeline-ui::e2e nx_affected::a_change_to_the_npm_launcher_selects_its_journeys_and_not_the_server_journeys
+     40.3 s  nextest onepipeline-ui::e2e nx_affected::a_base_commit_that_does_not_resolve_runs_everything_and_says_which_variable
+     38.7 s  nextest onepipeline-ui::e2e live::a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_the_rest
+     37.1 s  nextest onepipeline-ui::e2e ci_tier::the_release_pull_request_tier_plans_every_projects_check
+     34.8 s  nextest onepipeline-ui::e2e semver_check::an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_compatibility
+     34.1 s  nextest onepipeline-ui::e2e workspace_install::a_fresh_checkout_installs_from_the_lockfile_and_runs_a_target
+
+== test-windows (run 43426834616 attempt 1, job 131890198307, success) wall 14.3 min
+   head 2155cfbbd57124a9f4470abb5dbf535208e9da76  GITHUB_SHA b3a7fdc1c6bf5561b894cfb1a6f4b3eaa31c7e19  selection 23 task(s)  recorder none
+   restore HIT  Run Swatinem/rust-cache@v2.9.2 527 MB 53 s
+   restore MISS Restore the sibling CLI 0 s
+   Nx remote cache stored ? bytes
+   minutes  share  category
+     10.8  75.7%  unattributed (no recorded work running)
+      1.9  12.9%  bootstrap: unattributed (no recorded work running)
+      0.9   6.2%  cache restore
+      0.5   3.7%  setup
+     0.07   0.5%  recorder (measurement-only)
+     0.07   0.5%  teardown (post steps)
+     0.03   0.2%  report and upload
+     0.03   0.2%  unattributed (runner time between steps)
+     0.02   0.1%  cache save (post steps)
+     14.3 total (wall 14.3)
+   Nx tasks: inclusive / exclusive minutes
+   critical chain: 
+   slowest tests:
+    559.9 s  nextest onepipeline-ui::e2e ui::a_build_without_the_bundle_refuses_ui_naming_what_is_missing
+    317.4 s  nextest onepipeline-ui::e2e semver_check::a_release_moving_the_engine_without_announcing_it_is_refused
+    279.5 s  nextest onepipeline-ui::e2e semver_check::an_engine_requirement_that_cannot_be_read_fails_a_release_claiming_compatibility
+    234.8 s  nextest onepipeline-ui::e2e semver_check::several_readings_of_this_crate_at_once_each_get_their_own_answer
+    125.1 s  nextest onepipeline-ui::e2e live::every_appended_record_patches_each_view_into_what_a_fresh_read_serves
+    101.3 s  nextest onepipeline-ui::e2e semver_check::a_release_of_this_crate_reads_past_a_baseline_it_cannot_build
+     72.4 s  nextest onepipeline-ui::e2e live::a_cursor_older_than_the_retained_frames_is_answered_stale
+     55.9 s  nextest onepipeline-ui::e2e server::the_events_stream_announces_each_record_of_a_reworked_stack_as_it_is_written
+     45.1 s  nextest onepipeline-ui::e2e live::a_selective_first_answer_serves_its_nodes_pages_before_the_rest
+     44.9 s  nextest onepipeline-ui::e2e server::harness_timeline_metadata_uses_typed_records_and_recovers_from_unreadable_bounds
+     40.6 s  nextest onepipeline-ui::e2e server::invalid_remote_check_metadata_is_omitted
+     39.7 s  nextest onepipeline-ui::e2e live::a_nodes_window_is_its_latest_rows_and_pages_reach_every_row_either_side_of_the_rest
+     30.2 s  nextest onepipeline-ui::e2e live::with_no_view_open_pages_over_a_long_journal_are_the_complete_rows
+     28.3 s  nextest onepipeline-ui::e2e semver_check::a_blob_the_fixtures_object_database_no_longer_holds_does_not_decide_a_release
+     25.3 s  nextest onepipeline-ui::e2e ensure_sibling::a_malformed_stamp_is_provisioned_over
+     21.6 s  nextest onepipeline-ui::e2e server::node_control_says_each_of_its_answers_from_a_run_that_produces_it
+     21.3 s  nextest onepipeline-ui::e2e baseline_reuse::the_base_is_built_from_the_units_this_clone_already_compiled
+     20.9 s  nextest onepipeline-ui::e2e release_status::every_outcome_the_workflow_reports_is_required_unless_its_switch_is_off
+     20.2 s  nextest onepipeline-ui::e2e release_status::a_platform_job_that_did_not_succeed_demotes_the_release
+     19.9 s  nextest onepipeline-ui::e2e live::a_pages_bounds_filter_and_total_are_the_complete_documents
