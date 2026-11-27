@@ -3928,10 +3928,9 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   position: static;
   gap: 6px;
 }
-/* The eyebrow column, 2ch wider so REASONING and MESSAGE fit beside their glyph. */
-.transcript-item .eyebrow { width: 13ch; }
 /* The kind label is the old EVENT label's twin: the same small uppercase type and
-   11ch column, no pill, only tinted in its kind's colour. */
+   11ch column, no pill, only tinted in its kind's colour. No glyph: REASONING
+   fills the column on its own, and the tint names the kind. */
 .spike-kind {
   display: inline-flex;
   overflow: hidden;
@@ -3943,7 +3942,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   text-transform: uppercase;
   white-space: nowrap;
 }
-.spike-kind > svg { flex: none; }
 .spike-kind-tool { color: rgb(240 180 90 / 85%); }
 .spike-kind-message { color: rgb(111 181 255 / 85%); }
 .spike-kind-reasoning { color: rgb(195 155 255 / 85%); }
