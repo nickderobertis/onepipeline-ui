@@ -9308,21 +9308,9 @@ pub fn rendered(run: &RunId, rendered: String) -> Value {
 /// It takes the engine's own [`onepipeline::verbs::RunStatus`], so this crate's
 /// public surface follows the linked `onepipeline` release's types here too;
 /// [`ApiError::from_engine`](crate::error::ApiError::from_engine) says why
-/// moving that requirement across a pre-1.0 minor breaks this crate. Linking
-/// onepipeline 0.114.0 was such a break: a consumer upgrading across it must
-/// align its own engine dependency with onepipeline 0.114 to pass a
-/// `RunStatus` here. Linking onepipeline 0.116.0 was such a break too: a
-/// consumer upgrading across it must align its own engine dependency with
-/// onepipeline 0.116. Linking onepipeline 0.117 was such a break as well: a
-/// consumer upgrading across it must align its own engine dependency with
-/// onepipeline 0.117. Linking onepipeline 0.118 was such a break again: a
-/// consumer upgrading across it must align its own engine dependency with
-/// onepipeline 0.118. Linking onepipeline 0.119.0 was such a break once more:
-/// this crate's public surface follows onepipeline 0.119.0's, so a consumer
-/// upgrading across it must align its own engine dependency with onepipeline
-/// 0.119 to pass a `RunStatus` here. Linking onepipeline 0.120.0 is such a
-/// break as well: a consumer upgrading across it must align its own engine
-/// dependency with onepipeline 0.120 to pass a `RunStatus` here.
+/// moving that requirement across a pre-1.0 minor breaks this crate: a consumer
+/// passing a `RunStatus` here must depend on the same `onepipeline` minor this
+/// crate links. Each such move is recorded in `docs/engine-dependency-history.md`.
 #[must_use]
 pub fn status(run: &RunId, status: &onepipeline::verbs::RunStatus, rendered: String) -> Value {
     let (count, oldest_seconds) = status.view.unread_surfaces();

@@ -1018,3 +1018,15 @@ a wait only the user can end. `GET /api/v2/unwatched` still serves `reported` an
 field. The move is announced as a break: it carries this crate from onepipeline 0.119 to
 0.120, whose re-exported engine types change. Its oneagentgraph, onejudge, oneharness-core,
 onemessagebus, onetaskgraph and onevcs requirements are the ones 0.119.2 resolved.
+
+0.121.0 is the engine that links onetaskgraph 0.16.0, the store release whose status
+vocabulary gains `in-review` (a category every source maps, reads and writes) and whose
+Linear plugin converts every authored details block a write sends, and whose plan write-back
+projects a review stop as `in review`. This crate moves to it, with onevcs 0.69.1 and
+onemessagebus 0.11.2, so that a host holding its engine pin equal to the one this read API
+links can move the store every dispatch writes its plan homes through. The read API
+enumerates no store status and writes no body through the store: the new category and the
+projected word reach it only as data it passes through, so it serves nothing new. The move
+is announced as a break: it carries this crate from onepipeline 0.120 to 0.121, whose
+re-exported engine types change. Its oneagentgraph, onejudge and oneharness-core
+requirements are the ones 0.120.0 resolved.

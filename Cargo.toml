@@ -173,9 +173,9 @@ onejudge = "0.23.5"
 # it cannot notice, because both sides' rustdoc still spells the path
 # `onepipeline::Error` while the type behind it changed identity, so
 # `scripts/semver-check.sh` refuses a release that moved this line while the
-# commits release-plz versions from announce no break. At `=0.120.0` this crate's
-# surface follows onepipeline 0.120's: `error::ApiError::from_engine` takes that
-# release's `onepipeline::Error`, which 0.119's is not. Since 0.117
+# commits release-plz versions from announce no break. At `=0.121.0` this crate's
+# surface follows onepipeline 0.121's: `error::ApiError::from_engine` takes that
+# release's `onepipeline::Error`, which 0.120's is not. Since 0.117
 # `human_items::HumanItemList.items` holds its `HumanItemView`, which gains the
 # `checks` field and whose item gains `expiry` and the `expired` state. 0.110 is the release
 # whose records say whose words a ruling is (`onepipeline::provenance::Provenance`),
@@ -188,7 +188,7 @@ onejudge = "0.23.5"
 # The test-only sibling requirements follow its lock so the reader and fixture
 # producer share one resolution. Its native TLS requires OpenSSL's build tools (make and a C compiler).
 # Historical upgrade reasons: docs/engine-dependency-history.md.
-onepipeline = "=0.120.0"
+onepipeline = "=0.121.0"
 serde = { version = "1", features = ["derive"] }
 # `preserve_order` keeps JSON object keys in insertion order, which is what lets
 # a served payload round-trip byte for byte against the checked-in fixtures the
@@ -231,9 +231,9 @@ libc = "0.2"
 # records reaching this crate were written by, and the tree carries one version
 # of it rather than two. The same gate on `oneagentgraph`'s vocabulary reads the
 # dependency above, which the crate now links in its own right. Exact, at the
-# release the linked engine's lock resolves (0.120.0 requires ^0.69.0); earlier
+# release the linked engine's lock resolves (0.121.0 requires ^0.69.1); earlier
 # moves are in docs/engine-dependency-history.md.
-onevcs = "=0.69.0"
+onevcs = "=0.69.1"
 # The same library the crate links above, with the schema bundle it publishes
 # for its SDK consumers: the history record's schema is where `oneharness`
 # closes the two kinds an agent's own words are streamed under, so
@@ -244,7 +244,7 @@ oneharness-core = { version = "0.34.0", features = ["sdk-schema"] }
 # channel's records through the producer's own layout rather than by hand. Held
 # at the version the SDK's own requirement resolves to, so the tree links one
 # copy of this library rather than two.
-onemessagebus = "0.11.1"
+onemessagebus = "0.11.2"
 predicates = "3"
 # The store a host renders its tasks into, linked for the journey that launches
 # a run from a real rendering: `onetaskgraph task create --template-loader` is a
@@ -257,9 +257,9 @@ predicates = "3"
 # journey in `tests/plan_linear_create.rs` that copies a plan into a loopback
 # Linear: the stand-in answers exactly the documents the linked plugin sends,
 # by the plugin's own constants rather than a second spelling of them.
-onetaskgraph-core = { version = "=0.15.0", features = ["linear"] }
-onetaskgraph-linear = "=0.15.0"
-onetaskgraph-plugin-api = "=0.15.0"
+onetaskgraph-core = { version = "=0.16.0", features = ["linear"] }
+onetaskgraph-linear = "=0.16.0"
+onetaskgraph-plugin-api = "=0.16.0"
 # The parser `oneagentgraph` writes a member's onejudge config with, so the
 # engine-driven journey over a panel-judged member reads the provider block it was
 # handed as the document it is. Held at the major that library requires, so the
