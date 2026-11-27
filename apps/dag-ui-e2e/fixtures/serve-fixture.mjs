@@ -96,6 +96,8 @@ import { humanItemsWorld } from "./human-items-world.mjs";
 import {
   buildCommandStepsRuns,
   buildConversationFocusRuns,
+  buildJudgeSpikeRuns,
+  judgeSpikeFacts,
   buildEventListRuns,
   buildHeldTurnRuns,
   buildLargeRunViews,
@@ -525,6 +527,7 @@ function parseArgs(argv) {
     "--command-steps-corpus",
     "--refusals-corpus",
     "--conversation-focus-corpus",
+    "--judge-spike-corpus",
     "--event-list-corpus",
     "--held-turn-corpus",
     "--large-run-views-corpus",
@@ -903,6 +906,8 @@ if (args.stall) {
         corpus = { build: buildReviewLoopRuns, facts: reviewLoopFacts };
       } else if (args["command-steps-corpus"]) {
         corpus = { build: buildCommandStepsRuns, facts: commandStepsFacts };
+      } else if (args["judge-spike-corpus"]) {
+        corpus = { build: buildJudgeSpikeRuns, facts: judgeSpikeFacts };
       } else if (args["conversation-focus-corpus"]) {
         corpus = {
           build: buildConversationFocusRuns,

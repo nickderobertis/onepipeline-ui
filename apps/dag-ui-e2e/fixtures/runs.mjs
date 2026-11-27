@@ -7127,3 +7127,302 @@ export function buildConversationFocusRuns(root) {
 export function conversationFocusFacts() {
   return FOCUS;
 }
+
+// ---------------------------------------------------------------------------
+// SPIKE (throwaway, never lands): the judge-turns / event-kinds visual spike's
+// corpus. One live run whose node `drawer` has two dispatches: the first a worker
+// the supervisor judged turn by turn, a verdict judge ruled on and the member
+// settled with two criteria verdicts (its report retained); the second a live
+// nine-turn worker whose turns hold the tool shapes this host records —
+// claude-code `Bash` with and without a `description`, `Read`, `Edit`, `Grep`,
+// and a codex `command_execution` wrapped in `/bin/bash -lc '…'`. Every record is
+// invented in the shape of this host's, and no host path or run is copied.
+// ---------------------------------------------------------------------------
+export const JUDGE_SPIKE_RUN = "dag-ui-judge-spike";
+const JS_PROJECT = "home-operator-projects-observatory";
+const JS_STREAMS = {
+  first: "node-scope-1794000000000-5100",
+  second: "node-scope-1794000000001-5101",
+  kinds: "node-scope-1794000000002-5102",
+};
+/** History ids the mock reads judge turns back by: kind 5 supervisor, 6 verdict judge. */
+export const judgeSpikeHistoryId = (kind, n) =>
+  `01a19000-0000-7000-8000-${String(kind * 1000 + n).padStart(12, "0")}`;
+
+const JS_TASK = "Make the conversation drawer readable: its Close, its tool rows and its judge turns.";
+const JS_LONG_COMMAND =
+  "cd apps/dag-ui && bunx vitest run src/features/timeline/timeline-model.test.ts src/features/timeline/TimelineItemDetail.test.tsx --reporter=dot --testNamePattern 'drawer|judge|tool row|event kind' 2>&1 | tee /tmp/drawer-vitest.log | tail -n 40 && grep -c 'passed' /tmp/drawer-vitest.log && git diff --stat HEAD -- src/features/timeline src/styles.css";
+
+function jsWorkerEvents(turn) {
+  const id = (n) => `toolu_js_${String(turn).padStart(2, "0")}_${n}`;
+  let index = 0;
+  const out = [];
+  const words = (kind, text) => out.push({ kind, name: null, input: null, output: text, index: index++, tool_call_id: null });
+  const claude = (n, name, input, output) => {
+    out.push({ kind: "tool_call", name, input, output: null, index: index++, tool_call_id: id(n), status: "completed" });
+    out.push({ kind: "tool_result", name, input: null, output, index: index++, tool_call_id: id(n), status: "completed" });
+  };
+  const codex = (n, command, output) =>
+    out.push({ kind: "tool_call", name: "command_execution", input: { command, exit_code: 0 }, output, index: index++, tool_call_id: `call_js_${turn}_${n}`, status: "completed" });
+  switch (turn) {
+    case 1:
+      words("reasoning", "The drawer's Close sits absolutely over the panel; I need to see what it overlaps first.");
+      claude(1, "Read", { file_path: "apps/dag-ui/src/features/timeline/NodeTimelineView.tsx", offset: 770, limit: 40 }, "779\t<aside aria-label=\"Item detail panel\" className=\"detail-drawer\">\n780\t  <Button aria-label=\"Close detail\" className=\"drawer-close\" …");
+      claude(2, "Grep", { pattern: "drawer-close", path: "apps/dag-ui/src", output_mode: "content" }, "apps/dag-ui/src/styles.css:971:.drawer-close {\napps/dag-ui/src/features/timeline/NodeTimelineView.tsx:782:            className=\"drawer-close\"");
+      words("message", "Close is positioned over the drawer's top-right corner, so it lands on whatever the header puts there.");
+      break;
+    case 2:
+      words("reasoning", "I'll move Close into a bar of its own and run the timeline tests after.");
+      claude(1, "Edit", { file_path: "apps/dag-ui/src/styles.css", old_string: ".drawer-close {\n  position: absolute;", new_string: ".drawer-bar {\n  display: flex;\n  justify-content: flex-end;" }, "The file apps/dag-ui/src/styles.css has been updated.");
+      claude(2, "Bash", { command: "cd apps/dag-ui && bunx vitest run src/features/timeline --reporter=dot", description: "Run the timeline unit tests" }, " ✓ 412 passed (38 files)");
+      claude(3, "Bash", { command: "git status --short" }, " M apps/dag-ui/src/styles.css");
+      claude(4, "Read", { file_path: "apps/dag-ui/src/features/timeline/TimelineItemDetail.tsx", offset: 470, limit: 60 }, "470\tfunction Session({ …");
+      words("message", "Close now sits in its own bar; the tests pass.");
+      break;
+    case 3:
+      claude(1, "Grep", { pattern: "previewOf\\(", path: "node_modules/@oneharness/ui/dist", glob: "*.mjs" }, "turn-card.mjs:43:function previewOf(invocation) {");
+      claude(2, "Bash", { command: "git add -A && git commit -m 'fix(drawer): put Close in its own bar'", description: "Commit the drawer bar" }, "[drawer 3f1c2aa] fix(drawer): put Close in its own bar\n 2 files changed, 18 insertions(+), 9 deletions(-)");
+      words("message", "Committed. Next, the collapsed tool rows.");
+      break;
+    case 4:
+      words("reasoning", "A collapsed tool row prints the input as JSON; a person wants the description, the command or the path.");
+      claude(1, "Read", { file_path: "apps/dag-ui/src/features/timeline/timeline-model.ts", offset: 1420, limit: 50 }, "1420\tfunction eventRow(event: TimelineEvent): TimelineRow {");
+      claude(2, "Edit", { file_path: "apps/dag-ui/src/features/timeline/timeline-model.ts", old_string: "\"Event\"", new_string: "eventKindLabel(event)" }, "The file apps/dag-ui/src/features/timeline/timeline-model.ts has been updated.");
+      words("message", "The event rows now carry a kind of their own.");
+      break;
+    case 5:
+      // A turn the host ran on codex after claude-code's quota ran out.
+      words("message", "I'll run the drawer's focused tests and the diff stat in one go.");
+      codex(1, `/bin/bash -lc '${JS_LONG_COMMAND}'`, " ✓ 57 passed\n57\n src/features/timeline/NodeTimelineView.tsx | 14 ++++++----\n src/styles.css                             | 11 ++++----\n 2 files changed, 15 insertions(+), 10 deletions(-)");
+      codex(2, "/bin/bash -lc 'git log --oneline -3'", "3f1c2aa fix(drawer): put Close in its own bar\n9e01b7d fix(events): badge each row by its kind\na266409 chore: release v0.92.0");
+      words("message", "57 focused tests pass and the diff is the two files I meant to touch.");
+      break;
+    case 6:
+      claude(1, "Grep", { pattern: "No assistant text", path: "node_modules/@oneharness/ui/dist" }, "turn-card.mjs:442: children: \"No assistant text was captured for this run.\"");
+      claude(2, "Read", { file_path: "apps/dag-ui/src/features/timeline/useConversation.ts" }, "1\timport { useEffect, useState } from \"react\";");
+      words("message", "A judge turn has no assistant text because its history is never read; that needs the server.");
+      break;
+    case 7:
+      claude(1, "Bash", { command: "cargo test --test e2e conversations::judge -- --nocapture", description: "Run the judge conversation journeys" }, "test conversations::judge::serves_the_supervisor_turn ... ok\ntest result: ok. 3 passed");
+      claude(2, "Edit", { file_path: "src/routes/conversations.rs", old_string: "assistant: None,", new_string: "assistant: history.text(),"}, "The file src/routes/conversations.rs has been updated.");
+      words("message", "Judge turns now carry their prompt and text.");
+      break;
+    case 8:
+      claude(1, "Bash", { command: "just dag-ui-screens --grep 'drawer'" , description: "Re-capture the drawer screenshots" }, "visual-capture: x86_64 capture in shots/local/capture-7Qp2");
+      words("message", "Re-captured; the drawer, tool rows and judge turns read as intended.");
+      break;
+    default:
+      claude(1, "Bash", { command: "git push --dry-run" }, "Everything up-to-date");
+      words("message", `Turn ${turn}: checked the branch is ready.`);
+  }
+  return out;
+}
+const jsPrompt = (turn) => (turn === 1 ? `## What\n${JS_TASK}` : `Good. Carry on with step ${turn}: keep each change to one commit.`);
+const jsAnswer = (turn) => {
+  const events = jsWorkerEvents(turn);
+  return events.filter((e) => e.kind === "message").at(-1)?.output ?? `Turn ${turn} done.`;
+};
+
+function jsHistory(store, { session, historyId, started, prompt, events, text, harnessId = "claude-code:alternate", labels = {} }) {
+  const [harness, variant] = harnessId.split(":");
+  const lines = [
+    { type: "run-started", schema_version: "1.11", history_id: historyId, harness_id: harnessId, prompt, started },
+    ...events.map((event) => ({ type: "event", schema_version: "1.9", run_id: historyId, harness, variant, harness_id: harnessId, event, session_name: session })),
+    {
+      type: "run", schema_version: "1.8", history_id: historyId, session, name: session, labels,
+      project: "/home/operator/projects/observatory", timestamp: started, harness, variant, harness_id: harnessId,
+      model: harness === "codex" ? "a-judge-model" : "a-model", prompt,
+      permission_mode: labels.agent_role === "judge" ? "read-only" : "default", status: "ok", exit_code: 0,
+      duration_ms: 21000, finished_at: null, text, text_source: harness === "codex" ? "jsonrpc:codex-app-server" : "stream-json:result",
+      usage: { input_tokens: 2400, output_tokens: 610, cache_read_tokens: 18000, cache_write_tokens: 900 },
+      session_id: historyId, failure_kind: null,
+    },
+  ];
+  const dir = join(store, JS_PROJECT);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${session}.jsonl`), `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);
+}
+
+const JS_USAGE = { input_tokens: 2400, output_tokens: 610, cache_read_tokens: 18000, cache_write_tokens: 900, cost_usd: 0.31 };
+
+class JudgeSpikeMember {
+  constructor({ store, stream, node, start, kinds }) {
+    this.store = store;
+    this.stream = stream;
+    this.journal = new Journal(join(store, "..", "unused"), stream, start);
+    this.session = `${stream}.worker`;
+    this.kinds = kinds;
+    this.labels = { run_id: stream, node, member: "worker", persona: "engineer", "onepipeline.run_id": JUDGE_SPIKE_RUN, "onepipeline.node": node, "onepipeline.persona": "engineer", session: this.session };
+    this.unsessioned = Object.fromEntries(Object.entries(this.labels).filter(([key]) => key !== "session"));
+  }
+
+  write(kind, n, suffix, { prompt, events, text, harnessId, labels }) {
+    const historyId = judgeSpikeHistoryId(kind, n);
+    const session = `${this.stream}-worker-${suffix}-${String(n).padStart(2, "0")}`;
+    jsHistory(this.store, { session, historyId, started: stamp(this.journal.at), prompt, events, text, harnessId, labels });
+    return {
+      historyId,
+      session,
+      at: (extra = {}) => ({ history_dir: this.store, history_project: JS_PROJECT, history_session: session, history_id: historyId, ...extra }),
+    };
+  }
+
+  invoked(role, turn, written, identity) {
+    this.journal.advance(1).emit("agentgraph", "oneharness-session", this.unsessioned, {
+      role, turn, identity, history_id: written.historyId, history_dir: this.store, history_project: JS_PROJECT, history_session: written.session,
+    }, [{ id: written.historyId, kind: "oneharness_session", bytes: 0 }]);
+  }
+
+  agentTurn(turn, { message = true, completed = true } = {}) {
+    const events = jsWorkerEvents(turn);
+    const harnessId = events.some((e) => e.name === "command_execution") ? "codex:primary" : "claude-code:alternate";
+    const written = this.write(this.kinds.worker, turn, "skill", { prompt: jsPrompt(turn), events, text: jsAnswer(turn), harnessId });
+    const startedAt = stamp(this.journal.at);
+    this.invoked("agent", turn, written, harnessId);
+    this.journal.advance(1).emit("agentgraph", "turn-started", this.labels, {
+      transcript: written.at(), turn, role: "assistant", started_at: startedAt, origin: turn === 1 ? "task" : "supervisor",
+    });
+    for (const event of events)
+      this.journal.advance(2).emit("agentgraph", "turn-activity", this.labels, {
+        transcript: written.at({ index: event.index, ...(event.tool_call_id ? { tool_call_id: event.tool_call_id } : {}) }),
+        kind: event.kind, name: event.name, ...(event.tool_call_id ? { tool_call_id: event.tool_call_id } : {}), index: event.index,
+      });
+    if (message) this.journal.advance(2).emit("agentgraph", "turn-message", this.labels, { transcript: written.at(), turn, role: "assistant" });
+    if (completed)
+      this.journal.advance(1).emit("agentgraph", "turn-completed", this.labels, {
+        turn, role: "assistant", usage: JS_USAGE, started_at: startedAt, finished_at: stamp(this.journal.at),
+      });
+  }
+
+  /** The supervisor (a codex judge) reading turn `turn` and writing the next prompt. */
+  supervisorTurn(turn, { done = false } = {}) {
+    const said = done
+      ? "Every criterion looks met from here; hand it to the verdict judge."
+      : jsPrompt(turn + 1);
+    const final = JSON.stringify({ completion: done, message: said });
+    const events = [
+      { kind: "message", name: null, input: null, output: `I'll check the worker's turn ${turn} against the task before writing the next prompt.`, index: 0, tool_call_id: null },
+      { kind: "tool_call", name: "command_execution", input: { command: "/bin/bash -lc 'git status --short; git log -3 --oneline'", exit_code: 0 }, output: " M apps/dag-ui/src/styles.css\n3f1c2aa fix(drawer): put Close in its own bar", index: 1, tool_call_id: `call_sup_${turn}_1`, status: "completed" },
+      { kind: "tool_call", name: "command_execution", input: { command: "/bin/bash -lc \"sed -n '956,990p' apps/dag-ui/src/styles.css\"", exit_code: 0 }, output: ".detail-drawer {\n  position: absolute;", index: 2, tool_call_id: `call_sup_${turn}_2`, status: "completed" },
+      { kind: "message", name: null, input: null, output: final, index: 3, tool_call_id: null },
+    ];
+    const written = this.write(this.kinds.supervisor, turn, "user", {
+      prompt: `You are the simulated USER and completion supervisor for an AI agent.\n\nOriginal task:\n## What\n${JS_TASK}\n\nThe agent's turn ${turn} ended with:\n${jsAnswer(turn)}\n\nInspect the workspace read-only, then answer with JSON {"completion": bool, "message": string}.`,
+      events, text: final, harnessId: "codex:primary", labels: { agent_role: "judge", judge: "oneharness" },
+    });
+    const startedAt = stamp(this.journal.at);
+    this.invoked("judge", turn, written, "codex:primary");
+    this.journal.advance(1).emit("agentgraph", "turn-started", this.labels, { transcript: written.at(), turn, role: "user", started_at: startedAt });
+    this.journal.advance(1).emit("agentgraph", "turn-message", this.labels, { transcript: written.at(), turn, role: "user", origin: "supervisor" });
+    this.journal.advance(1).emit("agentgraph", "turn-completed", this.labels, {
+      turn, role: "user", usage: { input_tokens: 51204, output_tokens: 311, cache_read_tokens: 20480 }, started_at: startedAt, finished_at: stamp(this.journal.at),
+    });
+  }
+
+  /** The verdict judge ruling on each criterion once the supervisor called it done. */
+  verdictTurn(turn, criteria) {
+    const ruling = { value: true, reason: "Close sits in its own bar clear of the header, and the committed tests pass." };
+    const events = [
+      { kind: "tool_call", name: "command_execution", input: { command: "/bin/bash -lc 'git diff --stat main...HEAD'", exit_code: 0 }, output: " apps/dag-ui/src/styles.css | 11 ++++----\n 1 file changed", index: 0, tool_call_id: `call_vj_${turn}_1`, status: "completed" },
+      { kind: "message", name: null, input: null, output: JSON.stringify(ruling), index: 1, tool_call_id: null },
+    ];
+    const written = this.write(this.kinds.verdict, 1, "verdict", {
+      prompt: `You judge whether one acceptance criterion is met.\n\nCriterion: ${criteria[0]}\n\nRead the workspace read-only and answer with JSON {"value": bool, "reason": string}.`,
+      events, text: JSON.stringify(ruling), harnessId: "codex:alternate", labels: { agent_role: "judge", judge: "verdict" },
+    });
+    this.invoked("judge", turn, written, "codex:alternate");
+  }
+}
+
+const JS_CRITERIA = [
+  "The drawer's Close sits in a bar of its own, clear of the header and its badge.",
+  "Every judge turn shows its prompt, its text and its tool calls.",
+];
+const JS_VERDICTS = [
+  { value: true, reason: "Close sits in its own bar above the header; nothing overlaps it at either width." },
+  { value: false, reason: "The concluding turn still reads no assistant text; the server does not read judge histories yet." },
+].map((verdict, i) => ({ criterion: JS_CRITERIA[i], kind: "boolean", verdict }));
+
+function jsReport(started, turns) {
+  const at = (turn, extra = 0) => stamp(started + turn * 60_000 + extra);
+  const link = (role, turn) => ({ session_id: `01a19000-0000-7000-9000-${String(turn).padStart(12, "0")}`, role, turn_index: turn, started_at: at(turn), finished_at: at(turn, 20_000) });
+  const attribution = (turn, harnessId) => ({
+    role: "judge", turn_index: turn, ran: harnessId, fell_through: [],
+    candidates: [{ harness: "codex", harness_id: harnessId, variant: harnessId.split(":")[1], model: "a-judge-model", status: "ok", available: true, ran: true, failure_kind: null, exit_code: 0, duration_ms: 20_000, usage: { input_tokens: 51_204, output_tokens: 311, cache_read_tokens: 20_480 } }],
+  });
+  const range = Array.from({ length: turns }, (_, i) => i + 1);
+  return `${JSON.stringify({
+    schema_version: 12,
+    transcript: { messages: range.flatMap((turn) => [{ role: "user", content: jsPrompt(turn) }, { role: "assistant", content: jsAnswer(turn) }]) },
+    verdicts: JS_VERDICTS,
+    completion_reason: "Close is in its own bar; judge turns still need the server to read their histories.",
+    control: null,
+    supervisor_control: null,
+    telemetry: {
+      wall_ms: 400_000, agent: {}, judge: {}, orchestration_ms: 1_000,
+      sessions: [...range.flatMap((turn) => [link("agent", turn), link("judge", turn)]), link("judge", turns + 1)],
+      attribution: [...range.map((turn) => attribution(turn, "codex:primary")), attribution(turns + 1, "codex:alternate")],
+    },
+  })}\n`;
+}
+
+
+export function buildJudgeSpikeRuns(root) {
+  mkdirSync(root, { recursive: true });
+  const store = join(root, "..", "judge-spike-history");
+  const start = now() - 50 * 60 * 1000;
+  const { dir, journal } = plannedRun(root, JUDGE_SPIKE_RUN, [
+    ["drawer", JS_TASK],
+    ["event-kinds", "Badge every event row by what it is."],
+  ], start);
+  const run = { run_id: JUDGE_SPIKE_RUN };
+  declareGraph(root, JS_STREAMS.first, ["worker"]);
+  declareGraph(root, JS_STREAMS.second, ["worker"]);
+  declareGraph(root, JS_STREAMS.kinds, ["worker"]);
+
+  // A short node beside it, done, so the run's charts have more than one row.
+  journal.advance(1).emit("pipeline", "node-dispatched", { ...run, node: "event-kinds", persona: "worker" });
+  const kinds = new JudgeSpikeMember({ store, stream: JS_STREAMS.kinds, node: "event-kinds", start: start + 3_000, kinds: { worker: 7, supervisor: 8, verdict: 9 } });
+  kinds.journal.advance(1).emit("agentgraph", "member-started", kinds.unsessioned, {});
+  kinds.agentTurn(4);
+  kinds.journal.advance(1).emit("agentgraph", "member-settled", kinds.unsessioned, { completed: true, verdict: [], completion_reason: "rows are badged" });
+
+  // Dispatch 1: judged turn by turn, ruled on, settled with two verdicts.
+  journal.advance(1).emit("pipeline", "node-dispatched", { ...run, node: "drawer", persona: "worker" });
+  const first = new JudgeSpikeMember({ store, stream: JS_STREAMS.first, node: "drawer", start: start + 5_000, kinds: { worker: 4, supervisor: 5, verdict: 6 } });
+  first.journal.advance(1).emit("agentgraph", "member-started", first.unsessioned, {});
+  const FIRST_TURNS = 3;
+  for (let turn = 1; turn <= FIRST_TURNS; turn += 1) {
+    first.agentTurn(turn);
+    first.supervisorTurn(turn, { done: turn === FIRST_TURNS });
+  }
+  first.verdictTurn(FIRST_TURNS, JS_CRITERIA);
+  const settledAt = first.journal.advance(2).lines.length;
+  first.journal.emit("agentgraph", "member-settled", first.unsessioned, {
+    completed: true,
+    verdict: JS_VERDICTS,
+    completion_reason: "Close is in its own bar; judge turns still need the server to read their histories.",
+    report_path: "/a/producing/librarys/scratch/report.json",
+  }, [{ id: `report-${JS_STREAMS.first}`, kind: "report", bytes: 0 }]);
+  retainReport(dir, JS_STREAMS.first, settledAt, jsReport(start + 5_000, FIRST_TURNS));
+  journal.advance(400).emit("pipeline", "retry-requested", { ...run, node: "drawer" }, { reason: "the second criterion was not met" });
+
+  // Dispatch 2: live, nine turns, still running.
+  journal.advance(1).emit("pipeline", "node-dispatched", { ...run, node: "drawer", persona: "worker" });
+  const second = new JudgeSpikeMember({ store, stream: JS_STREAMS.second, node: "drawer", start: start + 600_000, kinds: { worker: 2, supervisor: 3, verdict: 10 } });
+  second.journal.advance(1).emit("agentgraph", "member-started", second.unsessioned, {});
+  const SECOND_TURNS = 9;
+  for (let turn = 1; turn <= SECOND_TURNS; turn += 1) {
+    second.agentTurn(turn, turn === SECOND_TURNS ? { message: false, completed: false } : {});
+    if (turn < SECOND_TURNS) second.supervisorTurn(turn);
+  }
+  // The live turn's latest activity, moments ago, so its driver reads as driving.
+  second.journal.at = now() - 20_000;
+  second.journal.emit("agentgraph", "turn-activity", second.labels, { kind: "reasoning", name: null, index: 9 });
+  journal.advance(1).emit("pipeline", "node-settled", { ...run, node: "event-kinds" }, { status: "done", outcome: "merged" });
+  Journal.writeMerged(journal.path, [journal, kinds.journal, first.journal, second.journal]);
+}
+
+export function judgeSpikeFacts() {
+  return { run: JUDGE_SPIKE_RUN, streams: JS_STREAMS };
+}
