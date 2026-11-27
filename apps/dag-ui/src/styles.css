@@ -4020,4 +4020,4 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 .spike-prompt[open] > summary { margin-bottom: 6px; }
 /* Both charts inset alike, their cards aligned with their containers. */
 .conversation-timeline-sticky { padding-right: 0; }
-.node-timeline-sticky { padding: 12px 22px; }
+.node-timeline-sticky { padding: 12px 30px; }

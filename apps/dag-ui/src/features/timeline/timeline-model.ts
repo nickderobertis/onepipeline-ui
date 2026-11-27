@@ -204,9 +204,13 @@ export function laneVocabulary(
   // and an always-empty row would push the reading below the fold for nothing.
   const unroled = spans.some((span) => spanLane(span) === "dispatch");
   const [queued, ...rest] = STRUCTURAL_LANES;
+  const judged = spans.some(
+    (span) => span.kind === "dispatch" && span.transport_role === "judge",
+  );
   return [
     ...(queued === undefined ? [] : [queued]),
     ...roles.map((role) => ({ id: roleLaneId(role), label: role })),
+    ...(judged ? [{ id: "judge", label: "judge" }] : []),
     ...rest.filter(({ id }) => unroled || id !== "dispatch"),
   ];
 }
@@ -1101,6 +1105,8 @@ function flattenRows(
 function laneId(row: TimelineRow): LaneId | null {
   // A journal record is a moment, not an interval: it is a marker over every lane.
   if (row.rowKind === "event") return null;
+  // SPIKE: a judge session reads in a lane of its own.
+  if (row.transport === "judge") return "judge";
   if (row.role !== undefined) return roleLaneId(row.role);
   // Widened for the lookup, not narrowed for it: a group row carries the kind of the
   // spans it stands for as a plain string, and a kind the table has no entry for is
@@ -1311,6 +1317,8 @@ function dispatchRole(span: TimelineSpan): AgentRole | undefined {
  * rollup would otherwise share.
  */
 export function spanLane(span: TimelineSpan): LaneId | null {
+  // SPIKE: a judge session reads in a lane of its own.
+  if (span.kind === "dispatch" && span.transport_role === "judge") return "judge";
   if (span.agent_role !== undefined) return roleLaneId(span.agent_role);
   if (span.harness_scope !== undefined) return roleLaneId(span.harness_scope);
   // Widened for the lookup, not narrowed for it: a rollup's label is a plain string,

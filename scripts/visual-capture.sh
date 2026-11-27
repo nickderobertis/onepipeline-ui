@@ -263,6 +263,7 @@ render() {
     "${docker_args[@]}" \
     --env HOME=/scratch/home \
     --env "SHOTS_OUT=$dest" \
+    --env SPIKE_SIDE --env SPIKE_OUT --env SPIKE_ONLY \
     --workdir /work \
     "$image" \
     npx playwright test --config apps/dag-ui-e2e/screenshots.config.ts "$@"
