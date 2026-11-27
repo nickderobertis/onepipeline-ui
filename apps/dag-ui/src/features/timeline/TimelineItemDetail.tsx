@@ -46,6 +46,7 @@ import { useRead } from "../../lib/useRead";
 import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
 import {
+  JUDGED_DISPATCH,
   conclusionText,
   judgeText,
   judgeTurnKind,
@@ -496,6 +497,10 @@ function Session({
   // SPIKE: a judge turn read back from its own history, labelled by its kind.
   const judgeConversation = conversationId.endsWith(".judge");
   const histories = useJudgeHistories(client, runId, conversationId, servedTurns);
+  // Read off the served turns, before the mock clears what it has shown as text.
+  const judgeKinds = new Map(
+    servedTurns.map((turn) => [turn.id, judgeTurnKind(turn)] as const),
+  );
   const availableTurns = useMemo(
     () =>
       judgeConversation
@@ -504,6 +509,7 @@ function Session({
             if (kind === "Conclusion")
               return {
                 ...turn,
+                spikeNoPrompt: true,
                 assistant: conclusionText(turn.unknown),
                 unknown: {},
               };
@@ -635,19 +641,22 @@ function Session({
                   key={turn.id}
                   ref={(element) => sync.register(turn.id, element)}
                 >
-                  <SpikeTurnLink
-                    conversationId={conversationId}
-                    judge={judgeConversation}
-                    settled={served?.conversation.state === "member-settled"}
-                    turn={turn}
-                  />
                   <SessionTurn
                     author={
                       judgeConversation
-                        ? `${judgeTurnKind(turn).kind}${judgeTurnKind(turn).index === undefined ? "" : ` · on worker turn ${judgeTurnKind(turn).index}`}`
+                        ? `${judgeKinds.get(turn.id)?.kind ?? "Judge"}${judgeKinds.get(turn.id)?.index === undefined ? "" : ` · on worker turn ${judgeKinds.get(turn.id)?.index}`}`
                         : author
                     }
                     {...(focus?.turnId === turn.id ? { focus } : {})}
+                    turn={turn}
+                  />
+                  <SpikeTurnLink
+                    conversationId={conversationId}
+                    judge={judgeConversation}
+                    settled={conversationId.startsWith(JUDGED_DISPATCH)}
+                    {...(judgeKinds.has(turn.id)
+                      ? { judged: judgeKinds.get(turn.id) }
+                      : {})}
                     turn={turn}
                   />
                 </div>
@@ -683,17 +692,19 @@ function Session({
 function SpikeTurnLink({
   conversationId,
   judge,
+  judged,
   settled,
   turn,
 }: {
   readonly conversationId: string;
   readonly judge: boolean;
+  readonly judged?: ReturnType<typeof judgeTurnKind>;
   readonly settled: boolean;
   readonly turn: Turn;
 }) {
   const index = Number(turn.id.split(".").at(-1));
   if (judge) {
-    const { kind, index: on } = judgeTurnKind(turn);
+    const { kind, index: on } = judged ?? judgeTurnKind(turn);
     if (kind !== "Supervisor" || on === undefined) return null;
     return (
       <a className="spike-turn-link" href={`#${conversationId.replace(/\.judge$/, "")}.${on - 1}`}>

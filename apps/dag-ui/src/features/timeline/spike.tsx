@@ -90,7 +90,7 @@ export function judgeTurnKind(turn: {
     ?.attribution;
   const index = attribution?.turn_index ?? 0;
   return attribution?.ran === "codex:alternate"
-    ? { kind: "Verdict judge", index }
+    ? { kind: "Verdict judge" }
     : { kind: "Supervisor", index };
 }
 
@@ -119,8 +119,9 @@ export function useJudgeHistories(
     void Promise.all(
       turns.map(async (turn) => {
         const { kind, index } = judgeTurnKind(turn);
-        if (kind === "Conclusion" || index === undefined) return undefined;
-        const id = kind === "Supervisor" ? historyId(5, index) : historyId(6, 1);
+        if (kind === "Conclusion") return undefined;
+        const id =
+          kind === "Supervisor" ? historyId(5, index ?? 0) : historyId(6, 1);
         try {
           const artifact = (await client.getArtifact(runId, id)) as {
             turns?: ArtifactTurn[];
@@ -185,3 +186,6 @@ export function judgeText(text: string | null | undefined): string | undefined {
   }
   return text;
 }
+
+/** SPIKE: the fixture's judged, settled dispatch, whose worker turns link to their judge. */
+export const JUDGED_DISPATCH = "node-scope-1794000000000-5100.";

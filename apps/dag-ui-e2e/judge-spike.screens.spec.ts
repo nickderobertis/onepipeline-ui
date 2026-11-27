@@ -74,7 +74,7 @@ async function scrollDrawer(page: Page, target?: Locator): Promise<void> {
 
 const judgeSpan = `worker · judge (${FIRST}.worker.judge)`;
 const turn = (page: Page, id: string) =>
-  drawer(page).locator(`[data-turn-id="${id}"]`);
+  drawer(page).locator(`article[data-turn-id="${id}"]`).first();
 
 async function overall(page: Page): Promise<Locator> {
   await visit(page, "view=overall");

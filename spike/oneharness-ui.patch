@@ -1,6 +1,6 @@
 diff -ru pristine/dist/apps/conversation-ui/src/components/timeline.mjs oneharness-ui/dist/apps/conversation-ui/src/components/timeline.mjs
 --- a/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 13:18:57.999765537 -0600
-+++ b/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 13:19:40.733243784 -0600
++++ b/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 13:25:46.149289590 -0600
 @@ -388,7 +388,7 @@
  				/* @__PURE__ */ jsxs("div", {
  					className: "relative grid gap-2",
@@ -20,7 +20,7 @@ diff -ru pristine/dist/apps/conversation-ui/src/components/timeline.mjs oneharne
  					children: axisTicks.map((tick) => /* @__PURE__ */ jsxs("li", {
 diff -ru pristine/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs oneharness-ui/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs
 --- a/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 13:18:57.997668312 -0600
-+++ b/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 13:19:40.729366590 -0600
++++ b/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 13:35:24.856892604 -0600
 @@ -82,8 +82,26 @@
  		children: title
  	}), children] });
@@ -90,6 +90,15 @@ diff -ru pristine/dist/apps/conversation-ui/src/features/conversations/component
  				hasInput ? /* @__PURE__ */ jsx(ToolSection, {
  					title: "Input",
  					children: /* @__PURE__ */ jsx(JsonCode, {
+@@ -358,7 +393,7 @@
+ 			]
+ 		}), /* @__PURE__ */ jsxs("div", {
+ 			hidden: collapsed,
+-			children: [/* @__PURE__ */ jsx(Message, {
++			children: [turn.spikeNoPrompt ? null : /* @__PURE__ */ jsx(Message, {
+ 				from: "user",
+ 				children: /* @__PURE__ */ jsxs(MessageContent, {
+ 					...prompt.props,
 @@ -367,7 +402,13 @@
  					children: [/* @__PURE__ */ jsx("div", {
  						className: "text-[10px] font-bold uppercase tracking-[.08em] text-subtle",
