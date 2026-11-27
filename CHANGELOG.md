@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.92.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.91.0...v0.92.0) - 2026-11-27
+
+### Fixed
+
+- *(deps)* [**breaking**] link the engine and store that convert every details block and carry the in-review status ([#897](https://github.com/nickderobertis/onepipeline-ui/pull/897))
+
 ## [0.91.0](https://github.com/nickderobertis/onepipeline-ui/compare/v0.90.1...v0.91.0) - 2026-11-25
 
 ### Fixed
