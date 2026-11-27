@@ -34,7 +34,7 @@ import type {
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
 import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { changeRequestId } from "../../lib/change-request";
 import { argvOf, commandLine } from "../../lib/command-line";
 import { HarnessConversation } from "../../lib/HarnessConversation";
@@ -45,6 +45,12 @@ import { formatDuration } from "../../lib/time";
 import { useRead } from "../../lib/useRead";
 import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
+import {
+  conclusionText,
+  judgeText,
+  judgeTurnKind,
+  useJudgeHistories,
+} from "./spike";
 import { ConversationPlotHover } from "./TimelinePopover";
 import {
   dispatchRoleLabel,
@@ -139,6 +145,8 @@ export function TimelineItemDetail({
             // alone — no heading, badge or field list — before, during and after
             // its transcript loads.
             <Session
+              client={client}
+              runId={runId}
               conversationId={reference?.value ?? ""}
               {...(node === undefined ? {} : { node })}
               row={row}
@@ -468,11 +476,15 @@ function RecorderCut({ turn }: { readonly turn: Turn }) {
  * moves under the reader.
  */
 function Session({
+  client,
+  runId,
   conversationId,
   node,
   row,
   transcript,
 }: {
+  readonly client: TelemetryClient;
+  readonly runId: string;
   readonly conversationId: string;
   readonly node?: NodeView;
   readonly row: TimelineRow;
@@ -480,7 +492,39 @@ function Session({
 }) {
   const [visible, setVisible] = useState(PAGE_SIZE);
   const served = transcript.conversation;
-  const availableTurns = served?.conversation.turns ?? [];
+  const servedTurns = served?.conversation.turns ?? [];
+  // SPIKE: a judge turn read back from its own history, labelled by its kind.
+  const judgeConversation = conversationId.endsWith(".judge");
+  const histories = useJudgeHistories(client, runId, conversationId, servedTurns);
+  const availableTurns = useMemo(
+    () =>
+      judgeConversation
+        ? servedTurns.map((turn) => {
+            const { kind } = judgeTurnKind(turn);
+            if (kind === "Conclusion")
+              return {
+                ...turn,
+                assistant: conclusionText(turn.unknown),
+                unknown: {},
+              };
+            const read = histories.get(turn.id);
+            return read === undefined
+              ? turn
+              : ({
+                  ...turn,
+                  spikeCollapsePrompt: true,
+                  unknown: {},
+                  user: read.user ?? turn.user,
+                  assistant: judgeText(read.assistant) ?? turn.assistant,
+                  tools: read.tools ?? turn.tools,
+                  ...(read.agentEvents === undefined
+                    ? {}
+                    : { agentEvents: read.agentEvents }),
+                } as Turn);
+          })
+        : servedTurns,
+    [judgeConversation, servedTurns, histories],
+  );
   const opened = row.rowKind === "event" ? turnOf(row.event) : undefined;
   const absence = absenceOf(row, transcript, node);
   const turns: readonly Turn[] =
@@ -591,8 +635,18 @@ function Session({
                   key={turn.id}
                   ref={(element) => sync.register(turn.id, element)}
                 >
+                  <SpikeTurnLink
+                    conversationId={conversationId}
+                    judge={judgeConversation}
+                    settled={served?.conversation.state === "member-settled"}
+                    turn={turn}
+                  />
                   <SessionTurn
-                    author={author}
+                    author={
+                      judgeConversation
+                        ? `${judgeTurnKind(turn).kind}${judgeTurnKind(turn).index === undefined ? "" : ` · on worker turn ${judgeTurnKind(turn).index}`}`
+                        : author
+                    }
                     {...(focus?.turnId === turn.id ? { focus } : {})}
                     turn={turn}
                   />
@@ -619,6 +673,39 @@ function Session({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * SPIKE: the link between a worker turn and the judge turn that ruled on it.
+ * A worker turn `<session>.<n>` was judged by `<session>.judge.<n>`.
+ */
+function SpikeTurnLink({
+  conversationId,
+  judge,
+  settled,
+  turn,
+}: {
+  readonly conversationId: string;
+  readonly judge: boolean;
+  readonly settled: boolean;
+  readonly turn: Turn;
+}) {
+  const index = Number(turn.id.split(".").at(-1));
+  if (judge) {
+    const { kind, index: on } = judgeTurnKind(turn);
+    if (kind !== "Supervisor" || on === undefined) return null;
+    return (
+      <a className="spike-turn-link" href={`#${conversationId.replace(/\.judge$/, "")}.${on - 1}`}>
+        ← Worker turn {on}, which this judged
+      </a>
+    );
+  }
+  if (!settled || !Number.isFinite(index)) return null;
+  return (
+    <a className="spike-turn-link" href={`#${conversationId}.judge.${index}`}>
+      Judged by supervisor turn {index + 1} →
+    </a>
   );
 }
 

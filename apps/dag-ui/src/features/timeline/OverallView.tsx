@@ -394,7 +394,7 @@ function GraphExecution({
       <Timeline
         {...TIMELINE_TIME_MARKS}
         axis={{ origin: graph.range[0] }}
-        expanded={false}
+        expanded={rowsOpen /* SPIKE: the control reads what it will do */}
         items={graph.line.items}
         label="Graph timeline"
         lanes={lineLanes}

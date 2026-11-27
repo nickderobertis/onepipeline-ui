@@ -7,6 +7,7 @@ import { ChevronDown, Repeat2 } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
+import { SPIKE_KINDS, SpikeKindBadge } from "./spike";
 import { cycleLabel, type TranscriptEntry } from "./timeline-model";
 
 /**
@@ -21,7 +22,10 @@ export function EventListHeader({
   counts,
   hidden,
   onHiddenChange,
+  spikeCounts,
 }: {
+  /** SPIKE: the reader-named kinds, which the filter lists in place of the types. */
+  readonly spikeCounts?: ReadonlyMap<string, number>;
   /** How many rows of each type the list holds, whatever is hidden. */
   readonly counts: ReadonlyMap<EventType, number>;
   readonly hidden: ReadonlySet<EventType>;
@@ -34,6 +38,34 @@ export function EventListHeader({
   );
   const shown = offered.filter((type) => !hidden.has(type)).length;
   const counted = useId();
+  if (spikeCounts !== undefined && spikeCounts.size > 0) {
+    const kinds = SPIKE_KINDS.filter((kind) => (spikeCounts.get(kind) ?? 0) > 0);
+    return (
+      <header className="event-list-head">
+        <h3>Events</h3>
+        <details className="kind-filter event-type-filter">
+          <summary>
+            <span>Event kinds: all {kinds.length}</span>
+            <ChevronDown aria-hidden="true" size={14} />
+          </summary>
+          <fieldset>
+            <legend className="sr-only">Event kinds</legend>
+            {kinds.map((kind) => (
+              <label key={kind}>
+                <input aria-label={kind} defaultChecked type="checkbox" />
+                <SpikeKindBadge kind={kind} />
+                <span className="event-type-count">{spikeCounts.get(kind)}</span>
+              </label>
+            ))}
+            <p className="event-type-filter-foot">
+              <button type="button">Select all</button>
+              <button type="button">Clear</button>
+            </p>
+          </fieldset>
+        </details>
+      </header>
+    );
+  }
   return (
     <header className="event-list-head">
       <h3>Events</h3>

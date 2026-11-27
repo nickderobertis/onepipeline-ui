@@ -67,6 +67,7 @@ import { CheckRuntime } from "./CheckRuntime";
 import { CheckStatus } from "./CheckStatus";
 import { ControlBadge } from "./ControlBadge";
 import { CycleBlock, EventListHeader, FilteredEmpty } from "./EventList";
+import { type SpikeKind, SpikeKindBadge, spikeKind } from "./spike";
 import { EventCategoryIcon } from "./event-category";
 import { HistoryFailed, PartialMark, PlotHatches } from "./history-controls";
 import { NodeRelease } from "./release";
@@ -534,6 +535,20 @@ function NodeExecution({
     [projection.tree, hidden],
   );
   const counts = useMemo(() => typeCounts(projection.tree), [projection.tree]);
+  // SPIKE: the kinds a reader would name, counted over the same rows.
+  const spikeCounts = useMemo(() => {
+    const found = new Map<string, number>();
+    const walk = (rows: readonly TimelineRow[]) => {
+      for (const row of rows) {
+        const kind =
+          row.rowKind === "event" ? spikeKind(row.event) : undefined;
+        if (kind !== undefined) found.set(kind, (found.get(kind) ?? 0) + 1);
+        walk(row.children);
+      }
+    };
+    walk(projection.tree);
+    return found;
+  }, [projection.tree]);
   // Which collapsed runs the reader has opened. Held here rather than in the
   // projection because it is the reader's own state: what the run recorded is the
   // same either way.
@@ -736,6 +751,7 @@ function NodeExecution({
           />
         )}
         <EventListHeader
+          spikeCounts={spikeCounts}
           counts={counts}
           hidden={hidden}
           onHiddenChange={onHiddenTypesChange}
@@ -777,15 +793,18 @@ function NodeExecution({
       </section>
       {selected !== undefined && (
         <aside aria-label="Item detail panel" className="detail-drawer">
-          <Button
-            aria-label="Close detail"
-            className="drawer-close"
-            onClick={() => onSelectItem()}
-            size="icon"
-            variant="ghost"
-          >
-            <X />
-          </Button>
+          {/* SPIKE: Close in a bar of its own, clear of the header and its badge. */}
+          <div className="drawer-bar">
+            <Button
+              aria-label="Close detail"
+              className="drawer-close"
+              onClick={() => onSelectItem()}
+              size="sm"
+              variant="ghost"
+            >
+              <X /> Close
+            </Button>
+          </div>
           <TimelineItemDetail
             client={client}
             node={node}
@@ -979,10 +998,16 @@ export const TranscriptItem = memo(function TranscriptItem({
           {/* The same glyph the plot draws this record's marker as, so a record
               scanned on one surface is recognised on the other rather than having
               to be read again. */}
-          {row.rowKind === "event" && (
-            <EventCategoryIcon category={row.category} />
+          {row.rowKind === "event" && spikeKind(row.event) !== undefined ? (
+            <SpikeKindBadge kind={spikeKind(row.event) as SpikeKind} />
+          ) : (
+            <>
+              {row.rowKind === "event" && (
+                <EventCategoryIcon category={row.category} />
+              )}
+              {row.displayKind}
+            </>
           )}
-          {row.displayKind}
         </span>
         <strong className="transcript-label" title={row.displayLabel}>
           {row.displayLabel}

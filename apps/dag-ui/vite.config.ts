@@ -28,9 +28,22 @@ const proxy = {
   "/healthz": apiTarget,
 };
 
+// SPIKE (throwaway): the patched copy of @oneharness/ui that
+// scripts/spike-judge-turns-ui.sh writes under node_modules/.spike.
+const spikeUi = `${import.meta.dirname}/../../node_modules/.spike/oneharness-ui/dist`;
+
 export default defineConfig({
   root: import.meta.dirname,
   plugins: [react(), tailwindcss()],
+  resolve: {
+    alias: [
+      { find: /^@oneharness\/ui$/, replacement: `${spikeUi}/index.mjs` },
+      {
+        find: /^@oneharness\/ui\/styles\.css$/,
+        replacement: `${spikeUi}/styles.css`,
+      },
+    ],
+  },
   build: {
     outDir: "dist",
     emptyOutDir: true,

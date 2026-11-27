@@ -1,0 +1,107 @@
+diff -ru pristine/dist/apps/conversation-ui/src/components/timeline.mjs oneharness-ui/dist/apps/conversation-ui/src/components/timeline.mjs
+--- a/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 13:18:57.999765537 -0600
++++ b/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 13:19:40.733243784 -0600
+@@ -388,7 +388,7 @@
+ 				/* @__PURE__ */ jsxs("div", {
+ 					className: "relative grid gap-2",
+ 					ref: grid,
+-					style: { containerType: "inline-size" },
++					style: { containerType: "inline-size", marginInline: "var(--spike-plot-inset, 14px)" },
+ 					children: [
+ 						rows.map((lane) => /* @__PURE__ */ jsxs("div", {
+ 							className: "relative h-6 border-b border-border/60",
+@@ -438,6 +438,7 @@
+ 				/* @__PURE__ */ jsx("ol", {
+ 					"aria-label": "Timeline axis",
+ 					className: "relative m-0 mt-2 h-6 list-none p-0 font-mono text-[9px] leading-3 text-subtle",
++					style: { marginInline: "var(--spike-plot-inset, 14px)" },
+ 					"data-testid": "timeline-axis",
+ 					"data-timeline-axis": true,
+ 					children: axisTicks.map((tick) => /* @__PURE__ */ jsxs("li", {
+diff -ru pristine/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs oneharness-ui/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs
+--- a/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 13:18:57.997668312 -0600
++++ b/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 13:19:40.729366590 -0600
+@@ -82,8 +82,26 @@
+ 		children: title
+ 	}), children] });
+ }
++// SPIKE (throwaway): a tool row reads as what it did, not as its JSON input.
++function spikeStripShell(command) {
++	const match = /^\/bin\/(?:ba)?sh -lc (['"])([\s\S]*)\1$/.exec(command.trim());
++	return match ? match[2] : command;
++}
++function spikeSummary(invocation) {
++	const input = invocation.input && typeof invocation.input === "object" ? invocation.input : null;
++	if (!input) return null;
++	if (invocation.name === "Bash" && typeof input.command === "string") return input.description ? { primary: input.description, secondary: input.command, command: input.command } : { primary: input.command, mono: true, command: input.command };
++	if (invocation.name === "command_execution" && typeof input.command === "string") {
++		const command = spikeStripShell(input.command);
++		return { primary: command, mono: true, wrap: true, command };
++	}
++	if (typeof input.file_path === "string") return { primary: input.file_path, mono: true };
++	if (invocation.name === "Grep" && typeof input.pattern === "string") return { primary: input.pattern, secondary: input.path ? `in ${input.path}` : void 0, mono: true };
++	return null;
++}
+ function ToolInvocationBlock({ invocation, current }) {
+ 	const duration = formatDuration(invocation.durationMs);
++	const spike = spikeSummary(invocation);
+ 	const preview = previewOf(invocation);
+ 	const hasInput = invocation.input !== void 0 && invocation.input !== null;
+ 	const outputJson = invocation.output === null ? void 0 : parseJsonText(invocation.output);
+@@ -95,7 +113,7 @@
+ 		value: invocation.id,
+ 		children: [/* @__PURE__ */ jsxs(AccordionTrigger, {
+ 			"aria-label": `${invocation.name} tool details`,
+-			className: "items-center gap-2 py-1.5 text-xs text-muted-foreground",
++			className: cn("gap-2 py-1.5 text-xs text-muted-foreground", spike ? "items-start spike-tool-trigger" : "items-center"),
+ 			children: [
+ 				/* @__PURE__ */ jsx(Terminal, {
+ 					"aria-hidden": "true",
+@@ -105,7 +123,16 @@
+ 					className: "shrink-0 font-medium text-foreground",
+ 					children: invocation.name
+ 				}),
+-				/* @__PURE__ */ jsx("span", {
++				spike ? /* @__PURE__ */ jsxs("span", {
++					className: "spike-tool-summary",
++					children: [/* @__PURE__ */ jsx("span", {
++						className: cn("spike-tool-primary", spike.mono && "spike-tool-mono", spike.wrap && "spike-tool-wrap"),
++						children: spike.primary
++					}), spike.secondary ? /* @__PURE__ */ jsx("span", {
++						className: "spike-tool-secondary",
++						children: spike.secondary
++					}) : null]
++				}) : /* @__PURE__ */ jsx("span", {
+ 					className: "min-w-0 flex-1 truncate font-mono text-[10px] font-normal text-subtle",
+ 					children: preview
+ 				}),
+@@ -119,6 +146,14 @@
+ 			className: "-mx-3 border-t p-0",
+ 			children: [
+ 				/* @__PURE__ */ jsx(ToolTiming, { invocation }),
++				spike?.command ? /* @__PURE__ */ jsx(ToolSection, {
++					title: "Command",
++					children: /* @__PURE__ */ jsx("pre", {
++						"aria-label": `${invocation.name} command`,
++						className: "spike-tool-command",
++						children: spike.command
++					})
++				}) : null,
+ 				hasInput ? /* @__PURE__ */ jsx(ToolSection, {
+ 					title: "Input",
+ 					children: /* @__PURE__ */ jsx(JsonCode, {
+@@ -367,7 +402,13 @@
+ 					children: [/* @__PURE__ */ jsx("div", {
+ 						className: "text-[10px] font-bold uppercase tracking-[.08em] text-subtle",
+ 						children: "You"
+-					}), inFlight && !turn.user ? /* @__PURE__ */ jsx("p", {
++					}), turn.spikeCollapsePrompt ? /* @__PURE__ */ jsxs("details", {
++						className: "spike-prompt",
++						children: [/* @__PURE__ */ jsxs("summary", { children: ["Prompt · ", String(turn.user ?? "").split("\n").length, " lines"] }), /* @__PURE__ */ jsx(MessageResponse, {
++							label: "User message",
++							children: turn.user
++						})]
++					}) : inFlight && !turn.user ? /* @__PURE__ */ jsx("p", {
+ 						className: "text-[13px] italic text-muted-foreground",
+ 						children: "The prompt is recorded when this run finishes."
+ 					}) : /* @__PURE__ */ jsx(MessageResponse, {
