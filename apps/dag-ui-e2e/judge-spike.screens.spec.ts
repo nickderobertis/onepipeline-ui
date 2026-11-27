@@ -135,7 +135,15 @@ const SHOTS: Shot[] = [
         .first();
       await call.click();
       await page.waitForTimeout(800);
-      await scrollDrawer(page, call);
+      // Below the drawer's pinned chart, not under it.
+      await call.evaluate((element) => {
+        const viewport = element.closest("[data-radix-scroll-area-viewport]");
+        if (!viewport) return;
+        const pinned = viewport.querySelector(".conversation-timeline-sticky");
+        const below = pinned ? pinned.getBoundingClientRect().bottom : viewport.getBoundingClientRect().top;
+        viewport.scrollTop += element.getBoundingClientRect().top - below - 12;
+      });
+      await page.waitForTimeout(800);
     },
   },
   {
