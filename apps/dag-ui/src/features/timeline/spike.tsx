@@ -24,13 +24,13 @@ export const SPIKE_KINDS = [
 ] as const;
 export type SpikeKind = (typeof SPIKE_KINDS)[number];
 
-const LOOK: Record<SpikeKind, { icon: LucideIcon; tone: string }> = {
-  "Tool call": { icon: Wrench, tone: "tool" },
-  "Agent message": { icon: MessageSquareText, tone: "message" },
-  Reasoning: { icon: Brain, tone: "reasoning" },
-  Turn: { icon: RefreshCw, tone: "turn" },
-  Judge: { icon: Gavel, tone: "judge" },
-  "Session lifecycle": { icon: Power, tone: "lifecycle" },
+const LOOK: Record<SpikeKind, { icon: LucideIcon; tone: string; short: string }> = {
+  "Tool call": { icon: Wrench, tone: "tool", short: "Tool" },
+  "Agent message": { icon: MessageSquareText, tone: "message", short: "Message" },
+  Reasoning: { icon: Brain, tone: "reasoning", short: "Reasoning" },
+  Turn: { icon: RefreshCw, tone: "turn", short: "Turn" },
+  Judge: { icon: Gavel, tone: "judge", short: "Judge" },
+  "Session lifecycle": { icon: Power, tone: "lifecycle", short: "Session" },
 };
 
 const LIFECYCLE = new Set([
@@ -65,11 +65,11 @@ export function spikeKind(event: TimelineEvent): SpikeKind | undefined {
 }
 
 export function SpikeKindBadge({ kind }: { readonly kind: SpikeKind }) {
-  const { icon: Icon, tone } = LOOK[kind];
+  const { icon: Icon, tone, short } = LOOK[kind];
   return (
-    <span className={`spike-kind spike-kind-${tone}`}>
+    <span className={`spike-kind spike-kind-${tone}`} title={kind}>
       <Icon aria-hidden="true" className="size-3" />
-      {kind}
+      {short}
     </span>
   );
 }

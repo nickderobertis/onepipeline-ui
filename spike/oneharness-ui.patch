@@ -1,6 +1,6 @@
-diff -ru pristine/dist/apps/conversation-ui/src/components/timeline.mjs oneharness-ui/dist/apps/conversation-ui/src/components/timeline.mjs
---- a/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 13:18:57.999765537 -0600
-+++ b/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 13:25:46.149289590 -0600
+diff -ru a/dist/apps/conversation-ui/src/components/timeline.mjs b/dist/apps/conversation-ui/src/components/timeline.mjs
+--- a/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 16:22:10.019161227 -0600
++++ b/dist/apps/conversation-ui/src/components/timeline.mjs	2026-11-27 16:22:10.130336843 -0600
 @@ -388,7 +388,7 @@
  				/* @__PURE__ */ jsxs("div", {
  					className: "relative grid gap-2",
@@ -18,9 +18,9 @@ diff -ru pristine/dist/apps/conversation-ui/src/components/timeline.mjs oneharne
  					"data-testid": "timeline-axis",
  					"data-timeline-axis": true,
  					children: axisTicks.map((tick) => /* @__PURE__ */ jsxs("li", {
-diff -ru pristine/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs oneharness-ui/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs
---- a/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 13:18:57.997668312 -0600
-+++ b/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 13:35:24.856892604 -0600
+diff -ru a/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs b/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs
+--- a/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 16:22:10.011879581 -0600
++++ b/dist/apps/conversation-ui/src/features/conversations/components/turn-card.mjs	2026-11-27 16:22:18.010951118 -0600
 @@ -82,8 +82,26 @@
  		children: title
  	}), children] });
@@ -53,7 +53,7 @@ diff -ru pristine/dist/apps/conversation-ui/src/features/conversations/component
  		children: [/* @__PURE__ */ jsxs(AccordionTrigger, {
  			"aria-label": `${invocation.name} tool details`,
 -			className: "items-center gap-2 py-1.5 text-xs text-muted-foreground",
-+			className: cn("gap-2 py-1.5 text-xs text-muted-foreground", spike ? "items-start spike-tool-trigger" : "items-center"),
++			className: cn("gap-2 py-1.5 text-xs text-muted-foreground", spike && (spike.secondary || spike.wrap) ? "items-start spike-tool-trigger" : "items-center"),
  			children: [
  				/* @__PURE__ */ jsx(Terminal, {
  					"aria-hidden": "true",
@@ -75,10 +75,11 @@ diff -ru pristine/dist/apps/conversation-ui/src/features/conversations/component
  					className: "min-w-0 flex-1 truncate font-mono text-[10px] font-normal text-subtle",
  					children: preview
  				}),
-@@ -119,6 +146,14 @@
+@@ -119,7 +146,22 @@
  			className: "-mx-3 border-t p-0",
  			children: [
  				/* @__PURE__ */ jsx(ToolTiming, { invocation }),
+-				hasInput ? /* @__PURE__ */ jsx(ToolSection, {
 +				spike?.command ? /* @__PURE__ */ jsx(ToolSection, {
 +					title: "Command",
 +					children: /* @__PURE__ */ jsx("pre", {
@@ -87,10 +88,18 @@ diff -ru pristine/dist/apps/conversation-ui/src/features/conversations/component
 +						children: spike.command
 +					})
 +				}) : null,
- 				hasInput ? /* @__PURE__ */ jsx(ToolSection, {
++				hasInput && spike?.command ? /* @__PURE__ */ jsxs("details", {
++					className: "spike-raw-input",
++					children: [/* @__PURE__ */ jsx("summary", { children: "Input" }), /* @__PURE__ */ jsx(JsonCode, {
++						className: payloadClassName,
++						label: `${invocation.name} tool input`,
++						value: invocation.input
++					})]
++				}) : hasInput ? /* @__PURE__ */ jsx(ToolSection, {
  					title: "Input",
  					children: /* @__PURE__ */ jsx(JsonCode, {
-@@ -358,7 +393,7 @@
+ 						className: payloadClassName,
+@@ -358,7 +400,7 @@
  			]
  		}), /* @__PURE__ */ jsxs("div", {
  			hidden: collapsed,
@@ -99,7 +108,7 @@ diff -ru pristine/dist/apps/conversation-ui/src/features/conversations/component
  				from: "user",
  				children: /* @__PURE__ */ jsxs(MessageContent, {
  					...prompt.props,
-@@ -367,7 +402,13 @@
+@@ -367,7 +409,13 @@
  					children: [/* @__PURE__ */ jsx("div", {
  						className: "text-[10px] font-bold uppercase tracking-[.08em] text-subtle",
  						children: "You"

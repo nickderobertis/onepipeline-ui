@@ -3928,29 +3928,26 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   position: static;
   gap: 6px;
 }
-.transcript-item .eyebrow:has(.spike-kind) {
-  width: 18ch;
-  overflow: visible;
-}
+/* The kind label is the old EVENT label's twin: the same small uppercase type and
+   11ch column, no pill, only tinted in its kind's colour. */
 .spike-kind {
   display: inline-flex;
+  overflow: hidden;
   align-items: center;
   gap: 4px;
-  padding: 1px 7px 1px 5px;
-  border: 1px solid currentColor;
-  border-radius: 999px;
   font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: none;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
   white-space: nowrap;
 }
-.spike-kind-tool { color: #f0b45a; background: rgb(240 180 90 / 10%); }
-.spike-kind-message { color: #6fb5ff; background: rgb(111 181 255 / 10%); }
-.spike-kind-reasoning { color: #c39bff; background: rgb(195 155 255 / 10%); }
-.spike-kind-turn { color: #7fd4c1; background: rgb(127 212 193 / 10%); }
-.spike-kind-judge { color: #ff8fa3; background: rgb(255 143 163 / 10%); }
-.spike-kind-lifecycle { color: #9fb0c8; background: rgb(159 176 200 / 10%); }
+.spike-kind > svg { flex: none; }
+.spike-kind-tool { color: rgb(240 180 90 / 85%); }
+.spike-kind-message { color: rgb(111 181 255 / 85%); }
+.spike-kind-reasoning { color: rgb(195 155 255 / 85%); }
+.spike-kind-turn { color: rgb(127 212 193 / 85%); }
+.spike-kind-judge { color: rgb(255 143 163 / 85%); }
+.spike-kind-lifecycle { color: rgb(159 176 200 / 85%); }
 .event-type-filter label .spike-kind { justify-self: start; }
 .spike-turn-link {
   display: inline-flex;
@@ -4021,3 +4018,13 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 /* Both charts inset alike, their cards aligned with their containers. */
 .conversation-timeline-sticky { padding-right: 0; }
 .node-timeline-sticky { padding: 12px 30px; }
+/* The raw input, folded under the readable command. */
+.spike-raw-input > summary {
+  cursor: pointer;
+  padding: 8px 14px 4px;
+  color: var(--subtle, var(--muted-foreground));
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}

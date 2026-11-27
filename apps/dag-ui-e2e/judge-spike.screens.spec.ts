@@ -125,6 +125,20 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    name: "02-tools-claude-expanded",
+    go: async (page) => {
+      await node(page);
+      await openRow(page, "I'll move Close into a bar of its own", 1);
+      const call = drawer(page)
+        .getByRole("button", { name: "Bash tool details" })
+        .filter({ hasText: "Run the timeline unit tests" })
+        .first();
+      await call.click();
+      await page.waitForTimeout(800);
+      await scrollDrawer(page, call);
+    },
+  },
+  {
     name: "02-tools-codex-expanded",
     go: async (page) => {
       await node(page);
