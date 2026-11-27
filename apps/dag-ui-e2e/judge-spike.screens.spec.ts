@@ -142,11 +142,31 @@ const SHOTS: Shot[] = [
     },
   },
   {
-    name: "03-judge-conclusion",
+    name: "03-judge-verdict",
     go: async (page) => {
       await node(page);
       await openRow(page, judgeSpan);
       await scrollDrawer(page, turn(page, `${FIRST}.worker.judge.3`));
+    },
+  },
+  {
+    // The concluding turn's answer — its verdicts and completion reason — placed
+    // just below the drawer's pinned chart, so all of it fits at both widths.
+    name: "03-judge-conclusion",
+    go: async (page) => {
+      await node(page);
+      await openRow(page, judgeSpan);
+      await turn(page, `${FIRST}.worker.judge.4`)
+        .locator('[data-turn-part="answer"]')
+        .evaluate((answer) => {
+          const viewport = answer.closest("[data-radix-scroll-area-viewport]");
+          const pinned = viewport?.querySelector(".conversation-timeline-sticky");
+          if (!viewport || !pinned) return;
+          // The turn's author line sits just above its answer; keep it in view.
+          const from = answer.getBoundingClientRect().top - 28;
+          viewport.scrollTop += from - pinned.getBoundingClientRect().bottom - 8;
+        });
+      await page.waitForTimeout(800);
     },
   },
   // 4. A worker turn and the judge turn that ruled on it, and the judge's lane.
