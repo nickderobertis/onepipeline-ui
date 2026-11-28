@@ -3998,17 +3998,6 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.spike-tool-command {
-  margin: 4px 14px 8px;
-  padding: 8px 10px;
-  border-radius: 6px;
-  background: var(--muted);
-  color: var(--foreground);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .spike-prompt > summary {
   cursor: pointer;
   color: var(--muted-foreground);
@@ -4018,10 +4007,34 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 /* Both charts inset alike, their cards aligned with their containers. */
 .conversation-timeline-sticky { padding-right: 0; }
 .node-timeline-sticky { padding: 12px 30px; }
-/* The raw input, folded under the readable command. */
+/* The raw input, folded under the readable command; the call id rides on its line. */
 .spike-raw-input > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
   cursor: pointer;
-  padding: 8px 14px 4px;
+  padding: 6px 14px 0;
+  color: var(--subtle, var(--muted-foreground));
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.spike-raw-input-id { font-weight: 400; letter-spacing: 0; text-transform: none; }
+.spike-raw-input-id > code { margin-left: 4px; font-family: var(--font-mono); font-size: 10px; color: var(--muted-foreground); }
+/* An expanded call: the command once, in the header, unclamped. */
+.spike-tool-trigger[data-state="open"] .spike-tool-secondary,
+.spike-tool-trigger[data-state="open"] .spike-tool-wrap {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+}
+.spike-tool-output > h4 {
+  margin: 0;
+  padding: 6px 14px 4px;
   color: var(--subtle, var(--muted-foreground));
   font-size: 9px;
   font-weight: 700;
