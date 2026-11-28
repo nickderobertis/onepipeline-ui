@@ -7,7 +7,7 @@ import { ChevronDown, Repeat2 } from "lucide-react";
 import { type ReactNode, useId } from "react";
 import { Timestamp } from "../../lib/Timestamp";
 import { formatDuration } from "../../lib/time";
-import { SPIKE_KINDS, SpikeKindBadge } from "./spike";
+import { KindLabel, ROW_KINDS, type RowKind } from "./spike-grouped";
 import { cycleLabel, type TranscriptEntry } from "./timeline-model";
 
 /**
@@ -25,7 +25,7 @@ export function EventListHeader({
   spikeCounts,
 }: {
   /** SPIKE: the reader-named kinds, which the filter lists in place of the types. */
-  readonly spikeCounts?: ReadonlyMap<string, number>;
+  readonly spikeCounts?: ReadonlyMap<RowKind, number>;
   /** How many rows of each type the list holds, whatever is hidden. */
   readonly counts: ReadonlyMap<EventType, number>;
   readonly hidden: ReadonlySet<EventType>;
@@ -39,13 +39,15 @@ export function EventListHeader({
   const shown = offered.filter((type) => !hidden.has(type)).length;
   const counted = useId();
   if (spikeCounts !== undefined && spikeCounts.size > 0) {
-    const kinds = SPIKE_KINDS.filter((kind) => (spikeCounts.get(kind) ?? 0) > 0);
+    const kinds = ROW_KINDS.filter((kind) => (spikeCounts.get(kind) ?? 0) > 0);
+    // The categories beside the kinds; Session is now a kind of its own.
+    const others = offered.filter((type) => type !== "session");
     return (
       <header className="event-list-head">
         <h3>Events</h3>
         <details className="kind-filter event-type-filter">
           <summary>
-            <span>Event kinds: all {kinds.length}</span>
+            <span>Event kinds: all {kinds.length + others.length}</span>
             <ChevronDown aria-hidden="true" size={14} />
           </summary>
           <fieldset>
@@ -53,8 +55,15 @@ export function EventListHeader({
             {kinds.map((kind) => (
               <label key={kind}>
                 <input aria-label={kind} defaultChecked type="checkbox" />
-                <SpikeKindBadge kind={kind} />
+                <KindLabel filter kind={kind} />
                 <span className="event-type-count">{spikeCounts.get(kind)}</span>
+              </label>
+            ))}
+            {others.map((type) => (
+              <label key={type}>
+                <input defaultChecked type="checkbox" />
+                <span>{eventTypeLabel(type)}</span>
+                <span className="event-type-count">{counts.get(type)}</span>
               </label>
             ))}
             <p className="event-type-filter-foot">

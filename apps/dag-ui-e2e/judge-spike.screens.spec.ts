@@ -37,12 +37,69 @@ const drawer = (page: Page) =>
 
 async function node(page: Page): Promise<void> {
   await visit(page, "node=drawer");
-  await expect(transcript(page).getByRole("article").first()).toBeVisible();
+  await expect(
+    side === "after"
+      ? transcript(page).locator(".spike-row").first()
+      : transcript(page).getByRole("article").first(),
+  ).toBeVisible();
   await page.waitForTimeout(1500);
 }
 
-/** Open the `nth` transcript row whose label starts with `start`. */
-async function openRow(page: Page, start: string, nth = 0): Promise<void> {
+/**
+ * Open a dispatch's whole worker or judge conversation: its session's span row on
+ * the base, which the grouped list no longer lists, so the mock's own hook there.
+ */
+async function openSession(
+  page: Page,
+  dispatch: number,
+  judge: boolean,
+): Promise<void> {
+  if (side === "before") {
+    await openRow(page, judge ? judgeSpan : `worker (${FIRST}.worker)`);
+    return;
+  }
+  await page.evaluate(
+    ([n, j]) =>
+      (window as unknown as { __spikeOpenSession: (n: number, j: boolean) => string | undefined })
+        .__spikeOpenSession(n as number, j as boolean),
+    [dispatch, judge] as const,
+  );
+  await drawerOpened(page);
+}
+
+/** The drawer's first turn, once it has opened. */
+async function drawerOpened(page: Page): Promise<void> {
+  await expect(
+    drawer(page).getByRole("article", { name: /^Turn / }).first(),
+  ).toBeVisible();
+  await page.waitForTimeout(2000);
+}
+
+/**
+ * Open the `nth` row whose label starts with `start`. On the mock the list is
+ * grouped by turn, newest dispatch first, so `afterNth` counts in that order and
+ * the group holding the row is opened first; on the base it is the flat list.
+ */
+async function openRow(
+  page: Page,
+  start: string,
+  nth = 0,
+  afterNth = nth,
+): Promise<void> {
+  if (side === "after") {
+    const key = await page.evaluate(
+      ([text, n]) =>
+        (window as unknown as { __spikeReveal: (t: string, n: number) => string | undefined })
+          .__spikeReveal(text as string, n as number),
+      [start, afterNth] as const,
+    );
+    if (key === undefined) throw new Error(`no row starts with ${start}`);
+    const row = transcript(page).locator(`[data-row-key="${key}"]`);
+    await row.scrollIntoViewIfNeeded();
+    await row.click();
+    await drawerOpened(page);
+    return;
+  }
   const row = transcript(page)
     .getByRole("article")
     .filter({ has: page.getByRole("button", { name: `Open ${start}` }) })
@@ -88,6 +145,8 @@ type Shot = {
   name: string;
   /** A view only the mock has: no before. */
   fresh?: boolean;
+  /** The viewports it is shown at, where not both. */
+  sizes?: string[];
   go: (page: Page) => Promise<void>;
 };
 
@@ -97,7 +156,7 @@ const SHOTS: Shot[] = [
     name: "01-close-worker",
     go: async (page) => {
       await node(page);
-      await openRow(page, "I'll move Close into a bar of its own", 1);
+      await openRow(page, "I'll move Close into a bar of its own", 1, 0);
       await scrollDrawer(page);
     },
   },
@@ -105,7 +164,7 @@ const SHOTS: Shot[] = [
     name: "01-close-judge",
     go: async (page) => {
       await node(page);
-      await openRow(page, judgeSpan);
+      await openSession(page, 1, true);
       await scrollDrawer(page);
     },
   },
@@ -114,7 +173,7 @@ const SHOTS: Shot[] = [
     name: "02-tools-claude",
     go: async (page) => {
       await node(page);
-      await openRow(page, "I'll move Close into a bar of its own", 1);
+      await openRow(page, "I'll move Close into a bar of its own", 1, 0);
     },
   },
   {
@@ -128,7 +187,7 @@ const SHOTS: Shot[] = [
     name: "02-tools-claude-expanded",
     go: async (page) => {
       await node(page);
-      await openRow(page, "I'll move Close into a bar of its own", 1);
+      await openRow(page, "I'll move Close into a bar of its own", 1, 0);
       const call = drawer(page)
         .getByRole("button", { name: "Bash tool details" })
         .filter({ hasText: "Run the timeline unit tests" })
@@ -150,7 +209,12 @@ const SHOTS: Shot[] = [
     name: "02-tools-codex-expanded",
     go: async (page) => {
       await node(page);
-      await openRow(page, "cd apps/dag-ui && bunx vitest run src/features/timeline/timeline-model");
+      await openRow(
+        page,
+        side === "after"
+          ? "Shell cd apps/dag-ui && bunx vitest run src/features/timeline/timeline-model"
+          : "cd apps/dag-ui && bunx vitest run src/features/timeline/timeline-model",
+      );
     },
   },
   // 3. A judge conversation: the supervisor's and the verdict judge's turns, then
@@ -159,7 +223,7 @@ const SHOTS: Shot[] = [
     name: "03-judge-turns",
     go: async (page) => {
       await node(page);
-      await openRow(page, judgeSpan);
+      await openSession(page, 1, true);
       await scrollDrawer(page, turn(page, `${FIRST}.worker.judge.2`));
     },
   },
@@ -167,7 +231,7 @@ const SHOTS: Shot[] = [
     name: "03-judge-verdict",
     go: async (page) => {
       await node(page);
-      await openRow(page, judgeSpan);
+      await openSession(page, 1, true);
       await scrollDrawer(page, turn(page, `${FIRST}.worker.judge.3`));
     },
   },
@@ -177,7 +241,7 @@ const SHOTS: Shot[] = [
     name: "03-judge-conclusion",
     go: async (page) => {
       await node(page);
-      await openRow(page, judgeSpan);
+      await openSession(page, 1, true);
       await turn(page, `${FIRST}.worker.judge.4`)
         .locator('[data-turn-part="answer"]')
         .evaluate((answer) => {
@@ -196,7 +260,7 @@ const SHOTS: Shot[] = [
     name: "04-worker-turn",
     go: async (page) => {
       await node(page);
-      await openRow(page, `worker (${FIRST}.worker)`);
+      await openSession(page, 1, false);
       await scrollDrawer(page, turn(page, `${FIRST}.worker.1`));
     },
   },
@@ -204,7 +268,7 @@ const SHOTS: Shot[] = [
     name: "04-judge-turn",
     go: async (page) => {
       await node(page);
-      await openRow(page, judgeSpan);
+      await openSession(page, 1, true);
       await scrollDrawer(page, turn(page, `${FIRST}.worker.judge.1`));
     },
   },
@@ -228,11 +292,55 @@ const SHOTS: Shot[] = [
     },
   },
   {
+    // The grouped list scrolled to its newest dispatch: the newest worker turn and
+    // the rulings on it open, every other turn and dispatch folded.
+    name: "05-event-grouped",
+    fresh: true,
+    go: async (page) => {
+      await node(page);
+      await transcript(page)
+        .locator(".spike-dispatch")
+        .first()
+        .evaluate((element) => element.scrollIntoView({ block: "start" }));
+      await page.waitForTimeout(600);
+    },
+  },
+  {
     name: "05-event-filter",
     go: async (page) => {
       await node(page);
       await page.locator(".event-type-filter > summary").click();
       await page.waitForTimeout(600);
+    },
+  },
+  // 8. A tool call row of the final verdict's group, opened in the drawer.
+  {
+    name: "08-judge-row",
+    fresh: true,
+    sizes: ["1440x900"],
+    go: async (page) => {
+      await node(page);
+      const verdict = transcript(page)
+        .locator(".spike-group")
+        .filter({ hasText: "Final verdict on turn 3" })
+        .first();
+      const row = verdict.locator(".spike-row").filter({ hasText: "git diff --stat main...HEAD" });
+      await row.scrollIntoViewIfNeeded();
+      await row.click();
+      await drawerOpened(page);
+      // The judge turn's heading just below the drawer's pinned chart.
+      await drawer(page)
+        .locator(".spike-judge-heading")
+        .evaluate((heading) => {
+          const viewport = heading.closest("[data-radix-scroll-area-viewport]");
+          const pinned = viewport?.querySelector(".conversation-timeline-sticky");
+          if (!viewport || !pinned) return;
+          viewport.scrollTop +=
+            heading.getBoundingClientRect().top - pinned.getBoundingClientRect().bottom - 8;
+        });
+      // The list's selected row in view beside it.
+      await row.evaluate((element) => element.scrollIntoView({ block: "center" }));
+      await page.waitForTimeout(800);
     },
   },
   // 6. The node chart beside the drawer's turns chart; the Graph timeline; a row's.
@@ -298,15 +406,18 @@ function compose() {
     for (const shot of SHOTS.filter(wanted))
       for (const which of ["before", "after"])
         test(`SPIKE-judge compose ${which} ${shot.name}`, async ({ page }) => {
-          const files = SIZES.map((size) =>
-            join(out, "raw", `${which}-${shot.name}-${size.name}.png`),
-          );
+          const files = SIZES.filter(
+            (size) => !shot.sizes || shot.sizes.includes(size.name),
+          ).map((size) => join(out, "raw", `${which}-${shot.name}-${size.name}.png`));
           test.skip(!files.every((file) => existsSync(file)), "not captured");
-          const [desktop, phone] = files.map(
+          const images = files.map(
             (file) => `data:image/png;base64,${readFileSync(file).toString("base64")}`,
           );
+          const widths = [1440, 390];
           await page.setContent(
-            `<body style="margin:0;background:#0b0f17"><div id="c" style="display:inline-flex;gap:24px;padding:16px;align-items:flex-start;background:#0b0f17"><img src="${desktop}" style="width:1440px;outline:1px solid #334"><img src="${phone}" style="width:390px;outline:1px solid #334"></div></body>`,
+            `<body style="margin:0;background:#0b0f17"><div id="c" style="display:inline-flex;gap:24px;padding:16px;align-items:flex-start;background:#0b0f17">${images
+              .map((src, i) => `<img src="${src}" style="width:${widths[i]}px;outline:1px solid #334">`)
+              .join("")}</div></body>`,
           );
           await page.locator("#c").screenshot({
             path: join(out, "report", `${which}-${shot.name}.png`),
@@ -325,6 +436,7 @@ function compose() {
       });
       for (const shot of SHOTS.filter(wanted)) {
         if (side === "before" && shot.fresh) continue;
+        if (shot.sizes && !shot.sizes.includes(size.name)) continue;
         test(`SPIKE-judge ${side} ${shot.name} ${size.name}`, async ({ page }) => {
           await shot.go(page);
           await page.mouse.move(size.width - 2, size.height - 2);

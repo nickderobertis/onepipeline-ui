@@ -120,8 +120,10 @@ export function useJudgeHistories(
       turns.map(async (turn) => {
         const { kind, index } = judgeTurnKind(turn);
         if (kind === "Conclusion") return undefined;
+        // The fixture's kinds per judged dispatch: the first 5/6, the third 12/13.
+        const [sup, ver] = conversationId?.startsWith(THIRD_DISPATCH) ? [12, 13] : [5, 6];
         const id =
-          kind === "Supervisor" ? historyId(5, index ?? 0) : historyId(6, 1);
+          kind === "Supervisor" ? historyId(sup, index ?? 0) : historyId(ver, 1);
         try {
           const artifact = (await client.getArtifact(runId, id)) as {
             turns?: ArtifactTurn[];
@@ -178,9 +180,9 @@ export function judgeText(text: string | null | undefined): string | undefined {
     const before = text.slice(0, at).trim();
     const lead = before === "" ? "" : `${before}\n\n`;
     if ("completion" in said)
-      return `${lead}**${said.completion ? "Done — hand to the verdict judge." : "Not done yet — next prompt:"}**\n\n${said.message ?? ""}`;
+      return `${lead}**${said.completion ? "Done:" : "Not done:"}** ${said.message ?? ""}`;
     if ("value" in said)
-      return `${lead}**${said.value === true ? "✓ Criterion met" : "✗ Criterion not met"}**\n\n${said.reason ?? ""}`;
+      return `${lead}**${said.value === true ? "Criteria met:" : "Criteria not met:"}** ${said.reason ?? ""}`;
   } catch {
     // not JSON: shown as written
   }
@@ -189,3 +191,5 @@ export function judgeText(text: string | null | undefined): string | undefined {
 
 /** SPIKE: the fixture's judged, settled dispatch, whose worker turns link to their judge. */
 export const JUDGED_DISPATCH = "node-scope-1794000000000-5100.";
+/** SPIKE: the third, judged dispatch the grouped list opens on. */
+export const THIRD_DISPATCH = "node-scope-1794000000003-5103.";

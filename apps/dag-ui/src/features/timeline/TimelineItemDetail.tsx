@@ -33,7 +33,7 @@ import type {
   TimelineSurface,
 } from "@onepipeline-ui/dag-model";
 import type { TelemetryClient } from "@onepipeline-ui/telemetry-client";
-import { ExternalLink, ListTree, TriangleAlert } from "lucide-react";
+import { ExternalLink, Gavel, ListTree, TriangleAlert } from "lucide-react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { changeRequestId } from "../../lib/change-request";
 import { argvOf, commandLine } from "../../lib/command-line";
@@ -45,8 +45,10 @@ import { formatDuration } from "../../lib/time";
 import { useRead } from "../../lib/useRead";
 import { ItemHeading } from "./item-reading";
 import { ReleaseRecord } from "./release";
+import { spikeJudgeFocus } from "./spike-grouped";
 import {
   JUDGED_DISPATCH,
+  THIRD_DISPATCH,
   conclusionText,
   judgeText,
   judgeTurnKind,
@@ -533,8 +535,16 @@ function Session({
   );
   const opened = row.rowKind === "event" ? turnOf(row.event) : undefined;
   const absence = absenceOf(row, transcript, node);
+  // SPIKE: a judge row of the grouped list opens the judge conversation on its turn.
+  const judgeFocus =
+    judgeConversation &&
+    spikeJudgeFocus.current?.turnId.startsWith(`${conversationId}.`) === true
+      ? spikeJudgeFocus.current
+      : undefined;
   const turns: readonly Turn[] =
-    opened === undefined
+    judgeFocus !== undefined
+      ? availableTurns.filter(({ id }) => id === judgeFocus.turnId)
+      : opened === undefined
       ? availableTurns
       : absence === undefined
         ? availableTurns.filter(({ id }) => id === opened)
@@ -546,7 +556,8 @@ function Session({
     plotted.map((turn) => ({ id: turn.id, time: Date.parse(turn.timestamp) })),
   );
   const pinned = usePinnedHeight("--conversation-focus-offset");
-  const focus = focusOf(row, plotted);
+  const focus =
+    judgeFocus === undefined ? focusOf(row, plotted) : (judgeFocus as ConversationFocus);
   // The turn whose place the note stands in, when the transcript lacks it.
   const missing = absence === undefined ? undefined : (opened ?? focus?.turnId);
   const author =
@@ -641,7 +652,18 @@ function Session({
                   key={turn.id}
                   ref={(element) => sync.register(turn.id, element)}
                 >
+                  {judgeFocus !== undefined && (
+                    <SpikeJudgeHeading
+                      conversationId={conversationId}
+                      turn={turn}
+                      {...(judgeKinds.has(turn.id)
+                        ? { judged: judgeKinds.get(turn.id) }
+                        : {})}
+                    />
+                  )}
                   <SessionTurn
+                    // SPIKE: remounted once a judge history lands, so a focus opens its item.
+                    key={`${turn.id}:${turn.tools.length}`}
                     author={
                       judgeConversation
                         ? `${judgeKinds.get(turn.id)?.kind ?? "Judge"}${judgeKinds.get(turn.id)?.index === undefined ? "" : ` · on worker turn ${judgeKinds.get(turn.id)?.index}`}`
@@ -650,15 +672,18 @@ function Session({
                     {...(focus?.turnId === turn.id ? { focus } : {})}
                     turn={turn}
                   />
-                  <SpikeTurnLink
+                  {judgeFocus === undefined && <SpikeTurnLink
                     conversationId={conversationId}
                     judge={judgeConversation}
-                    settled={conversationId.startsWith(JUDGED_DISPATCH)}
+                    settled={
+                      conversationId.startsWith(JUDGED_DISPATCH) ||
+                      conversationId.startsWith(THIRD_DISPATCH)
+                    }
                     {...(judgeKinds.has(turn.id)
                       ? { judged: judgeKinds.get(turn.id) }
                       : {})}
                     turn={turn}
-                  />
+                  />}
                 </div>
               ))}
               {/* Room below a single opened turn, so the item it opened on can be
@@ -705,6 +730,16 @@ function SpikeTurnLink({
   const index = Number(turn.id.split(".").at(-1));
   if (judge) {
     const { kind, index: on } = judged ?? judgeTurnKind(turn);
+    if (kind === "Verdict judge") {
+      // The verdict judge follows one supervisor turn per worker turn, so its
+      // 0-based index is the number of the worker turn it ruled on.
+      const ruled = Number(turn.id.split(".").at(-1));
+      return (
+        <a className="spike-turn-link" href={`#${conversationId.replace(/\.judge$/, "")}.${ruled - 1}`}>
+          ← Worker turn {ruled}, which this ruled on
+        </a>
+      );
+    }
     if (kind !== "Supervisor" || on === undefined) return null;
     return (
       <a className="spike-turn-link" href={`#${conversationId.replace(/\.judge$/, "")}.${on - 1}`}>
@@ -717,6 +752,31 @@ function SpikeTurnLink({
     <a className="spike-turn-link" href={`#${conversationId}.judge.${index}`}>
       Judged by supervisor turn {index + 1} →
     </a>
+  );
+}
+
+/** SPIKE: a judge turn opened from the grouped list, headed as the list names it. */
+function SpikeJudgeHeading({
+  conversationId,
+  judged,
+  turn,
+}: {
+  readonly conversationId: string;
+  readonly judged?: ReturnType<typeof judgeTurnKind>;
+  readonly turn: Turn;
+}) {
+  const position = Number(turn.id.split(".").at(-1));
+  const verdict = judged?.kind === "Verdict judge";
+  const ruled = verdict ? position : position + 1;
+  return (
+    <div className="spike-judge-heading">
+      <Gavel aria-hidden="true" className="size-3.5" />
+      <strong>{verdict ? `Final verdict on turn ${ruled}` : `Judge ruling on turn ${ruled}`}</strong>
+      <span>{verdict ? "verdict judge" : "supervisor"} · codex</span>
+      <a href={`#${conversationId.replace(/\.judge$/, "")}.${ruled - 1}`}>
+        Worker turn {ruled} →
+      </a>
+    </div>
   );
 }
 

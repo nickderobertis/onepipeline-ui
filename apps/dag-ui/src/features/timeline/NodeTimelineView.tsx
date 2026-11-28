@@ -68,6 +68,7 @@ import { CheckStatus } from "./CheckStatus";
 import { ControlBadge } from "./ControlBadge";
 import { CycleBlock, EventListHeader, FilteredEmpty } from "./EventList";
 import { type SpikeKind, SpikeKindBadge, spikeKind } from "./spike";
+import { GroupedEventList, kindCounts, useGroupedDispatches } from "./spike-grouped";
 import { EventCategoryIcon } from "./event-category";
 import { HistoryFailed, PartialMark, PlotHatches } from "./history-controls";
 import { NodeRelease } from "./release";
@@ -535,8 +536,11 @@ function NodeExecution({
     [projection.tree, hidden],
   );
   const counts = useMemo(() => typeCounts(projection.tree), [projection.tree]);
+  // SPIKE: the list grouped by turn, its judge rows read from the judges' histories.
+  const grouped = useGroupedDispatches(client, runId, projection.tree);
+  const groupedCounts = useMemo(() => kindCounts(grouped), [grouped]);
   // SPIKE: the kinds a reader would name, counted over the same rows.
-  const spikeCounts = useMemo(() => {
+  const _spikeCounts = useMemo(() => {
     const found = new Map<string, number>();
     const walk = (rows: readonly TimelineRow[]) => {
       for (const row of rows) {
@@ -751,7 +755,7 @@ function NodeExecution({
           />
         )}
         <EventListHeader
-          spikeCounts={spikeCounts}
+          spikeCounts={groupedCounts}
           counts={counts}
           hidden={hidden}
           onHiddenChange={onHiddenTypesChange}
@@ -759,7 +763,12 @@ function NodeExecution({
         {listed.length === 0 && projection.tree.length > 0 && (
           <FilteredEmpty onClear={() => onHiddenTypesChange([])} />
         )}
-        {transcriptRuns(reading).map((run) => {
+        <GroupedEventList
+          dispatches={grouped}
+          onOpen={openRow}
+          {...(selectedItemId === undefined ? {} : { selectedItemId })}
+        />
+        {[].map((run: ReturnType<typeof transcriptRuns>[number]) => {
           const items = (
             <TranscriptEntries
               entries={run.entries}

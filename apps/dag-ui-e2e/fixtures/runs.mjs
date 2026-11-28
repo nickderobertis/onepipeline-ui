@@ -7144,6 +7144,7 @@ const JS_STREAMS = {
   first: "node-scope-1794000000000-5100",
   second: "node-scope-1794000000001-5101",
   kinds: "node-scope-1794000000002-5102",
+  third: "node-scope-1794000000003-5103",
 };
 /** History ids the mock reads judge turns back by: kind 5 supervisor, 6 verdict judge. */
 export const judgeSpikeHistoryId = (kind, n) =>
@@ -7274,9 +7275,11 @@ class JudgeSpikeMember {
   }
 
   agentTurn(turn, { message = true, completed = true } = {}) {
-    const events = jsWorkerEvents(turn);
+    const events = this.script?.worker(turn) ?? jsWorkerEvents(turn);
     const harnessId = events.some((e) => e.name === "command_execution") ? "codex:primary" : "claude-code:alternate";
-    const written = this.write(this.kinds.worker, turn, "skill", { prompt: jsPrompt(turn), events, text: jsAnswer(turn), harnessId });
+    const answer = events.filter((e) => e.kind === "message").at(-1)?.output ?? `Turn ${turn} done.`;
+    const prompt = this.script?.prompt(turn) ?? jsPrompt(turn);
+    const written = this.write(this.kinds.worker, turn, "skill", { prompt, events, text: answer, harnessId });
     const startedAt = stamp(this.journal.at);
     this.invoked("agent", turn, written, harnessId);
     this.journal.advance(1).emit("agentgraph", "turn-started", this.labels, {
@@ -7296,6 +7299,7 @@ class JudgeSpikeMember {
 
   /** The supervisor (a codex judge) reading turn `turn` and writing the next prompt. */
   supervisorTurn(turn, { done = false } = {}) {
+    if (this.script !== undefined) return this.scriptedJudge(turn, done);
     const said = done
       ? "Every criterion looks met from here; hand it to the verdict judge."
       : jsPrompt(turn + 1);
@@ -7320,7 +7324,31 @@ class JudgeSpikeMember {
   }
 
   /** The verdict judge ruling on each criterion once the supervisor called it done. */
+  /** SPIKE dispatch 3: a supervisor turn whose history the script writes whole. */
+  scriptedJudge(turn, done) {
+    const { events, text, prompt } = this.script.supervisor(turn, done);
+    const written = this.write(this.kinds.supervisor, turn, "user", {
+      prompt, events, text, harnessId: "codex:primary", labels: { agent_role: "judge", judge: "oneharness" },
+    });
+    const startedAt = stamp(this.journal.at);
+    this.invoked("judge", turn, written, "codex:primary");
+    this.journal.advance(1).emit("agentgraph", "turn-started", this.labels, { transcript: written.at(), turn, role: "user", started_at: startedAt });
+    this.journal.advance(events.length * 4).emit("agentgraph", "turn-message", this.labels, { transcript: written.at(), turn, role: "user", origin: "supervisor" });
+    this.journal.advance(1).emit("agentgraph", "turn-completed", this.labels, {
+      turn, role: "user", usage: { input_tokens: 48_310, output_tokens: 402, cache_read_tokens: 19_456 }, started_at: startedAt, finished_at: stamp(this.journal.at),
+    });
+  }
+
   verdictTurn(turn, criteria) {
+    if (this.script !== undefined) {
+      const { events, text, prompt } = this.script.verdict(turn);
+      const written = this.write(this.kinds.verdict, 1, "verdict", {
+        prompt, events, text, harnessId: "codex:alternate", labels: { agent_role: "judge", judge: "verdict" },
+      });
+      this.invoked("judge", turn, written, "codex:alternate");
+      this.journal.advance(events.length * 5);
+      return;
+    }
     const ruling = { value: true, reason: "Close sits in its own bar clear of the header, and the committed tests pass." };
     const events = [
       { kind: "tool_call", name: "command_execution", input: { command: "/bin/bash -lc 'git diff --stat main...HEAD'", exit_code: 0 }, output: " apps/dag-ui/src/styles.css | 11 ++++----\n 1 file changed", index: 0, tool_call_id: `call_vj_${turn}_1`, status: "completed" },
@@ -7343,7 +7371,7 @@ const JS_VERDICTS = [
   { value: false, reason: "The concluding turn still reads no assistant text; the server does not read judge histories yet." },
 ].map((verdict, i) => ({ criterion: JS_CRITERIA[i], kind: "boolean", verdict }));
 
-function jsReport(started, turns) {
+function jsReport(started, turns, { verdicts = JS_VERDICTS, reason = "Close is in its own bar; judge turns still need the server to read their histories.", script } = {}) {
   const at = (turn, extra = 0) => stamp(started + turn * 60_000 + extra);
   const link = (role, turn) => ({ session_id: `01a19000-0000-7000-9000-${String(turn).padStart(12, "0")}`, role, turn_index: turn, started_at: at(turn), finished_at: at(turn, 20_000) });
   const attribution = (turn, harnessId) => ({
@@ -7353,9 +7381,9 @@ function jsReport(started, turns) {
   const range = Array.from({ length: turns }, (_, i) => i + 1);
   return `${JSON.stringify({
     schema_version: 12,
-    transcript: { messages: range.flatMap((turn) => [{ role: "user", content: jsPrompt(turn) }, { role: "assistant", content: jsAnswer(turn) }]) },
-    verdicts: JS_VERDICTS,
-    completion_reason: "Close is in its own bar; judge turns still need the server to read their histories.",
+    transcript: { messages: range.flatMap((turn) => [{ role: "user", content: script?.prompt(turn) ?? jsPrompt(turn) }, { role: "assistant", content: script ? (script.worker(turn).filter((e) => e.kind === "message").at(-1)?.output ?? "") : jsAnswer(turn) }]) },
+    verdicts,
+    completion_reason: reason,
     control: null,
     supervisor_control: null,
     telemetry: {
@@ -7366,6 +7394,111 @@ function jsReport(started, turns) {
   })}\n`;
 }
 
+
+// ---------------------------------------------------------------------------
+// SPIKE dispatch 3 of `drawer`: the retry after dispatch 1's unmet criterion. Three
+// worker turns, a supervisor ruling on each (the last one `done`), and a final
+// verdict judge; every judge history holds reasoning, tool calls and a JSON ruling.
+// Written for this spike; it copies no recorded run.
+// ---------------------------------------------------------------------------
+const JS3_TASK = "Serve each judge turn's own history, so the drawer shows what the judge read and ruled.";
+const JS3_CRITERIA = [
+  "A supervisor turn in the drawer shows its prompt, its tool calls and its ruling.",
+  "The verdict judge's turn shows the criteria it ruled on, met or not, with its reason.",
+];
+const JS3_VERDICTS = [
+  { value: true, reason: "Each supervisor turn serves its folded prompt, two or three read-only commands and a one-line ruling." },
+  { value: true, reason: "The verdict turn lists both criteria with a reason each, and the conversations journey covers it." },
+].map((verdict, i) => ({ criterion: JS3_CRITERIA[i], kind: "boolean", verdict }));
+const JS3_REASON = "Judge turns are read from their own histories and the drawer shows their rulings as sentences.";
+
+function js3Events() {
+  let index = 0;
+  const out = [];
+  const say = (kind, text) => out.push({ kind, name: null, input: null, output: text, index: index++, tool_call_id: null });
+  const tool = (id, name, input, output) => {
+    out.push({ kind: "tool_call", name, input, output: null, index: index++, tool_call_id: id, status: "completed" });
+    out.push({ kind: "tool_result", name, input: null, output, index: index++, tool_call_id: id, status: "completed" });
+  };
+  const shell = (id, command, output) =>
+    out.push({ kind: "tool_call", name: "command_execution", input: { command, exit_code: 0 }, output, index: index++, tool_call_id: id, status: "completed" });
+  return { out, say, tool, shell };
+}
+
+const JS3 = {
+  prompt: (turn) =>
+    turn === 1
+      ? `## What\n${JS3_TASK}`
+      : turn === 2
+        ? "The route still answers an empty assistant for a judge turn. Read the history the session record names, then rerun the conversations journeys."
+        : "Close to done: the verdict turn still prints its ruling as JSON. Say it as a sentence, and cover it in the journey.",
+  worker(turn) {
+    const { out, say, tool } = js3Events();
+    const id = (n) => `toolu_js3_${turn}_${n}`;
+    if (turn === 1) {
+      say("reasoning", "First find where a judge turn is assembled and why its text is empty.");
+      tool(id(1), "Grep", { pattern: "fn judge_turn", path: "src", output_mode: "content" }, "src/routes/conversations.rs:212:fn judge_turn(link: &SessionLink) -> Turn {");
+      tool(id(2), "Read", { file_path: "src/routes/conversations.rs", offset: 200, limit: 60 }, "212\\tfn judge_turn(link: &SessionLink) -> Turn {\n213\\t    Turn { assistant: None, tools: vec![], .. }");
+      say("message", "A judge turn is built from the report's session link alone, so it never has text or tools.");
+    } else if (turn === 2) {
+      say("reasoning", "The oneharness-session record names the history; join on member stream and turn.");
+      tool(id(1), "Edit", { file_path: "src/routes/conversations.rs", old_string: "assistant: None, tools: vec![],", new_string: "assistant: history.text(), tools: history.tools()," }, "The file src/routes/conversations.rs has been updated.");
+      tool(id(2), "Bash", { command: "cargo test --test e2e conversations::judge", description: "Run the judge conversation journeys" }, "test result: ok. 4 passed; 0 failed");
+      say("message", "Judge turns now carry their history's text and tool calls; the four journeys pass.");
+    } else {
+      say("reasoning", "The ruling is the turn's last message and is JSON; the drawer should say it as a sentence.");
+      tool(id(1), "Grep", { pattern: 'completion|"value"', path: "apps/dag-ui/src/features/timeline", glob: "*.ts*" }, "TimelineItemDetail.tsx:681:  // a judge's JSON answer");
+      tool(id(2), "Read", { file_path: "apps/dag-ui/src/features/timeline/TimelineItemDetail.tsx", offset: 660, limit: 50 }, "660\\tfunction SessionTurn({ author, focus, turn }) {");
+      say("message", "I'll add a ruling formatter beside the turn card and use it for the answer.");
+      tool(id(3), "Edit", { file_path: "apps/dag-ui/src/features/timeline/ruling.ts", old_string: "", new_string: "export function rulingSentence(text: string): string | undefined {" }, "The file apps/dag-ui/src/features/timeline/ruling.ts has been created.");
+      tool(id(4), "Edit", { file_path: "apps/dag-ui/src/features/timeline/TimelineItemDetail.tsx", old_string: "assistant={turn.assistant}", new_string: "assistant={rulingSentence(turn.assistant) ?? turn.assistant}" }, "The file apps/dag-ui/src/features/timeline/TimelineItemDetail.tsx has been updated.");
+      tool(id(5), "Bash", { command: "cd apps/dag-ui && bunx vitest run src/features/timeline/ruling.test.ts", description: "Run the ruling formatter's unit tests" }, " ✓ 9 passed (1 file)");
+      tool(id(6), "Bash", { command: "git diff --stat" }, " apps/dag-ui/src/features/timeline/TimelineItemDetail.tsx | 4 +-\n apps/dag-ui/src/features/timeline/ruling.ts | 31 +++++");
+      say("reasoning", "The journey should open the verdict turn and read the sentence, not the braces.");
+      tool(id(7), "Edit", { file_path: "apps/dag-ui-e2e/dag-ui-transcripts.spec.ts", old_string: "// judge turns", new_string: "// judge turns read as their ruling" }, "The file apps/dag-ui-e2e/dag-ui-transcripts.spec.ts has been updated.");
+      tool(id(8), "Bash", { command: "npx playwright test --config apps/dag-ui-e2e/playwright.config.ts dag-ui-transcripts --grep judge", description: "Run the judge transcript journeys" }, "  6 passed (41.2s)");
+      tool(id(9), "Bash", { command: "git add -A && git commit -qm 'feat(dag-ui): say a judge ruling as a sentence'" }, "");
+      say("message", "Rulings now read as sentences in the drawer; unit tests and the six judge journeys pass, committed.");
+    }
+    return out;
+  },
+  supervisor(turn, done) {
+    const { out, say, shell } = js3Events();
+    const id = (n) => `call_js3_sup_${turn}_${n}`;
+    say("reasoning", `Check what turn ${turn} changed before deciding whether the task is finished.`);
+    shell(id(1), "/bin/bash -lc 'git log --oneline -2; git status --short'", turn < 3 ? " M src/routes/conversations.rs" : "8b2e0f4 feat(dag-ui): say a judge ruling as a sentence");
+    if (turn >= 2) shell(id(2), "/bin/bash -lc \"grep -n 'history.text' src/routes/conversations.rs\"", "231:        assistant: history.text(),");
+    if (turn === 3) shell(id(3), "/bin/bash -lc 'cd apps/dag-ui && bunx vitest run src/features/timeline/ruling.test.ts'", " ✓ 9 passed");
+    const ruling = done
+      ? { completion: true, message: "The judge turns serve their histories and the drawer says each ruling in words." }
+      : { completion: false, message: JS3.prompt(turn + 1) };
+    say("message", JSON.stringify(ruling));
+    return {
+      events: out,
+      text: JSON.stringify(ruling),
+      prompt: `You are the completion supervisor for an agent working on:\n${JS3_TASK}\n\nRead its turn ${turn} and the workspace read-only, then answer with JSON {"completion": bool, "message": string}.`,
+    };
+  },
+  verdict() {
+    const { out, say, shell } = js3Events();
+    const id = (n) => `call_js3_vj_${n}`;
+    say("message", "I'll read the final diff, the journeys and the served judge turns before ruling on both criteria.");
+    say("reasoning", "Both criteria are about what the drawer shows, so the served payload and the journey matter more than the diff.");
+    shell(id(1), "/bin/bash -lc 'git diff --stat main...HEAD'", " src/routes/conversations.rs | 18 +++++---\n apps/dag-ui/src/features/timeline/ruling.ts | 31 +++++\n 3 files changed, 52 insertions(+), 6 deletions(-)");
+    shell(id(2), "/bin/bash -lc 'git show --stat HEAD'", "commit 8b2e0f4\n    feat(dag-ui): say a judge ruling as a sentence\n 2 files changed, 35 insertions(+), 2 deletions(-)");
+    shell(id(3), "/bin/bash -lc \"grep -n 'judge turns read as their ruling' -A12 apps/dag-ui-e2e/dag-ui-transcripts.spec.ts\"", "418:  // judge turns read as their ruling\n419:  await expect(drawer.getByText(/^Criteria met:/)).toBeVisible();");
+    shell(id(4), "/bin/bash -lc 'cargo test --test e2e conversations::judge 2>&1 | tail -3'", "test result: ok. 4 passed; 0 failed; 0 ignored");
+    shell(id(5), "/bin/bash -lc \"sed -n '1,40p' apps/dag-ui/src/features/timeline/ruling.ts\"", "export function rulingSentence(text: string): string | undefined {\n  const said = parse(text);");
+    shell(id(6), "/bin/bash -lc 'ls shots/local | tail -2'", "capture-drawer-judge\ncapture-drawer-judge-phone");
+    const ruling = { value: true, reason: "Both criteria hold: supervisor turns show prompt, tools and ruling, and the verdict turn lists each criterion with its reason." };
+    say("message", JSON.stringify(ruling));
+    return {
+      events: out,
+      text: JSON.stringify(ruling),
+      prompt: `You judge whether each acceptance criterion is met.\n\n${JS3_CRITERIA.map((c, i) => `${i + 1}. ${c}`).join("\n")}\n\nRead the workspace read-only and answer with JSON {"value": bool, "reason": string}.`,
+    };
+  },
+};
 
 export function buildJudgeSpikeRuns(root) {
   mkdirSync(root, { recursive: true });
@@ -7379,6 +7512,7 @@ export function buildJudgeSpikeRuns(root) {
   declareGraph(root, JS_STREAMS.first, ["worker"]);
   declareGraph(root, JS_STREAMS.second, ["worker"]);
   declareGraph(root, JS_STREAMS.kinds, ["worker"]);
+  declareGraph(root, JS_STREAMS.third, ["worker"]);
 
   // A short node beside it, done, so the run's charts have more than one row.
   journal.advance(1).emit("pipeline", "node-dispatched", { ...run, node: "event-kinds", persona: "worker" });
@@ -7416,11 +7550,32 @@ export function buildJudgeSpikeRuns(root) {
     second.agentTurn(turn, turn === SECOND_TURNS ? { message: false, completed: false } : {});
     if (turn < SECOND_TURNS) second.supervisorTurn(turn);
   }
+  // Dispatch 3: the retry, judged turn by turn and ruled on, both criteria met.
+  journal.at = start + 1_500_000;
+  journal.emit("pipeline", "retry-requested", { ...run, node: "drawer" }, { reason: "the verdict judge's turn still printed JSON" });
+  journal.advance(1).emit("pipeline", "node-dispatched", { ...run, node: "drawer", persona: "worker" });
+  const third = new JudgeSpikeMember({ store, stream: JS_STREAMS.third, node: "drawer", start: start + 1_502_000, kinds: { worker: 11, supervisor: 12, verdict: 13 } });
+  third.script = JS3;
+  third.journal.advance(1).emit("agentgraph", "member-started", third.unsessioned, {});
+  const THIRD_TURNS = 3;
+  for (let turn = 1; turn <= THIRD_TURNS; turn += 1) {
+    third.agentTurn(turn);
+    third.journal.advance(20);
+    third.supervisorTurn(turn, { done: turn === THIRD_TURNS });
+    third.journal.advance(30);
+  }
+  third.verdictTurn(THIRD_TURNS, JS3_CRITERIA);
+  const thirdSettledAt = third.journal.advance(2).lines.length;
+  third.journal.emit("agentgraph", "member-settled", third.unsessioned, {
+    completed: true, verdict: JS3_VERDICTS, completion_reason: JS3_REASON, report_path: "/a/producing/librarys/scratch/report.json",
+  }, [{ id: `report-${JS_STREAMS.third}`, kind: "report", bytes: 0 }]);
+  retainReport(dir, JS_STREAMS.third, thirdSettledAt, jsReport(start + 1_502_000, THIRD_TURNS, { verdicts: JS3_VERDICTS, reason: JS3_REASON, script: JS3 }));
+
   // The live turn's latest activity, moments ago, so its driver reads as driving.
   second.journal.at = now() - 20_000;
   second.journal.emit("agentgraph", "turn-activity", second.labels, { kind: "reasoning", name: null, index: 9 });
   journal.advance(1).emit("pipeline", "node-settled", { ...run, node: "event-kinds" }, { status: "done", outcome: "merged" });
-  Journal.writeMerged(journal.path, [journal, kinds.journal, first.journal, second.journal]);
+  Journal.writeMerged(journal.path, [journal, kinds.journal, first.journal, second.journal, third.journal]);
 }
 
 export function judgeSpikeFacts() {

@@ -4050,3 +4050,153 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   .spike-tool-trigger[data-state="open"]:has(.spike-tool-wrap) { flex-wrap: wrap; row-gap: 4px; }
   .spike-tool-trigger[data-state="open"] .spike-tool-summary:has(.spike-tool-wrap) { order: 9; flex-basis: 100%; }
 }
+
+/* SPIKE: the event list grouped by turn. Colour means event kind only: no colour
+   for worker or judge anywhere in the list. Each kind's colour has an HSL
+   saturation of at most 40% and a lightness within 15 points of the base EVENT
+   label's (--muted-foreground: #50586a, L 36.5%, light; #b2b8c7, L 73.9%, dark);
+   Tool, Message and Reasoning sit 50+ degrees apart, and Session is a grey of 8%. */
+:root {
+  --spike-tool: hsl(38 38% 38%);
+  --spike-message: hsl(208 36% 40%);
+  --spike-reasoning: hsl(266 30% 45%);
+  --spike-session: hsl(220 8% 42%);
+}
+.dark {
+  --spike-tool: hsl(38 38% 60%);
+  --spike-message: hsl(208 36% 63%);
+  --spike-reasoning: hsl(266 32% 67%);
+  --spike-session: hsl(220 8% 61%);
+}
+.spike-kind-tool { color: var(--spike-tool); }
+.spike-kind-message { color: var(--spike-message); }
+.spike-kind-reasoning { color: var(--spike-reasoning); }
+.spike-kind-session { color: var(--spike-session); }
+.spike-grouped { display: flex; width: min(100%, 1100px); margin-inline: auto; flex-direction: column; gap: 10px; }
+.spike-dispatch {
+  padding: 6px 12px 4px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+}
+.spike-dispatch > h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 2px 0 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.spike-dispatch-meta {
+  color: var(--subtle, var(--muted-foreground));
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  opacity: 0.8;
+}
+.spike-group { border-top: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+.spike-group-head {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  color: var(--foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+  opacity: 0.88;
+}
+.spike-group-head:hover { opacity: 1; }
+.spike-chev { flex: none; color: var(--muted-foreground); transition: transform 0.15s; }
+.spike-group[data-open="true"] .spike-chev { transform: rotate(90deg); }
+.spike-role { flex: none; color: var(--muted-foreground); }
+.spike-group-title { white-space: nowrap; }
+.spike-verdict {
+  color: var(--muted-foreground);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+.spike-counts {
+  display: inline-flex;
+  gap: 10px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+.spike-counts > span { display: inline-flex; align-items: center; gap: 4px; }
+.spike-group-meta {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+}
+.spike-tree {
+  margin: 0 0 6px 5px;
+  padding-left: 13px;
+  border-left: 1px solid var(--border);
+}
+.spike-row {
+  display: grid;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  grid-template-columns: 13ch minmax(0, 1fr) 64px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  font-size: 13px;
+  text-align: left;
+}
+.spike-row:hover { background: color-mix(in oklab, var(--accent) 50%, transparent); }
+.spike-row.is-selected {
+  background: color-mix(in oklab, var(--primary) 16%, transparent);
+  outline: 1px solid color-mix(in oklab, var(--primary) 40%, transparent);
+}
+.spike-row-text {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--foreground);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.spike-row-name { margin-right: 6px; color: var(--muted-foreground); }
+.spike-row-mono { font-family: var(--font-mono); font-size: 12px; color: var(--muted-foreground); }
+.spike-row-text > span:not(.spike-row-name):not(.spike-row-mono) { margin-right: 2px; }
+.spike-row-time {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.spike-more {
+  padding: 3px 4px 4px;
+  color: var(--primary);
+  font-size: 12px;
+}
+.event-type-filter label .spike-kind { justify-self: start; letter-spacing: 0.04em; text-transform: none; font-size: 12px; font-weight: 500; }
+@media (max-width: 640px) {
+  .spike-row { grid-template-columns: auto minmax(0, 1fr); gap: 8px; }
+  .spike-row-time, .spike-counts, .spike-group-meta, .spike-dispatch-meta { display: none; }
+}
+/* SPIKE: a judge turn opened from the list, headed as the list names it. */
+.spike-judge-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 6px 2px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.spike-judge-heading > strong { color: var(--foreground); font-weight: 600; }
+.spike-judge-heading > a { margin-left: auto; color: var(--primary); text-decoration: none; }

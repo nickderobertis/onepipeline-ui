@@ -8,6 +8,8 @@
 # desktop shot beside the phone shot to shots/local/judge-spike/report.
 #
 # Usage: scripts/spike-judge-turns-capture.sh [comma-separated shot-name prefixes]
+# SPIKE_SKIP_BEFORE=1 captures the afters alone, leaving any befores already in
+# shots/local/judge-spike/raw where they are.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 out="shots/local/judge-spike"
@@ -22,11 +24,13 @@ patch -s -p1 -d node_modules/.spike/oneharness-ui <spike/oneharness-ui.patch
 mock=$(git log --format=%H -1 --grep='^feat(spike): judge-turns and event-kinds mock')
 restore() { git checkout -q HEAD -- apps/dag-ui; git clean -qfd apps/dag-ui/src; }
 trap restore EXIT
-rm -rf "$out/raw" "$out/report"
+if [ -z "${SPIKE_SKIP_BEFORE:-}" ]; then rm -rf "$out/raw" "$out/report"; fi
 export SHOTS_OUT="$out/gallery" SPIKE_OUT="$out" SPIKE_ONLY="${1:-}"
 status=0
-git diff "$mock^" HEAD -- apps/dag-ui | git apply -R
-SPIKE_SIDE=before bash scripts/visual-capture.sh --grep 'SPIKE-judge before' || status=$?
-restore
+if [ -z "${SPIKE_SKIP_BEFORE:-}" ]; then
+  git diff "$mock^" HEAD -- apps/dag-ui | git apply -R
+  SPIKE_SIDE=before bash scripts/visual-capture.sh --grep 'SPIKE-judge before' || status=$?
+  restore
+fi
 SPIKE_SIDE=after bash scripts/visual-capture.sh --grep 'SPIKE-judge (after|compose)' || status=$?
 exit "$status"
