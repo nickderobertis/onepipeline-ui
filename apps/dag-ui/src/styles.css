@@ -4041,3 +4041,8 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* SPIKE: on a phone an open codex command takes its own line under the tool name. */
+@media (max-width: 600px) {
+  .spike-tool-trigger[data-state="open"]:has(.spike-tool-wrap) { flex-wrap: wrap; row-gap: 4px; }
+  .spike-tool-trigger[data-state="open"] .spike-tool-summary:has(.spike-tool-wrap) { order: 9; flex-basis: 100%; }
+}
