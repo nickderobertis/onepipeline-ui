@@ -627,7 +627,12 @@ function Session({
           </Alert>
         ) : (
           <>
-            <div className="conversation-timeline-sticky" ref={pinned}>
+            {/* SPIKE: a judge row opens its turn without the pinned chart, as the mockup does. */}
+            <div
+              className="conversation-timeline-sticky"
+              hidden={judgeFocus !== undefined}
+              ref={pinned}
+            >
               <ConversationPlotHover>
                 <ConversationTimeline
                   cursor={sync.cursor}

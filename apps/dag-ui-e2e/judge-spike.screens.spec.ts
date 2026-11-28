@@ -328,15 +328,14 @@ const SHOTS: Shot[] = [
       await row.scrollIntoViewIfNeeded();
       await row.click();
       await drawerOpened(page);
-      // The judge turn's heading just below the drawer's pinned chart.
+      // The judge turn's heading at the top of the drawer's reading.
       await drawer(page)
         .locator(".spike-judge-heading")
         .evaluate((heading) => {
           const viewport = heading.closest("[data-radix-scroll-area-viewport]");
-          const pinned = viewport?.querySelector(".conversation-timeline-sticky");
-          if (!viewport || !pinned) return;
+          if (!viewport) return;
           viewport.scrollTop +=
-            heading.getBoundingClientRect().top - pinned.getBoundingClientRect().bottom - 8;
+            heading.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 8;
         });
       // The list's selected row in view beside it.
       await row.evaluate((element) => element.scrollIntoView({ block: "center" }));

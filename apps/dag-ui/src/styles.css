@@ -4200,3 +4200,4 @@ button[aria-describedby^="timeline-detail-"][aria-describedby*="-idle-"] {
 }
 .spike-judge-heading > strong { color: var(--foreground); font-weight: 600; }
 .spike-judge-heading > a { margin-left: auto; color: var(--primary); text-decoration: none; }
+.conversation-timeline-sticky[hidden] { display: none; }

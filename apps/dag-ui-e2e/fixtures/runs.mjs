@@ -7488,8 +7488,6 @@ const JS3 = {
     shell(id(2), "/bin/bash -lc 'git show --stat HEAD'", "commit 8b2e0f4\n    feat(dag-ui): say a judge ruling as a sentence\n 2 files changed, 35 insertions(+), 2 deletions(-)");
     shell(id(3), "/bin/bash -lc \"grep -n 'judge turns read as their ruling' -A12 apps/dag-ui-e2e/dag-ui-transcripts.spec.ts\"", "418:  // judge turns read as their ruling\n419:  await expect(drawer.getByText(/^Criteria met:/)).toBeVisible();");
     shell(id(4), "/bin/bash -lc 'cargo test --test e2e conversations::judge 2>&1 | tail -3'", "test result: ok. 4 passed; 0 failed; 0 ignored");
-    shell(id(5), "/bin/bash -lc \"sed -n '1,40p' apps/dag-ui/src/features/timeline/ruling.ts\"", "export function rulingSentence(text: string): string | undefined {\n  const said = parse(text);");
-    shell(id(6), "/bin/bash -lc 'ls shots/local | tail -2'", "capture-drawer-judge\ncapture-drawer-judge-phone");
     const ruling = { value: true, reason: "Both criteria hold: supervisor turns show prompt, tools and ruling, and the verdict turn lists each criterion with its reason." };
     say("message", JSON.stringify(ruling));
     return {
