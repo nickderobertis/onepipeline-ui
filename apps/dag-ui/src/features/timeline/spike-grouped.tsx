@@ -24,13 +24,15 @@ export const ROW_KINDS: readonly RowKind[] = [
   "reasoning",
   "session",
 ];
-const KIND: Record<RowKind, { icon: LucideIcon; word: string; filter: string }> =
-  {
-    tool: { icon: Wrench, word: "Tool", filter: "Tool call" },
-    message: { icon: MessageSquareText, word: "Message", filter: "Message" },
-    reasoning: { icon: Brain, word: "Reasoning", filter: "Reasoning" },
-    session: { icon: Power, word: "Session", filter: "Session" },
-  };
+const KIND: Record<
+  RowKind,
+  { icon: LucideIcon; word: string; filter: string }
+> = {
+  tool: { icon: Wrench, word: "Tool", filter: "Tool call" },
+  message: { icon: MessageSquareText, word: "Message", filter: "Message" },
+  reasoning: { icon: Brain, word: "Reasoning", filter: "Reasoning" },
+  session: { icon: Power, word: "Session", filter: "Session" },
+};
 
 export function KindLabel({
   kind,
@@ -57,7 +59,11 @@ interface ListRow {
   readonly text?: string;
   readonly at?: string;
   /** What opening the row selects: an event row, or a judge turn and its item. */
-  readonly open: { readonly id: string; readonly judgeTurn?: string; readonly eventIndex?: number };
+  readonly open: {
+    readonly id: string;
+    readonly judgeTurn?: string;
+    readonly eventIndex?: number;
+  };
 }
 
 interface Group {
@@ -167,11 +173,10 @@ function useHistories(
 ): ReadonlyMap<string, HistoryTurn> {
   const [read, setRead] = useState<ReadonlyMap<string, HistoryTurn>>(new Map());
   const key = ids.join(",");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: spike
   useEffect(() => {
     let live = true;
     void Promise.all(
-      ids.map(async (id) => {
+      (key === "" ? [] : key.split(",")).map(async (id) => {
         try {
           const artifact = (await client.getArtifact(runId, id)) as {
             turns?: HistoryTurn[];
@@ -217,7 +222,11 @@ function buildDispatches(tree: readonly TimelineRow[]): Dispatch[] {
       };
       byId.set(dispatch.id, held);
     }
-    if (row.rowKind === "span" && row.transport !== "judge" && row.role !== undefined)
+    if (
+      row.rowKind === "span" &&
+      row.transport !== "judge" &&
+      row.role !== undefined
+    )
       held.workerSpan ??= row.id;
     if (row.rowKind === "span" && row.transport === "judge") {
       held.judgeSpan ??= row.id;
@@ -227,7 +236,9 @@ function buildDispatches(tree: readonly TimelineRow[]): Dispatch[] {
     }
     if (row.rowKind === "event") events.push({ row, dispatch: held });
   }
-  events.sort((a, b) => Date.parse(a.row.startedAt) - Date.parse(b.row.startedAt));
+  events.sort(
+    (a, b) => Date.parse(a.row.startedAt) - Date.parse(b.row.startedAt),
+  );
   const current = new Map<string, Group>();
   const judgeSeen = new Map<string, number>();
   for (const { row, dispatch } of events) {
@@ -258,7 +269,8 @@ function buildDispatches(tree: readonly TimelineRow[]): Dispatch[] {
     if (event.kind === "oneharness-session") {
       const turn = Number(fields.turn ?? 0);
       const judge = fields.role === "judge";
-      const verdict = judge && String(fields.identity ?? "").endsWith(":alternate");
+      const verdict =
+        judge && String(fields.identity ?? "").endsWith(":alternate");
       const group: Group = {
         key: `${dispatch.id}:${dispatch.groups.length}`,
         role: !judge ? "worker" : verdict ? "verdict" : "supervisor",
@@ -316,10 +328,16 @@ function withHistories(
     const groups = dispatch.groups;
     groups.forEach((group, i) => {
       const read =
-        group.historyId === undefined ? undefined : histories.get(group.historyId);
+        group.historyId === undefined
+          ? undefined
+          : histories.get(group.historyId);
       const next = groups[i + 1]?.start;
       void next;
-      if (group.role !== "worker" && group.end === group.start && read?.durationMs)
+      if (
+        group.role !== "worker" &&
+        group.end === group.start &&
+        read?.durationMs
+      )
         group.end = new Date(
           Date.parse(group.start ?? "") + read.durationMs,
         ).toISOString();
@@ -329,7 +347,8 @@ function withHistories(
           if (row.kind !== "tool") continue;
           const index = (row as unknown as { index?: number }).index;
           const tool = read.tools?.find((t) => t.index === index);
-          if (tool) group.rows[j] = { ...row, ...toolLine(tool.name, tool.input) };
+          if (tool)
+            group.rows[j] = { ...row, ...toolLine(tool.name, tool.input) };
         }
         return;
       }
@@ -340,14 +359,13 @@ function withHistories(
           ? undefined
           : `${dispatch.judgeConversation}.${judgeIndex}`;
       const span = Date.parse(group.start ?? "");
-      const length = Math.max(
-        (read.durationMs ?? 20_000) ,
-        1,
-      );
+      const length = Math.max(read.durationMs ?? 20_000, 1);
       const items = [
         ...(read.agentEvents ?? []).map((event) => ({
           index: event.index,
-          kind: (event.kind === "reasoning" ? "reasoning" : "message") as RowKind,
+          kind: (event.kind === "reasoning"
+            ? "reasoning"
+            : "message") as RowKind,
           text: event.text,
         })),
         ...(read.tools ?? []).map((tool) => ({
@@ -359,7 +377,11 @@ function withHistories(
       const ruling = rulingSentence(read.assistant);
       const all = [
         ...items,
-        { index: items.length + 1, kind: "message" as RowKind, text: ruling?.text ?? read.assistant ?? "" },
+        {
+          index: items.length + 1,
+          kind: "message" as RowKind,
+          text: ruling?.text ?? read.assistant ?? "",
+        },
       ];
       group.rows.length = 0;
       all.forEach((item, j) => {
@@ -445,7 +467,9 @@ export function GroupedEventList({
   readonly onOpen: (id: string) => void;
   readonly selectedItemId?: string;
 }) {
-  const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
+  const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(
+    new Map(),
+  );
   const [more, setMore] = useState<ReadonlySet<string>>(new Set());
   const [marked, setMarked] = useState<string>();
   // SPIKE capture hooks: open the group holding a row, and open a session by its span.
@@ -467,7 +491,9 @@ export function GroupedEventList({
       return found.row.key;
     };
     hooks.__spikeOpenSession = (dispatchNumber: number, judge: boolean) => {
-      const dispatch = dispatches.find(({ number }) => number === dispatchNumber);
+      const dispatch = dispatches.find(
+        ({ number }) => number === dispatchNumber,
+      );
       const id = judge ? dispatch?.judgeSpan : dispatch?.workerSpan;
       spikeJudgeFocus.current = undefined;
       if (id !== undefined) onOpen(id);
@@ -475,16 +501,23 @@ export function GroupedEventList({
     };
   }, [dispatches, onOpen]);
   const newest = dispatches[0];
-  const lastWorker = newest?.groups.findLastIndex((group) => group.role === "worker") ?? -1;
+  const lastWorker =
+    newest?.groups.findLastIndex((group) => group.role === "worker") ?? -1;
   const openByDefault = (dispatch: Dispatch, group: Group, index: number) =>
     (dispatch === newest && lastWorker >= 0 && index >= lastWorker) ||
     group.rows.some(
-      (row) => row.key === marked || (marked === undefined && row.open.id === selectedItemId && !row.open.judgeTurn),
+      (row) =>
+        row.key === marked ||
+        (marked === undefined &&
+          row.open.id === selectedItemId &&
+          !row.open.judgeTurn),
     );
   return (
     <div className="spike-grouped">
       {dispatches.map((dispatch) => {
-        const turns = dispatch.groups.filter((group) => group.role !== "session").length;
+        const turns = dispatch.groups.filter(
+          (group) => group.role !== "session",
+        ).length;
         return (
           <section
             aria-label={dispatch.label}
@@ -498,26 +531,43 @@ export function GroupedEventList({
               </span>
             </h3>
             {dispatch.groups.map((group, index) => {
-              const open = toggled.get(group.key) ?? openByDefault(dispatch, group, index);
+              const open =
+                toggled.get(group.key) ?? openByDefault(dispatch, group, index);
               const counts = ROW_KINDS.map(
-                (kind) => [kind, group.rows.filter((row) => row.kind === kind).length] as const,
+                (kind) =>
+                  [
+                    kind,
+                    group.rows.filter((row) => row.kind === kind).length,
+                  ] as const,
               ).filter(([, n]) => n > 0);
-              const shown = more.has(group.key) ? group.rows : group.rows.slice(0, LIMIT);
+              const shown = more.has(group.key)
+                ? group.rows
+                : group.rows.slice(0, LIMIT);
               const rest = group.rows.length - shown.length;
-              const Icon = group.role === "worker" || group.role === "session" ? Bot : Gavel;
+              const Icon =
+                group.role === "worker" || group.role === "session"
+                  ? Bot
+                  : Gavel;
               return (
                 <div className="spike-group" data-open={open} key={group.key}>
                   <button
                     aria-expanded={open}
                     className="spike-group-head"
-                    onClick={() => setToggled((was) => new Map(was).set(group.key, !open))}
+                    onClick={() =>
+                      setToggled((was) => new Map(was).set(group.key, !open))
+                    }
                     type="button"
                   >
-                    <ChevronRight aria-hidden="true" className="spike-chev size-3" />
+                    <ChevronRight
+                      aria-hidden="true"
+                      className="spike-chev size-3"
+                    />
                     <Icon aria-hidden="true" className="spike-role size-3" />
                     <span className="spike-group-title">{title(group)}</span>
                     {group.verdict && (
-                      <span className={`spike-verdict ${group.verdict.done ? "is-done" : ""}`}>
+                      <span
+                        className={`spike-verdict ${group.verdict.done ? "is-done" : ""}`}
+                      >
                         · {group.verdict.word}
                       </span>
                     )}
@@ -526,7 +576,10 @@ export function GroupedEventList({
                         const { icon: KindIcon } = KIND[kind];
                         return (
                           <span className={`spike-kind-${kind}`} key={kind}>
-                            <KindIcon aria-hidden="true" className="size-[11px]" />
+                            <KindIcon
+                              aria-hidden="true"
+                              className="size-[11px]"
+                            />
                             {n}
                           </span>
                         );
@@ -534,7 +587,9 @@ export function GroupedEventList({
                     </span>
                     <span className="spike-group-meta">
                       {clock(group.start)}
-                      {group.role === "session" ? "" : ` · ${span(group.start, group.end)}`}
+                      {group.role === "session"
+                        ? ""
+                        : ` · ${span(group.start, group.end)}`}
                     </span>
                   </button>
                   {open && (
@@ -562,7 +617,9 @@ export function GroupedEventList({
                         >
                           <KindLabel kind={row.kind} />
                           <span className="spike-row-text">
-                            {row.name !== undefined && <span className="spike-row-name">{row.name}</span>}
+                            {row.name !== undefined && (
+                              <span className="spike-row-name">{row.name}</span>
+                            )}
                             {row.lead !== undefined && <span>{row.lead} </span>}
                             {row.mono !== undefined ? (
                               <span className="spike-row-mono">{row.mono}</span>
@@ -570,13 +627,17 @@ export function GroupedEventList({
                               row.text
                             ) : null}
                           </span>
-                          <span className="spike-row-time">{clock(row.at)}</span>
+                          <span className="spike-row-time">
+                            {clock(row.at)}
+                          </span>
                         </button>
                       ))}
                       {rest > 0 && (
                         <button
                           className="spike-more"
-                          onClick={() => setMore((was) => new Set(was).add(group.key))}
+                          onClick={() =>
+                            setMore((was) => new Set(was).add(group.key))
+                          }
                           type="button"
                         >
                           Show {rest} more
