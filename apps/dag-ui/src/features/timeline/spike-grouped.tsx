@@ -451,7 +451,7 @@ export function GroupedEventList({
   // SPIKE capture hooks: open the group holding a row, and open a session by its span.
   useEffect(() => {
     const label = (row: ListRow) =>
-      `Open ${[row.name, row.lead ?? row.text ?? row.mono].filter(Boolean).join(" ")}`;
+      `Open ${[row.name, row.lead ?? row.mono ?? row.text].filter(Boolean).join(" ")}`;
     const hooks = window as unknown as Record<string, unknown>;
     hooks.__spikeReveal = (start: string, nth = 0) => {
       const found = dispatches.flatMap((dispatch) =>
@@ -541,7 +541,7 @@ export function GroupedEventList({
                     <div className="spike-tree">
                       {shown.map((row) => (
                         <button
-                          aria-label={`Open ${[row.name, row.lead ?? row.text ?? row.mono].filter(Boolean).join(" ")}`}
+                          aria-label={`Open ${[row.name, row.lead ?? row.mono ?? row.text].filter(Boolean).join(" ")}`}
                           data-row-key={row.key}
                           className={`spike-row ${row.key === marked || (marked === undefined && row.open.id === selectedItemId && !row.open.judgeTurn) ? "is-selected" : ""}`}
                           key={row.key}
