@@ -65,9 +65,10 @@ export function spikeKind(event: TimelineEvent): SpikeKind | undefined {
 }
 
 export function SpikeKindBadge({ kind }: { readonly kind: SpikeKind }) {
-  const { tone, short } = LOOK[kind];
+  const { icon: Icon, tone, short } = LOOK[kind];
   return (
     <span className={`spike-kind spike-kind-${tone}`} title={kind}>
+      <Icon aria-hidden="true" className="size-3" />
       {short}
     </span>
   );
